@@ -15,6 +15,7 @@ import type { IIssueDisplayFilterOptions, IIssueDisplayProperties } from "@plane
 import { EIssueLayoutTypes, EIssuesStoreType } from "@plane/types";
 // hooks
 import { useIssues } from "@/hooks/store/use-issues";
+import { useResponsiveIssueLayout } from "@/hooks/use-responsive-issue-layout";
 // plane web imports
 import type { TProject } from "@plane/types";
 // local imports
@@ -59,7 +60,9 @@ export const HeaderFilters = observer(function HeaderFilters(props: Props) {
     issuesFilter: { issueFilters, updateFilters },
   } = useIssues(storeType);
   // derived values
-  const activeLayout = issueFilters?.displayFilters?.layout;
+  // On phone-width screens, Spreadsheet/Gantt render as List (see useResponsiveIssueLayout);
+  // reflect that in the switcher button + display-options so the header matches what's shown.
+  const activeLayout = useResponsiveIssueLayout(issueFilters?.displayFilters?.layout);
   const layoutDisplayFiltersOptions = ISSUE_STORE_TO_FILTERS_MAP[storeType]?.layoutOptions[activeLayout];
 
   const handleLayoutChange = useCallback(

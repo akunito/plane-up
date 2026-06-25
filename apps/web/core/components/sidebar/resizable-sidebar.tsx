@@ -219,6 +219,12 @@ export function ResizableSidebar({
           />
         </aside>
       </div>
+      {/* Mobile drawer scrim — dims content behind the open drawer. Tap-to-close is
+          handled by the sidebar's existing outside-click detector, so no onClick here
+          (it would double-toggle). */}
+      {isMobile && !isCollapsed && (
+        <div className="animate-fade-in fixed inset-0 z-[15] bg-black/50 md:hidden" aria-hidden="true" />
+      )}
       {/* Peek View */}
       <div
         className={cn(
