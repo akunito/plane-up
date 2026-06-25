@@ -5,6 +5,7 @@
  */
 
 import { EIssueLayoutTypes } from "@plane/types";
+import { WorkspaceIssuesListLayout } from "@/components/issues/issue-layouts/list/roots/workspace-root";
 import { WorkspaceSpreadsheetRoot } from "@/components/issues/issue-layouts/spreadsheet/roots/workspace-root";
 import { WorkspaceAdditionalLayouts } from "@/plane-web/components/views/helper";
 
@@ -37,6 +38,8 @@ export function WorkspaceActiveLayout(props: TWorkspaceLayoutProps) {
     issuesLoading,
   } = props;
   switch (activeLayout) {
+    case EIssueLayoutTypes.LIST:
+      return <WorkspaceIssuesListLayout />;
     case EIssueLayoutTypes.SPREADSHEET:
       return (
         <WorkspaceSpreadsheetRoot
