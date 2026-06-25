@@ -119,6 +119,7 @@ export const DisplayFiltersSelection = observer(function DisplayFiltersSelection
               })
             }
             orderByOptions={layoutDisplayFiltersOptions?.display_filters.order_by ?? []}
+            enableMultiSort
           />
         </div>
       )}

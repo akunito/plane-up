@@ -5,7 +5,7 @@
  */
 
 import { isEqual, concat, get, indexOf, isEmpty, orderBy, pull, set, uniq, update, clone } from "lodash-es";
-import { action, computed, makeObservable, observable, runInAction } from "mobx";
+import { action, computed, makeObservable, observable, reaction, runInAction } from "mobx";
 import { computedFn } from "mobx-utils";
 // plane constants
 import { ALL_ISSUES, ISSUE_PRIORITIES } from "@plane/constants";
@@ -30,6 +30,7 @@ import { EIssueServiceType, EIssueLayoutTypes } from "@plane/types";
 // helpers
 import { convertToISODateString } from "@plane/utils";
 // plane web imports
+import { multiSortStore } from "./multi-sort.store";
 // services
 import { CycleService } from "@/services/cycle.service";
 import { IssueArchiveService, IssueService } from "@/services/issue";
@@ -258,6 +259,13 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
     this.cycleService = new CycleService();
 
     this.controller = new AbortController();
+
+    // Frontend-only multi-sort: re-sort the currently loaded list whenever the
+    // active secondary sort rules change (observable.ref → fires on reassignment).
+    reaction(
+      () => multiSortStore.secondaryOrderBy,
+      () => this.reapplyMultiSort()
+    );
   }
 
   // Abstract class to be implemented to fetch parent stats such as project, module or cycle details
@@ -1228,7 +1236,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
           if (isSubIssue && !isShowWorkItemsEnabled) continue;
           // add issue Id at the path
           update(this, ["groupedIssueIds", ...issueUpdate.path], (issueIds: string[] = []) =>
-            this.issuesSortWithOrderBy(uniq(concat(issueIds, issueId)), this.orderBy)
+            this.sortIds(uniq(concat(issueIds, issueId)))
           );
         }
 
@@ -1245,7 +1253,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
         if (issueUpdate.action === EIssueGroupedAction.REORDER) {
           // re-order/re-sort the issue Ids at the path
           update(this, ["groupedIssueIds", ...issueUpdate.path], (issueIds: string[] = []) =>
-            this.issuesSortWithOrderBy(issueIds, this.orderBy)
+            this.sortIds(issueIds)
           );
         }
       }
@@ -1426,7 +1434,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
     // if groupedIssueIds is an array, update the `groupedIssueIds` store at the issuePath
     if (groupedIssueIds && Array.isArray(groupedIssueIds)) {
       update(this, ["groupedIssueIds", ...issuePath], (issueIds: string[] = []) =>
-        this.issuesSortWithOrderBy(uniq(concat(issueIds, groupedIssueIds)), this.orderBy)
+        this.sortIds(uniq(concat(issueIds, groupedIssueIds)))
       );
       // return true to indicate the store has been updated
       return true;
@@ -1951,6 +1959,122 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
       default:
         return getIssueIds(array);
     }
+  };
+
+  /**
+   * Sort descriptor (iteratees + orders) for one order-by key — mirrors the cases in
+   * issuesSortWithOrderBy so multiple keys can be chained in a single lodash orderBy.
+   * Returns null for keys handled only by the extended (EE) sort.
+   */
+  getSortDescriptor = (
+    key: TIssueOrderByOptions
+  ): { iteratees: Array<((i: any) => unknown) | string>; orders: Array<"asc" | "desc"> } | null => {
+    const empty = (field: string) => getSortOrderToFilterEmptyValues.bind(null, field);
+    const priorities = ISSUE_PRIORITIES.map((p) => p.key);
+    switch (key) {
+      case "sort_order":
+        return { iteratees: ["sort_order"], orders: ["asc"] };
+      case "state__name":
+        return { iteratees: [(i) => this.populateIssueDataForSorting("state_id", i?.["state_id"], i?.["project_id"])], orders: ["asc"] };
+      case "-state__name":
+        return { iteratees: [(i) => this.populateIssueDataForSorting("state_id", i?.["state_id"], i?.["project_id"])], orders: ["desc"] };
+      case "created_at":
+        return { iteratees: [(i) => convertToISODateString(i["created_at"])], orders: ["asc"] };
+      case "-created_at":
+        return { iteratees: [(i) => convertToISODateString(i["created_at"])], orders: ["desc"] };
+      case "updated_at":
+        return { iteratees: [(i) => convertToISODateString(i["updated_at"])], orders: ["asc"] };
+      case "-updated_at":
+        return { iteratees: [(i) => convertToISODateString(i["updated_at"])], orders: ["desc"] };
+      case "start_date":
+        return { iteratees: [empty("start_date"), "start_date"], orders: ["asc", "asc"] };
+      case "-start_date":
+        return { iteratees: [empty("start_date"), "start_date"], orders: ["asc", "desc"] };
+      case "target_date":
+        return { iteratees: [empty("target_date"), "target_date"], orders: ["asc", "asc"] };
+      case "-target_date":
+        return { iteratees: [empty("target_date"), "target_date"], orders: ["asc", "desc"] };
+      case "-priority":
+        return { iteratees: [(i) => indexOf(priorities, i?.priority)], orders: ["asc"] };
+      case "priority":
+        return { iteratees: [(i) => indexOf(priorities, i?.priority)], orders: ["desc"] };
+      case "attachment_count":
+        return { iteratees: ["attachment_count"], orders: ["asc"] };
+      case "-attachment_count":
+        return { iteratees: ["attachment_count"], orders: ["desc"] };
+      case "estimate_point__key":
+        return { iteratees: [empty("estimate_point"), (i) => this.populateIssueDataForSorting("estimate_point", i?.["estimate_point"], i?.["project_id"])], orders: ["asc", "asc"] };
+      case "-estimate_point__key":
+        return { iteratees: [empty("estimate_point"), (i) => this.populateIssueDataForSorting("estimate_point", i?.["estimate_point"], i?.["project_id"])], orders: ["asc", "desc"] };
+      case "link_count":
+        return { iteratees: ["link_count"], orders: ["asc"] };
+      case "-link_count":
+        return { iteratees: ["link_count"], orders: ["desc"] };
+      case "sub_issues_count":
+        return { iteratees: ["sub_issues_count"], orders: ["asc"] };
+      case "-sub_issues_count":
+        return { iteratees: ["sub_issues_count"], orders: ["desc"] };
+      case "labels__name":
+        return { iteratees: [empty("label_ids"), (i) => this.populateIssueDataForSorting("label_ids", i?.["label_ids"], i?.["project_id"], "asc")], orders: ["asc", "asc"] };
+      case "-labels__name":
+        return { iteratees: [empty("label_ids"), (i) => this.populateIssueDataForSorting("label_ids", i?.["label_ids"], i?.["project_id"], "asc")], orders: ["asc", "desc"] };
+      case "issue_module__module__name":
+        return { iteratees: [empty("module_ids"), (i) => this.populateIssueDataForSorting("module_ids", i?.["module_ids"], i?.["project_id"], "asc")], orders: ["asc", "asc"] };
+      case "-issue_module__module__name":
+        return { iteratees: [empty("module_ids"), (i) => this.populateIssueDataForSorting("module_ids", i?.["module_ids"], i?.["project_id"], "asc")], orders: ["asc", "desc"] };
+      case "issue_cycle__cycle__name":
+        return { iteratees: [empty("cycle_id"), (i) => this.populateIssueDataForSorting("cycle_id", i?.["cycle_id"], i?.["project_id"], "asc")], orders: ["asc", "asc"] };
+      case "-issue_cycle__cycle__name":
+        return { iteratees: [empty("cycle_id"), (i) => this.populateIssueDataForSorting("cycle_id", i?.["cycle_id"], i?.["project_id"], "asc")], orders: ["asc", "desc"] };
+      case "assignees__first_name":
+        return { iteratees: [empty("assignee_ids"), (i) => this.populateIssueDataForSorting("assignee_ids", i?.["assignee_ids"], i?.["project_id"], "asc")], orders: ["asc", "asc"] };
+      case "-assignees__first_name":
+        return { iteratees: [empty("assignee_ids"), (i) => this.populateIssueDataForSorting("assignee_ids", i?.["assignee_ids"], i?.["project_id"], "asc")], orders: ["asc", "desc"] };
+      default:
+        return null;
+    }
+  };
+
+  /**
+   * Chains primary order_by + secondary keys client-side (lodash multi-iteratee orderBy)
+   * over the created_at-sorted base. Frontend-only; falls back to the single-key sort
+   * when there is one (or fewer) key, so the default sort path is unchanged.
+   */
+  issuesSortWithMultipleOrderBy = (issueIds: string[], keys: (TIssueOrderByOptions | undefined)[]): string[] => {
+    const validKeys = keys.filter((k): k is TIssueOrderByOptions => !!k);
+    if (validKeys.length <= 1) return this.issuesSortWithOrderBy(issueIds, validKeys[0]);
+    const issues = this.rootIssueStore.issues.getIssuesByIds(issueIds, this.isArchived ? "archived" : "un-archived");
+    const array = orderBy(issues, (issue) => convertToISODateString(issue["created_at"]), ["desc"]);
+    const descriptors = validKeys
+      .map((k) => this.getSortDescriptor(k))
+      .filter((d): d is NonNullable<typeof d> => d !== null);
+    if (descriptors.length === 0) return this.issuesSortWithOrderBy(issueIds, validKeys[0]);
+    const iteratees = descriptors.flatMap((d) => d.iteratees);
+    const orders = descriptors.flatMap((d) => d.orders);
+    return getIssueIds(orderBy(array, iteratees as any, orders as any));
+  };
+
+  /** Sort a leaf id list by the primary order_by + the active secondary multi-sort keys. */
+  sortIds = (issueIds: string[]): string[] =>
+    this.issuesSortWithMultipleOrderBy(issueIds, [this.orderBy, ...multiSortStore.secondaryOrderBy]);
+
+  /** Re-sort the currently loaded groupedIssueIds in place (used when the secondary multi-sort changes). */
+  reapplyMultiSort = () => {
+    const grouped = this.groupedIssueIds as Record<string, unknown> | undefined;
+    if (!grouped) return;
+    runInAction(() => {
+      for (const groupId of Object.keys(grouped)) {
+        const value = grouped[groupId];
+        if (Array.isArray(value)) {
+          set(this, ["groupedIssueIds", groupId], this.sortIds(value as string[]));
+        } else if (value && typeof value === "object") {
+          for (const subGroupId of Object.keys(value as Record<string, unknown>)) {
+            const sub = (value as Record<string, unknown>)[subGroupId];
+            if (Array.isArray(sub)) set(this, ["groupedIssueIds", groupId, subGroupId], this.sortIds(sub as string[]));
+          }
+        }
+      }
+    });
   };
 
   /**
