@@ -28,6 +28,9 @@ import type { TPersonalNavigationItemKey } from "@/types/navigation-preferences"
 type TCustomizeNavigationDialogProps = {
   isOpen: boolean;
   onClose: () => void;
+  // Which section(s) to show. Defaults to "all" (the global "Customize navigation" entry point);
+  // the per-section sidebar pin/manage buttons open it scoped to "workspace" or "projects".
+  section?: "workspace" | "projects" | "all";
 };
 
 type TWorkspaceNavigationItem = {
@@ -46,7 +49,7 @@ const PERSONAL_ITEMS: Array<{ key: TPersonalNavigationItemKey; labelTranslationK
 export const CustomizeNavigationDialog = observer(function CustomizeNavigationDialog(
   props: TCustomizeNavigationDialogProps
 ) {
-  const { isOpen, onClose } = props;
+  const { isOpen, onClose, section = "all" } = props;
   const { t } = useTranslation();
 
   // router
@@ -183,7 +186,9 @@ export const CustomizeNavigationDialog = observer(function CustomizeNavigationDi
         {/* Header */}
         <div className="flex justify-between px-6 pt-4">
           <div>
-            <h2 className="text-18 font-semibold text-primary">{t("customize_navigation")}</h2>
+            <h2 className="text-18 font-semibold text-primary">
+              {section === "workspace" ? t("workspace") : section === "projects" ? t("projects") : t("customize_navigation")}
+            </h2>
             <p className="mt-1 text-13 text-tertiary">
               Selected items will always stay visible in your sidebar. You can still find the others anytime from the
               More menu. These changes are personal to you and won&apos;t affect anyone else on your workspace.
@@ -201,6 +206,7 @@ export const CustomizeNavigationDialog = observer(function CustomizeNavigationDi
         {/* Content */}
         <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
           {/* Personal Section */}
+          {section === "all" && (
           <div className="flex flex-col gap-2">
             <h3 className="text-13 font-semibold text-placeholder">{t("personal")}</h3>
             <div className="rounded-md border border-subtle bg-surface-2 py-2">
@@ -228,7 +234,10 @@ export const CustomizeNavigationDialog = observer(function CustomizeNavigationDi
             </div>
           </div>
 
+          )}
+
           {/* Workspace Section */}
+          {(section === "all" || section === "workspace") && (
           <div className="flex flex-col gap-2">
             <h3 className="text-13 font-semibold text-placeholder">{t("workspace")}</h3>
             <div className="rounded-md border border-subtle bg-surface-2 py-2">
@@ -258,7 +267,10 @@ export const CustomizeNavigationDialog = observer(function CustomizeNavigationDi
             </div>
           </div>
 
+          )}
+
           {/* Projects Section */}
+          {(section === "all" || section === "projects") && (
           <div className="flex flex-col gap-2">
             <h3 className="text-13 font-semibold text-placeholder">{t("projects")}</h3>
 
@@ -343,6 +355,7 @@ export const CustomizeNavigationDialog = observer(function CustomizeNavigationDi
               </div>
             </div>
           </div>
+          )}
         </div>
       </div>
     </ModalCore>
