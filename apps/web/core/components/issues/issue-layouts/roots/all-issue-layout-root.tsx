@@ -23,6 +23,7 @@ import { WorkItemFiltersRow } from "@/components/work-item-filters/filters-row";
 import { useGlobalView } from "@/hooks/store/use-global-view";
 import { useIssues } from "@/hooks/store/use-issues";
 import { useAppRouter } from "@/hooks/use-app-router";
+import { useResponsiveIssueLayout } from "@/hooks/use-responsive-issue-layout";
 import { IssuesStoreContext } from "@/hooks/use-issue-layout-store";
 import { useWorkspaceIssueProperties } from "@/hooks/use-workspace-issue-properties";
 
@@ -50,7 +51,11 @@ export const AllIssueLayoutRoot = observer(function AllIssueLayoutRoot(props: Pr
   // Derived values
   const viewDetails = globalViewId ? getViewDetailsById(globalViewId) : undefined;
   const workItemFilters = globalViewId ? filters?.[globalViewId] : undefined;
-  const activeLayout: EIssueLayoutTypes | undefined = workItemFilters?.displayFilters?.layout;
+  // On phones, Spreadsheet (the only CE global-view layout) overflows; fall back to the
+  // cross-project List layout (WorkspaceIssuesListLayout, wired into WorkspaceActiveLayout).
+  const activeLayout: EIssueLayoutTypes | undefined = useResponsiveIssueLayout(
+    workItemFilters?.displayFilters?.layout
+  );
   // Determine initial work item filters based on view type and availability
   const initialWorkItemFilters = useMemo(() => {
     if (!globalViewId) return undefined;
