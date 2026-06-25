@@ -223,21 +223,27 @@ export class FavoriteStore implements IFavoriteStore {
     edge: string | undefined
   ) => {
     try {
-      let resultSequence = 10000;
+      const GAP = 10000;
+      let resultSequence = GAP;
       if (edge) {
-        const sortedIds = orderBy(Object.values(this.favoriteMap), "sequence", "desc").map((fav: IFavorite) => fav.id);
-        const destinationSequence = this.favoriteMap[destinationId]?.sequence || undefined;
-        if (destinationSequence) {
+        // sequences sort high→low (desc); exclude the item being moved so it isn't
+        // treated as its own neighbour when computing the midpoint.
+        const sortedIds = orderBy(Object.values(this.favoriteMap), "sequence", "desc")
+          .map((fav: IFavorite) => fav.id)
+          .filter((id) => id !== favoriteId);
+        const destinationSequence = this.favoriteMap[destinationId]?.sequence;
+        if (destinationSequence !== undefined) {
           const destinationIndex = sortedIds.findIndex((id) => id === destinationId);
           if (edge === "reorder-above") {
-            const prevSequence = this.favoriteMap[sortedIds[destinationIndex - 1]]?.sequence || undefined;
-            if (prevSequence) {
-              resultSequence = (destinationSequence + prevSequence) / 2;
-            } else {
-              resultSequence = destinationSequence + resultSequence;
-            }
+            // place above destination → between destination and its upper neighbour
+            const prevSequence = this.favoriteMap[sortedIds[destinationIndex - 1]]?.sequence;
+            resultSequence =
+              prevSequence !== undefined ? (destinationSequence + prevSequence) / 2 : destinationSequence + GAP;
           } else {
-            resultSequence = destinationSequence - resultSequence;
+            // place below destination → between destination and its lower neighbour
+            const nextSequence = this.favoriteMap[sortedIds[destinationIndex + 1]]?.sequence;
+            resultSequence =
+              nextSequence !== undefined ? (destinationSequence + nextSequence) / 2 : destinationSequence - GAP;
           }
         }
       }
@@ -435,6 +441,8 @@ export class FavoriteStore implements IFavoriteStore {
             set(this.entityMap, [favorite.entity_identifier], favorite);
           }
         });
+        // de-duplicate so a refetch (e.g. after reload) doesn't render pins twice
+        this.favoriteIds = uniqBy(this.favoriteIds, (id) => id);
       });
       return favorites;
     } catch (error) {
