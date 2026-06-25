@@ -11,6 +11,10 @@ import { usePopper } from "react-popper";
 import { Popover, Transition } from "@headlessui/react";
 // ui
 import { Button } from "@plane/propel/button";
+// hooks
+import useSize from "@/hooks/use-window-size";
+// local
+import { FilterMobileSheet } from "./mobile-sheet";
 
 type Props = {
   children: React.ReactNode;
@@ -44,9 +48,12 @@ export function FiltersDropdown(props: Props) {
     placement: placement ?? "auto",
   });
 
+  const [windowWidth] = useSize();
+  const isMobile = windowWidth > 0 && windowWidth < 768;
+
   return (
     <Popover as="div">
-      {({ open }) => (
+      {({ open, close }) => (
         <>
           <Popover.Button as={React.Fragment}>
             {menuButton ? (
@@ -88,6 +95,7 @@ export function FiltersDropdown(props: Props) {
               </div>
             )}
           </Popover.Button>
+          {!isMobile && (
           <Transition
             as={Fragment}
             enter="transition ease-out duration-200"
@@ -111,6 +119,12 @@ export function FiltersDropdown(props: Props) {
               </div>
             </Popover.Panel>
           </Transition>
+          )}
+          {isMobile && (
+            <FilterMobileSheet isOpen={open} onClose={close} title={title}>
+              {children}
+            </FilterMobileSheet>
+          )}
         </>
       )}
     </Popover>
