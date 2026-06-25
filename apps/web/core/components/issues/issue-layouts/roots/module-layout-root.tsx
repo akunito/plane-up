@@ -17,6 +17,7 @@ import { ProjectLevelWorkItemFiltersHOC } from "@/components/work-item-filters/f
 import { WorkItemFiltersRow } from "@/components/work-item-filters/filters-row";
 import { useIssues } from "@/hooks/store/use-issues";
 import { IssuesStoreContext } from "@/hooks/use-issue-layout-store";
+import { useResponsiveIssueLayout } from "@/hooks/use-responsive-issue-layout";
 // local imports
 import { IssuePeekOverview } from "../../peek-overview";
 import { ModuleCalendarLayout } from "../calendar/roots/module-root";
@@ -52,7 +53,7 @@ export const ModuleLayoutRoot = observer(function ModuleLayoutRoot() {
   const { issuesFilter } = useIssues(EIssuesStoreType.MODULE);
   // derived values
   const workItemFilters = moduleId ? issuesFilter?.getIssueFilters(moduleId) : undefined;
-  const activeLayout = workItemFilters?.displayFilters?.layout || undefined;
+  const activeLayout = useResponsiveIssueLayout(workItemFilters?.displayFilters?.layout || undefined);
 
   useSWR(
     workspaceSlug && projectId && moduleId

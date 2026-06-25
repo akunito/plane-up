@@ -20,6 +20,7 @@ import { ProjectLevelWorkItemFiltersHOC } from "@/components/work-item-filters/f
 import { WorkItemFiltersRow } from "@/components/work-item-filters/filters-row";
 import { useCycle } from "@/hooks/store/use-cycle";
 import { useIssues } from "@/hooks/store/use-issues";
+import { useResponsiveIssueLayout } from "@/hooks/use-responsive-issue-layout";
 import { IssuesStoreContext } from "@/hooks/use-issue-layout-store";
 // local imports
 import { IssuePeekOverview } from "../../peek-overview";
@@ -62,7 +63,7 @@ export const CycleLayoutRoot = observer(function CycleLayoutRoot() {
   const [transferIssuesModal, setTransferIssuesModal] = useState(false);
   // derived values
   const workItemFilters = cycleId ? issuesFilter?.getIssueFilters(cycleId) : undefined;
-  const activeLayout = workItemFilters?.displayFilters?.layout;
+  const activeLayout = useResponsiveIssueLayout(workItemFilters?.displayFilters?.layout);
 
   useSWR(
     workspaceSlug && projectId && cycleId ? `CYCLE_ISSUES_${workspaceSlug}_${projectId}_${cycleId}` : null,

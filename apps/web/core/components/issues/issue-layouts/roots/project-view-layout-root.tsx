@@ -16,6 +16,7 @@ import { ProjectLevelWorkItemFiltersHOC } from "@/components/work-item-filters/f
 import { WorkItemFiltersRow } from "@/components/work-item-filters/filters-row";
 import { useIssues } from "@/hooks/store/use-issues";
 import { useProjectView } from "@/hooks/store/use-project-view";
+import { useResponsiveIssueLayout } from "@/hooks/use-responsive-issue-layout";
 import { IssuesStoreContext } from "@/hooks/use-issue-layout-store";
 // local imports
 import { IssuePeekOverview } from "../../peek-overview";
@@ -54,7 +55,7 @@ export const ProjectViewLayoutRoot = observer(function ProjectViewLayoutRoot() {
   // derived values
   const projectView = viewId ? getViewById(viewId) : undefined;
   const workItemFilters = viewId ? issuesFilter?.getIssueFilters(viewId) : undefined;
-  const activeLayout = workItemFilters?.displayFilters?.layout;
+  const activeLayout = useResponsiveIssueLayout(workItemFilters?.displayFilters?.layout);
   const initialWorkItemFilters = projectView
     ? {
         displayFilters: workItemFilters?.displayFilters,
