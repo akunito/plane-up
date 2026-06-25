@@ -27,6 +27,10 @@ import useLocalStorage from "./use-local-storage";
 
 const APP_RAIL_PREFERENCES_KEY = "app_rail_preferences";
 
+// Workspace nav items pinned (shown) by default when the user has no stored preference.
+// `projects` is always-on via the static-pinned list; `archives` stays hidden until pinned.
+const DEFAULT_PINNED_WORKSPACE_ITEMS = ["views", "analytics"];
+
 export const usePersonalNavigationPreferences = () => {
   const { workspaceSlug } = useParams();
   const { getNavigationPreferences, updateBulkSidebarPreferences } = useWorkspace();
@@ -237,7 +241,8 @@ export const useWorkspaceNavigationPreferences = () => {
   );
 
   const getWorkspaceItemState = useCallback(
-    (key: string): TWorkspaceNavigationItemState => preferences.items[key] || { is_pinned: false, sort_order: 0 },
+    (key: string): TWorkspaceNavigationItemState =>
+      preferences.items[key] || { is_pinned: DEFAULT_PINNED_WORKSPACE_ITEMS.includes(key), sort_order: 0 },
     [preferences]
   );
 
