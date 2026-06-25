@@ -9,7 +9,7 @@ import { combine } from "@atlaskit/pragmatic-drag-and-drop/combine";
 import { autoScrollForElements } from "@atlaskit/pragmatic-drag-and-drop-auto-scroll/element";
 import { observer } from "mobx-react";
 import { useParams, usePathname } from "next/navigation";
-import { Ellipsis } from "lucide-react";
+import { Ellipsis, Pin } from "lucide-react";
 import { Disclosure, Transition } from "@headlessui/react";
 // plane imports
 import { EUserPermissions, EUserPermissionsLevel, PROJECT_TRACKER_ELEMENTS } from "@plane/constants";
@@ -21,6 +21,7 @@ import { Tooltip } from "@plane/propel/tooltip";
 import { Loader } from "@plane/ui";
 import { copyUrlToClipboard, cn, orderJoinedProjects } from "@plane/utils";
 // components
+import { CustomizeNavigationDialog } from "@/components/navigation/customize-navigation-dialog";
 import { CreateProjectModal } from "@/components/project/create-project-modal";
 import { SidebarNavItem } from "@/components/sidebar/sidebar-navigation";
 // hooks
@@ -39,6 +40,7 @@ export const SidebarProjectsList = observer(function SidebarProjectsList() {
   const [isAllProjectsListOpen, setIsAllProjectsListOpen] = useState(true);
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false); // scroll animation state
+  const [isManageOpen, setIsManageOpen] = useState(false); // pin/manage dialog (Projects section)
   // refs
   const containerRef = useRef<HTMLDivElement | null>(null);
   // store hooks
@@ -163,6 +165,11 @@ export const SidebarProjectsList = observer(function SidebarProjectsList() {
           workspaceSlug={workspaceSlug.toString()}
         />
       )}
+      <CustomizeNavigationDialog
+        isOpen={isManageOpen}
+        onClose={() => setIsManageOpen(false)}
+        section="projects"
+      />
       <div
         ref={containerRef}
         className={cn({
@@ -186,6 +193,16 @@ export const SidebarProjectsList = observer(function SidebarProjectsList() {
                 <span className="text-13 font-semibold">{t("projects")}</span>
               </Disclosure.Button>
               <div className="flex items-center gap-1">
+                <Tooltip tooltipHeading={t("customize_navigation")} tooltipContent="">
+                  <IconButton
+                    variant="ghost"
+                    size="sm"
+                    icon={Pin}
+                    onClick={() => setIsManageOpen(true)}
+                    className="hidden text-placeholder group-hover:inline-flex"
+                    aria-label={t("customize_navigation")}
+                  />
+                </Tooltip>
                 {isAuthorizedUser && (
                   <Tooltip tooltipHeading={t("create_project")} tooltipContent="">
                     <IconButton

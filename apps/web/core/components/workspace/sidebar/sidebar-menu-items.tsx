@@ -4,9 +4,9 @@
  * See the LICENSE file for details.
  */
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { observer } from "mobx-react";
-import { Ellipsis } from "lucide-react";
+import { Ellipsis, Pin } from "lucide-react";
 import { Disclosure, Transition } from "@headlessui/react";
 // plane imports
 import {
@@ -19,6 +19,7 @@ import { useTranslation } from "@plane/i18n";
 import { ChevronRightIcon } from "@plane/propel/icons";
 import { cn } from "@plane/utils";
 // components
+import { CustomizeNavigationDialog } from "@/components/navigation/customize-navigation-dialog";
 import { SidebarNavItem } from "@/components/sidebar/sidebar-navigation";
 // store hooks
 import { useAppTheme } from "@/hooks/store/use-app-theme";
@@ -43,6 +44,8 @@ export const SidebarMenuItems = observer(function SidebarMenuItems() {
   const { preferences: workspacePreferences } = useWorkspaceNavigationPreferences();
   // translation
   const { t } = useTranslation();
+  // pin/manage dialog (scoped to the Workspace section)
+  const [isManageOpen, setIsManageOpen] = useState(false);
 
   const toggleListDisclosure = (isOpen: boolean) => {
     toggleWorkspaceMenu(isOpen);
@@ -96,6 +99,11 @@ export const SidebarMenuItems = observer(function SidebarMenuItems() {
 
   return (
     <>
+      <CustomizeNavigationDialog
+        isOpen={isManageOpen}
+        onClose={() => setIsManageOpen(false)}
+        section="workspace"
+      />
       <div className="flex flex-col gap-0.5">
         {filteredStaticNavigationItems.map((item, _index) => (
           // oxlint-disable-next-line react/no-array-index-key
@@ -117,7 +125,18 @@ export const SidebarMenuItems = observer(function SidebarMenuItems() {
           >
             <span className="text-13 font-semibold">{t("common.workspace")}</span>
           </Disclosure.Button>
-          <div className="pointer-events-none flex items-center opacity-0 group-hover:pointer-events-auto group-hover:opacity-100">
+          <div className="pointer-events-none flex items-center gap-0.5 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100">
+            <button
+              type="button"
+              className="flex-shrink-0 rounded-sm p-0.5 text-placeholder hover:bg-layer-1"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsManageOpen(true);
+              }}
+              aria-label={t("customize_navigation")}
+            >
+              <Pin className="size-3.5" />
+            </button>
             <Disclosure.Button
               as="button"
               type="button"
