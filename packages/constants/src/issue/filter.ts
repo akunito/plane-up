@@ -202,6 +202,20 @@ export const ISSUE_DISPLAY_FILTERS_BY_PAGE: TIssueFiltersToDisplayByPageType = {
           values: [],
         },
       },
+      // Cross-project read-only Board (frontend-only): the workspace store fetches a flat list and the
+      // board groups it client-side by state-group, so group_by here is fixed to state_detail.group.
+      kanban: {
+        display_properties: ISSUE_DISPLAY_PROPERTIES_KEYS,
+        display_filters: {
+          group_by: ["state_detail.group"],
+          order_by: ["-created_at", "-updated_at", "start_date", "-priority", "target_date"],
+          type: ["active", "backlog"],
+        },
+        extra_options: {
+          access: false,
+          values: [],
+        },
+      },
     },
   },
   issues: {

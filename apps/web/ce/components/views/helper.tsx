@@ -4,7 +4,9 @@
  * See the LICENSE file for details.
  */
 
-import type { EIssueLayoutTypes, IProjectView } from "@plane/types";
+import type { IProjectView } from "@plane/types";
+import { EIssueLayoutTypes } from "@plane/types";
+import { LayoutSelection } from "@/components/issues/issue-layouts/filters/header/layout-selection";
 import type { TWorkspaceLayoutProps } from "@/components/views/helper";
 
 export type TLayoutSelectionProps = {
@@ -13,8 +15,13 @@ export type TLayoutSelectionProps = {
   workspaceSlug: string;
 };
 
-export function GlobalViewLayoutSelection(_props: TLayoutSelectionProps) {
-  return <></>;
+// Layouts available on the global/workspace views. Upstream OSS leaves this empty (Board is
+// Enterprise-stubbed); this fork enables Spreadsheet + List + a cross-project read-only Board.
+const GLOBAL_VIEW_LAYOUTS = [EIssueLayoutTypes.SPREADSHEET, EIssueLayoutTypes.LIST, EIssueLayoutTypes.KANBAN];
+
+export function GlobalViewLayoutSelection(props: TLayoutSelectionProps) {
+  const { onChange, selectedLayout } = props;
+  return <LayoutSelection layouts={GLOBAL_VIEW_LAYOUTS} onChange={onChange} selectedLayout={selectedLayout} />;
 }
 
 export function WorkspaceAdditionalLayouts(_props: TWorkspaceLayoutProps) {
