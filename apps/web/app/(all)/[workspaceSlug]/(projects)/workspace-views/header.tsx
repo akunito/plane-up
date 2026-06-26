@@ -14,6 +14,7 @@ import {
   GLOBAL_VIEW_TRACKER_ELEMENTS,
   DEFAULT_GLOBAL_VIEWS_LIST,
 } from "@plane/constants";
+import { Plus } from "lucide-react";
 import { useTranslation } from "@plane/i18n";
 import { Button } from "@plane/propel/button";
 import { ViewsIcon } from "@plane/propel/icons";
@@ -122,8 +123,10 @@ export const GlobalIssuesHeader = observer(function GlobalIssuesHeader() {
   return (
     <>
       <CreateUpdateWorkspaceViewModal isOpen={createViewModal} onClose={() => setCreateViewModal(false)} />
-      <Header>
-        <Header.LeftItem>
+      {/* On phones the right-side controls don't fit beside the breadcrumb — let the header wrap
+          them onto a second line (gap-y-4 is already defined) instead of clipping them off-screen. */}
+      <Header className="max-md:flex-wrap">
+        <Header.LeftItem className="max-md:max-w-full">
           <Breadcrumbs>
             <Breadcrumbs.Item
               component={<BreadcrumbLink label={t("views")} icon={<ViewsIcon className="h-4 w-4 text-tertiary" />} />}
@@ -173,12 +176,16 @@ export const GlobalIssuesHeader = observer(function GlobalIssuesHeader() {
           <Button
             variant="primary"
             size="lg"
+            className="flex-shrink-0"
             data-ph-element={GLOBAL_VIEW_TRACKER_ELEMENTS.RIGHT_HEADER_ADD_BUTTON}
             onClick={() => setCreateViewModal(true)}
           >
-            {t("workspace_views.add_view")}
+            {/* icon-only on phones to save width; full label from md up */}
+            <Plus className="size-4 md:hidden" />
+            <span className="hidden md:block">{t("workspace_views.add_view")}</span>
           </Button>
-          <div className="hidden md:block">
+          {/* show the view actions (edit / rename / update / delete) on mobile too, not only desktop */}
+          <div className="block">
             {viewDetails && <WorkspaceViewQuickActions workspaceSlug={workspaceSlug?.toString()} view={viewDetails} />}
             {isDefaultView && defaultViewDetails && (
               <DefaultWorkspaceViewQuickActions workspaceSlug={workspaceSlug?.toString()} view={defaultViewDetails} />
