@@ -21,6 +21,7 @@ import { Tooltip } from "@plane/propel/tooltip";
 import { Loader } from "@plane/ui";
 import { copyUrlToClipboard, cn, orderJoinedProjects } from "@plane/utils";
 // components
+import { CustomizeNavigationDialog } from "@/components/navigation/customize-navigation-dialog";
 import { CreateProjectModal } from "@/components/project/create-project-modal";
 import { SidebarNavItem } from "@/components/sidebar/sidebar-navigation";
 // hooks
@@ -39,6 +40,7 @@ export const SidebarProjectsList = observer(function SidebarProjectsList() {
   const [isAllProjectsListOpen, setIsAllProjectsListOpen] = useState(true);
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false); // scroll animation state
+  const [isManageOpen, setIsManageOpen] = useState(false); // pin/manage dialog (Projects) — responsive popup
   // refs
   const containerRef = useRef<HTMLDivElement | null>(null);
   // store hooks
@@ -163,6 +165,7 @@ export const SidebarProjectsList = observer(function SidebarProjectsList() {
           workspaceSlug={workspaceSlug.toString()}
         />
       )}
+      <CustomizeNavigationDialog isOpen={isManageOpen} onClose={() => setIsManageOpen(false)} section="projects" />
       <div
         ref={containerRef}
         className={cn({
@@ -191,9 +194,9 @@ export const SidebarProjectsList = observer(function SidebarProjectsList() {
                     variant="ghost"
                     size="sm"
                     icon={Pin}
-                    onClick={() => toggleExtendedProjectSidebar()}
-                    className="text-placeholder"
-                    aria-label={t("aria_labels.app_sidebar.open_extended_sidebar")}
+                    onClick={() => setIsManageOpen(true)}
+                    className="hidden text-placeholder group-hover:inline-flex"
+                    aria-label={t("customize_navigation")}
                   />
                 </Tooltip>
                 {isAuthorizedUser && (
@@ -216,7 +219,7 @@ export const SidebarProjectsList = observer(function SidebarProjectsList() {
                   size="sm"
                   icon={ChevronRightIcon}
                   onClick={() => toggleListDisclosure(!isAllProjectsListOpen)}
-                  className="text-placeholder"
+                  className="hidden text-placeholder group-hover:inline-flex"
                   iconClassName={cn("transition-transform", {
                     "rotate-90": isAllProjectsListOpen,
                   })}

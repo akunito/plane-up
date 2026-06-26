@@ -4,7 +4,7 @@
  * See the LICENSE file for details.
  */
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { observer } from "mobx-react";
 import { Pin } from "lucide-react";
 import { Disclosure, Transition } from "@headlessui/react";
@@ -17,8 +17,11 @@ import {
 } from "@plane/constants";
 import { useTranslation } from "@plane/i18n";
 import { ChevronRightIcon } from "@plane/propel/icons";
+import { IconButton } from "@plane/propel/icon-button";
+import { Tooltip } from "@plane/propel/tooltip";
 import { cn } from "@plane/utils";
 // components
+import { CustomizeNavigationDialog } from "@/components/navigation/customize-navigation-dialog";
 // store hooks
 import { useAppTheme } from "@/hooks/store/use-app-theme";
 import useLocalStorage from "@/hooks/use-local-storage";
@@ -42,6 +45,8 @@ export const SidebarMenuItems = observer(function SidebarMenuItems() {
   const { preferences: workspacePreferences } = useWorkspaceNavigationPreferences();
   // translation
   const { t } = useTranslation();
+  // pin/manage dialog (Workspace section) — responsive popup
+  const [isManageOpen, setIsManageOpen] = useState(false);
 
   const toggleListDisclosure = (isOpen: boolean) => {
     toggleWorkspaceMenu(isOpen);
@@ -95,6 +100,7 @@ export const SidebarMenuItems = observer(function SidebarMenuItems() {
 
   return (
     <>
+      <CustomizeNavigationDialog isOpen={isManageOpen} onClose={() => setIsManageOpen(false)} section="workspace" />
       <div className="flex flex-col gap-0.5">
         {filteredStaticNavigationItems.map((item, _index) => (
           // oxlint-disable-next-line react/no-array-index-key
@@ -116,35 +122,30 @@ export const SidebarMenuItems = observer(function SidebarMenuItems() {
           >
             <span className="text-13 font-semibold">{t("common.workspace")}</span>
           </Disclosure.Button>
-          <div className="flex items-center gap-0.5">
-            <button
-              type="button"
-              className="flex-shrink-0 rounded-sm p-0.5 text-placeholder hover:bg-layer-1"
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleExtendedSidebar();
-              }}
-              aria-label={t("aria_labels.app_sidebar.open_extended_sidebar")}
-            >
-              <Pin className="size-3.5" />
-            </button>
-            <Disclosure.Button
-              as="button"
-              type="button"
-              className="flex-shrink-0 rounded-sm p-0.5 hover:bg-layer-1"
+          <div className="flex items-center gap-1">
+            <Tooltip tooltipHeading="Manage workspace" tooltipContent="">
+              <IconButton
+                variant="ghost"
+                size="sm"
+                icon={Pin}
+                onClick={() => setIsManageOpen(true)}
+                className="hidden text-placeholder group-hover:inline-flex"
+                aria-label={t("customize_navigation")}
+              />
+            </Tooltip>
+            <IconButton
+              variant="ghost"
+              size="sm"
+              icon={ChevronRightIcon}
               onClick={() => toggleListDisclosure(!isWorkspaceMenuOpen)}
+              className="hidden text-placeholder group-hover:inline-flex"
+              iconClassName={cn("transition-transform", { "rotate-90": isWorkspaceMenuOpen })}
               aria-label={t(
                 isWorkspaceMenuOpen
                   ? "aria_labels.app_sidebar.close_workspace_menu"
                   : "aria_labels.app_sidebar.open_workspace_menu"
               )}
-            >
-              <ChevronRightIcon
-                className={cn("size-3 flex-shrink-0 transition-all", {
-                  "rotate-90": isWorkspaceMenuOpen,
-                })}
-              />
-            </Disclosure.Button>
+            />
           </div>
         </div>
         <Transition
