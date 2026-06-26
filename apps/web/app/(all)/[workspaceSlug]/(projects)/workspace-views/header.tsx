@@ -11,6 +11,7 @@ import { useParams } from "next/navigation";
 import {
   EIssueFilterType,
   ISSUE_DISPLAY_FILTERS_BY_PAGE,
+  ISSUE_LAYOUTS,
   GLOBAL_VIEW_TRACKER_ELEMENTS,
   DEFAULT_GLOBAL_VIEWS_LIST,
 } from "@plane/constants";
@@ -20,11 +21,12 @@ import { ViewsIcon } from "@plane/propel/icons";
 import type { IIssueDisplayFilterOptions, IIssueDisplayProperties, ICustomSearchSelectOption } from "@plane/types";
 import { EIssuesStoreType, EIssueLayoutTypes } from "@plane/types";
 import { Breadcrumbs, Header, BreadcrumbNavigationSearchDropdown } from "@plane/ui";
+import { cn } from "@plane/utils";
 // components
 import { BreadcrumbLink } from "@/components/common/breadcrumb-link";
 import { SwitcherLabel } from "@/components/common/switcher-label";
 import { DisplayFiltersSelection, FiltersDropdown } from "@/components/issues/issue-layouts/filters";
-import { LayoutSelection } from "@/components/issues/issue-layouts/filters/header/layout-selection";
+import { IssueLayoutIcon } from "@/components/issues/issue-layouts/layout-icon";
 import { WorkItemFiltersToggle } from "@/components/work-item-filters/filters-toggle";
 import { DefaultWorkspaceViewQuickActions } from "@/components/workspace/views/default-view-quick-action";
 import { CreateUpdateWorkspaceViewModal } from "@/components/workspace/views/modal";
@@ -168,22 +170,43 @@ export const GlobalIssuesHeader = observer(function GlobalIssuesHeader() {
           {globalViewId && <WorkItemFiltersToggle entityType={EIssuesStoreType.GLOBAL} entityId={globalViewId} />}
           {!isLocked && (
             <FiltersDropdown title={t("common.display")} placement="bottom-end">
-              {/* Layout switcher inside Display on phones (mirrors the desktop header switcher). */}
-              <div className="mb-3 border-b border-subtle pb-3 md:hidden">
-                <div className="mb-2 text-xs font-medium text-tertiary">Layout</div>
-                <LayoutSelection
-                  layouts={GLOBAL_VIEW_LAYOUTS}
-                  selectedLayout={activeLayout ?? EIssueLayoutTypes.SPREADSHEET}
-                  onChange={handleLayoutChange}
+              {/* Fixed-height scroll box on phones so the bottom-docked sheet doesn't shrink/jump when
+                  switching layouts (e.g. Calendar has fewer Display options). `md:contents` removes the
+                  box on desktop so the popper sizes normally. */}
+              <div className="flex h-[70vh] flex-col overflow-y-auto md:contents">
+                {/* Layout switcher inside Display on phones, with labels (mirrors the desktop switcher). */}
+                <div className="mb-3 border-b border-subtle px-2 pb-3 pt-1 md:hidden">
+                  <div className="mb-2 text-xs font-medium text-tertiary">Layout</div>
+                  <div className="flex flex-wrap gap-2">
+                    {ISSUE_LAYOUTS.filter((l) => GLOBAL_VIEW_LAYOUTS.includes(l.key)).map((l) => {
+                      const isActive = (activeLayout ?? EIssueLayoutTypes.SPREADSHEET) === l.key;
+                      return (
+                        <button
+                          key={l.key}
+                          type="button"
+                          onClick={() => handleLayoutChange(l.key)}
+                          className={cn(
+                            "flex items-center gap-2 rounded-md border px-3 py-1.5 text-13 font-medium",
+                            isActive
+                              ? "border-accent-primary bg-accent-primary/10 text-accent-primary"
+                              : "border-subtle text-secondary"
+                          )}
+                        >
+                          <IssueLayoutIcon layout={l.key} size={14} strokeWidth={2} className="size-3.5" />
+                          <span>{t(l.i18n_title)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <DisplayFiltersSelection
+                  layoutDisplayFiltersOptions={currentLayoutFilters}
+                  displayFilters={issueFilters?.displayFilters ?? {}}
+                  handleDisplayFiltersUpdate={handleDisplayFilters}
+                  displayProperties={issueFilters?.displayProperties ?? {}}
+                  handleDisplayPropertiesUpdate={handleDisplayProperties}
                 />
               </div>
-              <DisplayFiltersSelection
-                layoutDisplayFiltersOptions={currentLayoutFilters}
-                displayFilters={issueFilters?.displayFilters ?? {}}
-                handleDisplayFiltersUpdate={handleDisplayFilters}
-                displayProperties={issueFilters?.displayProperties ?? {}}
-                handleDisplayPropertiesUpdate={handleDisplayProperties}
-              />
             </FiltersDropdown>
           )}
           {/* Add view: desktop only — on phones it's an item inside the "⋯" menu (onCreateView). */}
