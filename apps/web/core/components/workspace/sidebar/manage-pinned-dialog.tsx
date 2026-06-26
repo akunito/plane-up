@@ -143,16 +143,20 @@ export const ManagePinnedDialog = observer(function ManagePinnedDialog({ isOpen,
           {label}
         </div>
         {/* search */}
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-tertiary" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={placeholder}
-            className="w-full rounded-md border border-subtle bg-surface-2 py-1.5 pl-8 pr-2 text-13 text-primary outline-none placeholder:text-tertiary focus:border-accent-primary"
-          />
+        <div>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-tertiary" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={placeholder}
+              className="w-full rounded-md border border-subtle bg-surface-2 py-1.5 pl-8 pr-2 text-13 text-primary outline-none placeholder:text-tertiary focus:border-accent-primary"
+            />
+          </div>
+          {/* results render inline (not absolutely positioned) so they aren't clipped by the modal's
+              scroll container — the modal body scrolls to reveal them. */}
           {visibleResults.length > 0 && (
-            <div className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-subtle bg-surface-1 shadow-raised-100">
+            <div className="mt-1 max-h-60 w-full overflow-y-auto rounded-md border border-subtle bg-surface-1">
               {visibleResults.map((r) => (
                 <button
                   key={r.id}
