@@ -11,6 +11,7 @@ import { EUserPermissions, EUserPermissionsLevel } from "@plane/constants";
 // components
 import { SidebarWrapper } from "@/components/sidebar/sidebar-wrapper";
 import { SidebarFavoritesMenu } from "@/components/workspace/sidebar/favorites/favorites-menu";
+import { SidebarPinnedList } from "@/components/workspace/sidebar/pinned-list";
 import { SidebarProjectsList } from "@/components/workspace/sidebar/projects-list";
 import { SidebarQuickActions } from "@/components/workspace/sidebar/quick-actions";
 import { SidebarMenuItems } from "@/components/workspace/sidebar/sidebar-menu-items";
@@ -42,6 +43,8 @@ export const AppSidebar = observer(function AppSidebar() {
       <SidebarTeamsList />
       {/* Projects List */}
       <SidebarProjectsList />
+      {/* Pinned pages + tickets ("Pages" category) */}
+      <SidebarPinnedList />
     </SidebarWrapper>
   );
 });
