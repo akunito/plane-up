@@ -153,6 +153,8 @@ const ISSUE_ORDERBY_KEY: Record<TIssueOrderByOptions, keyof TIssue> = {
   sort_order: "sort_order",
   state__name: "state_id",
   "-state__name": "state_id",
+  project__name: "project_id",
+  "-project__name": "project_id",
   assignees__first_name: "assignee_ids",
   "-assignees__first_name": "assignee_ids",
   labels__name: "label_ids",
@@ -1675,7 +1677,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
    * @returns string | string[] of sortable fields to be used for sorting
    */
   populateIssueDataForSorting(
-    dataType: "state_id" | "label_ids" | "assignee_ids" | "module_ids" | "cycle_id" | "estimate_point",
+    dataType: "state_id" | "project_id" | "label_ids" | "assignee_ids" | "module_ids" | "cycle_id" | "estimate_point",
     dataIds: string | string[] | null | undefined,
     projectId: string | undefined | null,
     order?: "asc" | "desc"
@@ -1693,6 +1695,15 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
         for (const dataId of dataIdsArray) {
           const state = stateMap[dataId];
           if (state && state.name) dataValues.push(state.name.toLocaleLowerCase());
+        }
+        break;
+      }
+      case "project_id": {
+        const projectMap = this.rootIssueStore?.projectMap;
+        if (!projectMap) break;
+        for (const dataId of dataIdsArray) {
+          const project = projectMap[dataId];
+          if (project && project.name) dataValues.push(project.name.toLocaleLowerCase());
         }
         break;
       }
@@ -1775,6 +1786,20 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
           orderBy(
             array,
             (issue) => this.populateIssueDataForSorting("state_id", issue?.["state_id"], issue?.["project_id"]),
+            ["desc"]
+          )
+        );
+      case "project__name":
+        return getIssueIds(
+          orderBy(array, (issue) =>
+            this.populateIssueDataForSorting("project_id", issue?.["project_id"], issue?.["project_id"])
+          )
+        );
+      case "-project__name":
+        return getIssueIds(
+          orderBy(
+            array,
+            (issue) => this.populateIssueDataForSorting("project_id", issue?.["project_id"], issue?.["project_id"]),
             ["desc"]
           )
         );
@@ -1964,6 +1989,10 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
         return { iteratees: [(i) => this.populateIssueDataForSorting("state_id", i?.["state_id"], i?.["project_id"])], orders: ["asc"] };
       case "-state__name":
         return { iteratees: [(i) => this.populateIssueDataForSorting("state_id", i?.["state_id"], i?.["project_id"])], orders: ["desc"] };
+      case "project__name":
+        return { iteratees: [(i) => this.populateIssueDataForSorting("project_id", i?.["project_id"], i?.["project_id"])], orders: ["asc"] };
+      case "-project__name":
+        return { iteratees: [(i) => this.populateIssueDataForSorting("project_id", i?.["project_id"], i?.["project_id"])], orders: ["desc"] };
       case "created_at":
         return { iteratees: [(i) => convertToISODateString(i["created_at"])], orders: ["asc"] };
       case "-created_at":
