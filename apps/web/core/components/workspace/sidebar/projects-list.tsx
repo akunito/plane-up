@@ -195,7 +195,7 @@ export const SidebarProjectsList = observer(function SidebarProjectsList() {
                     size="sm"
                     icon={Pin}
                     onClick={() => setIsManageOpen(true)}
-                    className="hidden text-placeholder group-hover:inline-flex"
+                    className="inline-flex text-placeholder md:hidden md:group-hover:inline-flex"
                     aria-label={t("customize_navigation")}
                   />
                 </Tooltip>
@@ -209,7 +209,7 @@ export const SidebarProjectsList = observer(function SidebarProjectsList() {
                         setIsProjectModalOpen(true);
                       }}
                       data-ph-element={PROJECT_TRACKER_ELEMENTS.SIDEBAR_CREATE_PROJECT_TOOLTIP}
-                      className="hidden text-placeholder group-hover:inline-flex"
+                      className="inline-flex text-placeholder md:hidden md:group-hover:inline-flex"
                       aria-label={t("aria_labels.projects_sidebar.create_new_project")}
                     />
                   </Tooltip>
@@ -219,7 +219,7 @@ export const SidebarProjectsList = observer(function SidebarProjectsList() {
                   size="sm"
                   icon={ChevronRightIcon}
                   onClick={() => toggleListDisclosure(!isAllProjectsListOpen)}
-                  className="hidden text-placeholder group-hover:inline-flex"
+                  className="inline-flex text-placeholder md:hidden md:group-hover:inline-flex"
                   iconClassName={cn("transition-transform", {
                     "rotate-90": isAllProjectsListOpen,
                   })}

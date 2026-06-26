@@ -128,7 +128,7 @@ export const SidebarMenuItems = observer(function SidebarMenuItems() {
                 size="sm"
                 icon={Pin}
                 onClick={() => setIsManageOpen(true)}
-                className="hidden text-placeholder group-hover:inline-flex"
+                className="inline-flex text-placeholder md:hidden md:group-hover:inline-flex"
                 aria-label={t("customize_navigation")}
               />
             </Tooltip>
@@ -137,7 +137,7 @@ export const SidebarMenuItems = observer(function SidebarMenuItems() {
               size="sm"
               icon={ChevronRightIcon}
               onClick={() => toggleListDisclosure(!isWorkspaceMenuOpen)}
-              className="hidden text-placeholder group-hover:inline-flex"
+              className="inline-flex text-placeholder md:hidden md:group-hover:inline-flex"
               iconClassName={cn("transition-transform", { "rotate-90": isWorkspaceMenuOpen })}
               aria-label={t(
                 isWorkspaceMenuOpen
