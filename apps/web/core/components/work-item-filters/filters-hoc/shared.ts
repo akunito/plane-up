@@ -5,7 +5,7 @@
  */
 
 // plane imports
-import type { TDeleteViewOptions, TSaveViewOptions, TUpdateViewOptions } from "@plane/constants";
+import type { TSaveViewOptions, TUpdateViewOptions } from "@plane/constants";
 import type { IWorkItemFilterInstance } from "@plane/shared-state";
 import type { EIssuesStoreType, IIssueFilters, TWorkItemFilterExpression, TWorkItemFilterProperty } from "@plane/types";
 
@@ -30,9 +30,4 @@ export type TEnableSaveViewProps = {
 export type TEnableUpdateViewProps = {
   enableUpdateView?: boolean;
   updateViewOptions?: Omit<TUpdateViewOptions<TWorkItemFilterExpression>, "onViewUpdate">;
-};
-
-export type TEnableDeleteViewProps = {
-  enableDeleteView?: boolean;
-  deleteViewOptions?: Omit<TDeleteViewOptions, "onViewDelete">;
 };

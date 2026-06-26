@@ -27,7 +27,6 @@ export type TFiltersRowProps<K extends TFilterProperty, E extends TExternalFilte
     clearFilter?: string;
     saveView?: string;
     updateView?: string;
-    deleteView?: string;
   };
 };
 
@@ -43,13 +42,11 @@ export const FiltersRow = observer(function FiltersRow<K extends TFilterProperty
   } = props;
   // states
   const [isUpdating, setIsUpdating] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
   // derived values
   const disabledAllOperations = disabledAllOperationsProp || !filter.configManager.areConfigsReady;
   const hasAnyConditions = filter.allConditionsForDisplay.length > 0;
   const hasAvailableOperations =
-    !disabledAllOperations &&
-    (filter.canClearFilters || filter.canSaveView || filter.canUpdateView || filter.canDeleteView);
+    !disabledAllOperations && (filter.canClearFilters || filter.canSaveView || filter.canUpdateView);
 
   const headerButtonConfig: Partial<TAddFilterButtonProps<K, E>["buttonConfig"]> = {
     label: null,
@@ -65,15 +62,6 @@ export const FiltersRow = observer(function FiltersRow<K extends TFilterProperty
       await filter.updateView();
     } finally {
       setTimeout(() => setIsUpdating(false), 240); // To avoid flickering
-    }
-  }, [filter]);
-
-  const handleDelete = useCallback(async () => {
-    setIsDeleting(true);
-    try {
-      await filter.deleteView();
-    } finally {
-      setTimeout(() => setIsDeleting(false), 240); // To avoid flickering
     }
   }, [filter]);
 
@@ -131,18 +119,6 @@ export const FiltersRow = observer(function FiltersRow<K extends TFilterProperty
           data-ph-element={trackerElements?.updateView}
         >
           {isUpdating ? "Confirming" : (filter.updateViewOptions?.label ?? "Update view")}
-        </Button>
-      </ElementTransition>
-      <ElementTransition show={filter.canDeleteView}>
-        <Button
-          variant="error-outline"
-          className={COMMON_OPERATION_BUTTON_CLASSNAME}
-          onClick={handleDelete}
-          loading={isDeleting}
-          disabled={isDeleting}
-          data-ph-element={trackerElements?.deleteView}
-        >
-          {isDeleting ? "Deleting" : (filter.deleteViewOptions?.label ?? "Delete view")}
         </Button>
       </ElementTransition>
     </>

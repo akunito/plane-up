@@ -14,7 +14,6 @@ import type { IProjectView, TWorkItemFilterExpression } from "@plane/types";
 import { EUserProjectRoles, EViewAccess } from "@plane/types";
 // components
 import { removeNillKeys } from "@/components/issues/issue-layouts/utils";
-import { DeleteProjectViewModal } from "@/components/views/delete-view-modal";
 import { CreateUpdateProjectViewModal } from "@/components/views/modal";
 // hooks
 import { useCycle } from "@/hooks/store/use-cycle";
@@ -27,37 +26,22 @@ import { useProjectView } from "@/hooks/store/use-project-view";
 import { useUser, useUserPermissions } from "@/hooks/store/user";
 // local imports
 import { WorkItemFiltersHOC } from "./base";
-import type {
-  TEnableDeleteViewProps,
-  TEnableSaveViewProps,
-  TEnableUpdateViewProps,
-  TSharedWorkItemFiltersHOCProps,
-} from "./shared";
+import type { TEnableSaveViewProps, TEnableUpdateViewProps, TSharedWorkItemFiltersHOCProps } from "./shared";
 
 type TProjectLevelWorkItemFiltersHOCProps = TSharedWorkItemFiltersHOCProps & {
   workspaceSlug: string;
   projectId: string;
 } & TEnableSaveViewProps &
-  TEnableUpdateViewProps &
-  TEnableDeleteViewProps;
+  TEnableUpdateViewProps;
 
 export const ProjectLevelWorkItemFiltersHOC = observer(function ProjectLevelWorkItemFiltersHOC(
   props: TProjectLevelWorkItemFiltersHOCProps
 ) {
-  const {
-    children,
-    enableSaveView,
-    enableUpdateView,
-    enableDeleteView,
-    entityId,
-    initialWorkItemFilters,
-    projectId,
-    workspaceSlug,
-  } = props;
+  const { children, enableSaveView, enableUpdateView, entityId, initialWorkItemFilters, projectId, workspaceSlug } =
+    props;
   // states
   const [isCreateViewModalOpen, setIsCreateViewModalOpen] = useState(false);
   const [createViewPayload, setCreateViewPayload] = useState<Partial<IProjectView> | null>(null);
-  const [isDeleteViewModalOpen, setIsDeleteViewModalOpen] = useState(false);
   // hooks
   const { getProjectById } = useProject();
   const { getViewById, updateView } = useProjectView();
@@ -73,13 +57,6 @@ export const ProjectLevelWorkItemFiltersHOC = observer(function ProjectLevelWork
   // derived values
   const hasProjectMemberLevelPermissions = allowPermissions(
     [EUserProjectRoles.ADMIN, EUserProjectRoles.MEMBER],
-    EUserPermissionsLevel.PROJECT,
-    workspaceSlug,
-    projectId
-  );
-  // project admins can delete any view (matches the backend destroy permission); update stays owner-only.
-  const isProjectAdmin = allowPermissions(
-    [EUserProjectRoles.ADMIN],
     EUserPermissionsLevel.PROJECT,
     workspaceSlug,
     projectId
@@ -116,17 +93,8 @@ export const ProjectLevelWorkItemFiltersHOC = observer(function ProjectLevelWork
       isCurrentUserOwner,
     ]
   );
-  const canDeleteView = useMemo(
-    () =>
-      enableDeleteView &&
-      !props.deleteViewOptions?.isDisabled &&
-      !isViewLocked &&
-      (isCurrentUserOwner || isProjectAdmin),
-    [enableDeleteView, props.deleteViewOptions?.isDisabled, isViewLocked, isCurrentUserOwner, isProjectAdmin]
-  );
   const createViewLabel = useMemo(() => props.saveViewOptions?.label, [props.saveViewOptions?.label]);
   const updateViewLabel = useMemo(() => props.updateViewOptions?.label, [props.updateViewOptions?.label]);
-  const deleteViewLabel = useMemo(() => props.deleteViewOptions?.label, [props.deleteViewOptions?.label]);
   const hasAdditionalChanges = useMemo(
     () =>
       !isEqual(initialWorkItemFilters?.displayFilters, viewDetails?.display_filters) ||
@@ -213,20 +181,10 @@ export const ProjectLevelWorkItemFiltersHOC = observer(function ProjectLevelWork
     () => ({
       label: updateViewLabel,
       isDisabled: !canUpdateView,
-      // keep the button persistently visible for users who can update (not only on a detected change)
-      hasAdditionalChanges: hasAdditionalChanges || canUpdateView,
+      hasAdditionalChanges,
       onViewUpdate: handleViewUpdate,
     }),
     [updateViewLabel, canUpdateView, hasAdditionalChanges, handleViewUpdate]
-  );
-
-  const deleteViewOptions = useMemo(
-    () => ({
-      label: deleteViewLabel,
-      isDisabled: !canDeleteView,
-      onViewDelete: () => setIsDeleteViewModalOpen(true),
-    }),
-    [deleteViewLabel, canDeleteView]
   );
 
   return (
@@ -241,13 +199,6 @@ export const ProjectLevelWorkItemFiltersHOC = observer(function ProjectLevelWork
           setIsCreateViewModalOpen(false);
         }}
       />
-      {viewDetails && (
-        <DeleteProjectViewModal
-          data={viewDetails}
-          isOpen={isDeleteViewModalOpen}
-          onClose={() => setIsDeleteViewModalOpen(false)}
-        />
-      )}
       <WorkItemFiltersHOC
         {...props}
         workspaceSlug={workspaceSlug}
@@ -258,7 +209,6 @@ export const ProjectLevelWorkItemFiltersHOC = observer(function ProjectLevelWork
         stateIds={getProjectStateIds(projectId)}
         saveViewOptions={saveViewOptions}
         updateViewOptions={updateViewOptions}
-        deleteViewOptions={deleteViewOptions}
       >
         {children}
       </WorkItemFiltersHOC>

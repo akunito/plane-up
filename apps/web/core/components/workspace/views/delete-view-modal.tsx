@@ -19,11 +19,10 @@ type Props = {
   data: IWorkspaceView;
   isOpen: boolean;
   onClose: () => void;
-  onDeleted?: () => void;
 };
 
 export const DeleteGlobalViewModal = observer(function DeleteGlobalViewModal(props: Props) {
-  const { data, isOpen, onClose, onDeleted } = props;
+  const { data, isOpen, onClose } = props;
   // states
   const [isDeleteLoading, setIsDeleteLoading] = useState(false);
   // router
@@ -39,12 +38,6 @@ export const DeleteGlobalViewModal = observer(function DeleteGlobalViewModal(pro
 
     try {
       await deleteGlobalView(workspaceSlug.toString(), data.id);
-      // remove filters from local storage
-      localStorage.removeItem(`global_view_filters/${data.id}`);
-      setIsDeleteLoading(false);
-      handleClose();
-      onDeleted?.();
-      return;
     } catch (_error) {
       setToast({
         type: TOAST_TYPE.ERROR,
@@ -55,6 +48,8 @@ export const DeleteGlobalViewModal = observer(function DeleteGlobalViewModal(pro
 
     setIsDeleteLoading(false);
     handleClose();
+    // remove filters from local storage
+    localStorage.removeItem(`global_view_filters/${data.id}`);
   };
 
   return (

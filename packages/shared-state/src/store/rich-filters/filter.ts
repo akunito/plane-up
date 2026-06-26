@@ -11,7 +11,6 @@ import { v4 as uuidv4 } from "uuid";
 // plane imports
 import type {
   TClearFilterOptions,
-  TDeleteViewOptions,
   TExpressionOptions,
   TFilterOptions,
   TSaveViewOptions,
@@ -88,12 +87,10 @@ export interface IFilterInstance<P extends TFilterProperty, E extends TExternalF
   clearFilterOptions: TClearFilterOptions | undefined;
   saveViewOptions: TSaveViewOptions<E> | undefined;
   updateViewOptions: TUpdateViewOptions<E> | undefined;
-  deleteViewOptions: TDeleteViewOptions | undefined;
   // computed permissions
   canClearFilters: boolean;
   canSaveView: boolean;
   canUpdateView: boolean;
-  canDeleteView: boolean;
   // visibility
   toggleVisibility: (isVisible?: boolean) => void;
   // filter expression actions
@@ -129,7 +126,6 @@ export interface IFilterInstance<P extends TFilterProperty, E extends TExternalF
   clearFilters: () => Promise<void>;
   saveView: () => Promise<void>;
   updateView: () => Promise<void>;
-  deleteView: () => Promise<void>;
   // expression options actions
   updateExpressionOptions: (newOptions: Partial<TExpressionOptions<E>>) => void;
 }
@@ -189,12 +185,10 @@ export class FilterInstance<P extends TFilterProperty, E extends TExternalFilter
       clearFilterOptions: computed,
       saveViewOptions: computed,
       updateViewOptions: computed,
-      deleteViewOptions: computed,
       // computed permissions
       canClearFilters: computed,
       canSaveView: computed,
       canUpdateView: computed,
-      canDeleteView: computed,
       // actions
       resetExpression: action,
       findConditionsByPropertyAndOperator: action,
@@ -206,7 +200,6 @@ export class FilterInstance<P extends TFilterProperty, E extends TExternalFilter
       clearFilters: action,
       saveView: action,
       updateView: action,
-      deleteView: action,
       updateExpressionOptions: action,
     });
   }
@@ -286,14 +279,6 @@ export class FilterInstance<P extends TFilterProperty, E extends TExternalFilter
     return this.expressionOptions.updateViewOptions;
   }
 
-  /**
-   * Returns the delete view options.
-   * @returns The delete view options.
-   */
-  get deleteViewOptions(): IFilterInstance<P, E>["deleteViewOptions"] {
-    return this.expressionOptions.deleteViewOptions;
-  }
-
   // ------------ computed permissions ------------
 
   /**
@@ -324,14 +309,6 @@ export class FilterInstance<P extends TFilterProperty, E extends TExternalFilter
       (this.hasChanges || !!this.updateViewOptions.hasAdditionalChanges) &&
       !this.updateViewOptions.isDisabled
     );
-  }
-
-  /**
-   * Checks if the current view can be deleted.
-   * @returns True if the view can be deleted, false otherwise.
-   */
-  get canDeleteView(): IFilterInstance<P, E>["canDeleteView"] {
-    return !!this.deleteViewOptions && !this.deleteViewOptions.isDisabled;
   }
 
   // ------------ actions ------------
@@ -555,17 +532,6 @@ export class FilterInstance<P extends TFilterProperty, E extends TExternalFilter
       this._resetInitialFilterExpression();
     } else {
       console.warn("Cannot update view: invalid expression or missing options.");
-    }
-  });
-
-  /**
-   * Deletes the current view.
-   */
-  deleteView: IFilterInstance<P, E>["deleteView"] = action(async () => {
-    if (this.canDeleteView && this.deleteViewOptions) {
-      await this.deleteViewOptions.onViewDelete();
-    } else {
-      console.warn("Cannot delete view: missing options.");
     }
   });
 

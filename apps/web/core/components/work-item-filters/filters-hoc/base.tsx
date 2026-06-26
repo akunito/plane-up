@@ -8,7 +8,7 @@ import { useEffect, useMemo } from "react";
 import { observer } from "mobx-react";
 import { v4 as uuidv4 } from "uuid";
 // plane imports
-import type { TDeleteViewOptions, TSaveViewOptions, TUpdateViewOptions } from "@plane/constants";
+import type { TSaveViewOptions, TUpdateViewOptions } from "@plane/constants";
 import type { IWorkItemFilterInstance } from "@plane/shared-state";
 import type { IIssueFilters, TWorkItemFilterExpression } from "@plane/types";
 // store hooks
@@ -22,7 +22,6 @@ import type { TSharedWorkItemFiltersHOCProps, TSharedWorkItemFiltersProps } from
 type TAdditionalWorkItemFiltersProps = {
   saveViewOptions?: TSaveViewOptions<TWorkItemFilterExpression>;
   updateViewOptions?: TUpdateViewOptions<TWorkItemFilterExpression>;
-  deleteViewOptions?: TDeleteViewOptions;
 } & TWorkItemFiltersEntityProps;
 
 type TWorkItemFiltersHOCProps = TSharedWorkItemFiltersHOCProps & TAdditionalWorkItemFiltersProps;
@@ -58,7 +57,6 @@ const WorkItemFilterRoot = observer(function WorkItemFilterRoot(props: TWorkItem
     saveViewOptions,
     updateFilters,
     updateViewOptions,
-    deleteViewOptions,
     showOnMount,
     ...entityConfigProps
   } = props;
@@ -86,12 +84,11 @@ const WorkItemFilterRoot = observer(function WorkItemFilterRoot(props: TWorkItem
         expressionOptions: {
           saveViewOptions,
           updateViewOptions,
-          deleteViewOptions,
         },
         showOnMount,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entityType, workItemEntityID, saveViewOptions, updateViewOptions, deleteViewOptions, updateFilters]
+    [entityType, workItemEntityID, saveViewOptions, updateViewOptions, updateFilters]
   );
 
   // delete filter instance when component unmounts
