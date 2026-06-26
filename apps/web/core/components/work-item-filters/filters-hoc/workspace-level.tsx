@@ -7,7 +7,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { isEqual, cloneDeep } from "lodash-es";
 import { observer } from "mobx-react";
-import { useRouter } from "next/navigation";
 // plane imports
 import { DEFAULT_GLOBAL_VIEWS_LIST, EUserPermissionsLevel } from "@plane/constants";
 import { setToast, TOAST_TYPE } from "@plane/propel/toast";
@@ -16,7 +15,6 @@ import { EUserProjectRoles, EViewAccess } from "@plane/types";
 // components
 import { removeNillKeys } from "@/components/issues/issue-layouts/utils";
 import { CreateUpdateWorkspaceViewModal } from "@/components/workspace/views/modal";
-import { DeleteGlobalViewModal } from "@/components/workspace/views/delete-view-modal";
 // hooks
 import { useGlobalView } from "@/hooks/store/use-global-view";
 import { useLabel } from "@/hooks/store/use-label";
@@ -25,30 +23,20 @@ import { useProject } from "@/hooks/store/use-project";
 import { useUser, useUserPermissions } from "@/hooks/store/user";
 // local imports
 import { WorkItemFiltersHOC } from "./base";
-import type {
-  TEnableDeleteViewProps,
-  TEnableSaveViewProps,
-  TEnableUpdateViewProps,
-  TSharedWorkItemFiltersHOCProps,
-} from "./shared";
+import type { TEnableSaveViewProps, TEnableUpdateViewProps, TSharedWorkItemFiltersHOCProps } from "./shared";
 
 type TWorkspaceLevelWorkItemFiltersHOCProps = TSharedWorkItemFiltersHOCProps & {
   workspaceSlug: string;
 } & TEnableSaveViewProps &
-  TEnableUpdateViewProps &
-  TEnableDeleteViewProps;
+  TEnableUpdateViewProps;
 
 export const WorkspaceLevelWorkItemFiltersHOC = observer(function WorkspaceLevelWorkItemFiltersHOC(
   props: TWorkspaceLevelWorkItemFiltersHOCProps
 ) {
-  const { children, enableSaveView, enableUpdateView, enableDeleteView, entityId, initialWorkItemFilters, workspaceSlug } =
-    props;
+  const { children, enableSaveView, enableUpdateView, entityId, initialWorkItemFilters, workspaceSlug } = props;
   // states
   const [isCreateViewModalOpen, setIsCreateViewModalOpen] = useState(false);
   const [createViewPayload, setCreateViewPayload] = useState<Partial<IWorkspaceView> | undefined>(undefined);
-  const [isDeleteViewModalOpen, setIsDeleteViewModalOpen] = useState(false);
-  // router
-  const router = useRouter();
   // hooks
   const { getViewDetailsById, updateGlobalView } = useGlobalView();
   const { data: currentUser } = useUser();
@@ -61,12 +49,6 @@ export const WorkspaceLevelWorkItemFiltersHOC = observer(function WorkspaceLevel
   // derived values
   const hasWorkspaceMemberLevelPermissions = allowPermissions(
     [EUserProjectRoles.ADMIN, EUserProjectRoles.MEMBER],
-    EUserPermissionsLevel.WORKSPACE,
-    workspaceSlug
-  );
-  // workspace admins can delete any view (matches the backend destroy permission); update stays owner-only.
-  const isWorkspaceAdmin = allowPermissions(
-    [EUserProjectRoles.ADMIN],
     EUserPermissionsLevel.WORKSPACE,
     workspaceSlug
   );
@@ -95,25 +77,8 @@ export const WorkspaceLevelWorkItemFiltersHOC = observer(function WorkspaceLevel
       isCurrentUserOwner,
     ]
   );
-  const canDeleteView = useMemo(
-    () =>
-      enableDeleteView &&
-      !isDefaultView &&
-      !props.deleteViewOptions?.isDisabled &&
-      !isViewLocked &&
-      (isCurrentUserOwner || isWorkspaceAdmin),
-    [
-      enableDeleteView,
-      props.deleteViewOptions?.isDisabled,
-      isDefaultView,
-      isViewLocked,
-      isCurrentUserOwner,
-      isWorkspaceAdmin,
-    ]
-  );
   const createViewLabel = useMemo(() => props.saveViewOptions?.label, [props.saveViewOptions?.label]);
   const updateViewLabel = useMemo(() => props.updateViewOptions?.label, [props.updateViewOptions?.label]);
-  const deleteViewLabel = useMemo(() => props.deleteViewOptions?.label, [props.deleteViewOptions?.label]);
   const hasAdditionalChanges = useMemo(
     () =>
       !isEqual(initialWorkItemFilters?.displayFilters, viewDetails?.display_filters) ||
@@ -205,20 +170,10 @@ export const WorkspaceLevelWorkItemFiltersHOC = observer(function WorkspaceLevel
     () => ({
       label: updateViewLabel,
       isDisabled: !canUpdateView,
-      // keep the button persistently visible for users who can update (not only on a detected change)
-      hasAdditionalChanges: hasAdditionalChanges || canUpdateView,
+      hasAdditionalChanges,
       onViewUpdate: handleViewUpdate,
     }),
     [updateViewLabel, canUpdateView, hasAdditionalChanges, handleViewUpdate]
-  );
-
-  const deleteViewOptions = useMemo(
-    () => ({
-      label: deleteViewLabel,
-      isDisabled: !canDeleteView,
-      onViewDelete: () => setIsDeleteViewModalOpen(true),
-    }),
-    [deleteViewLabel, canDeleteView]
   );
 
   return (
@@ -231,14 +186,6 @@ export const WorkspaceLevelWorkItemFiltersHOC = observer(function WorkspaceLevel
           setIsCreateViewModalOpen(false);
         }}
       />
-      {viewDetails && (
-        <DeleteGlobalViewModal
-          data={viewDetails}
-          isOpen={isDeleteViewModalOpen}
-          onClose={() => setIsDeleteViewModalOpen(false)}
-          onDeleted={() => router.push(`/${workspaceSlug}/workspace-views/all-issues`)}
-        />
-      )}
       <WorkItemFiltersHOC
         {...props}
         memberIds={getWorkspaceMemberIds(workspaceSlug)}
@@ -246,7 +193,6 @@ export const WorkspaceLevelWorkItemFiltersHOC = observer(function WorkspaceLevel
         projectIds={joinedProjectIds}
         saveViewOptions={saveViewOptions}
         updateViewOptions={updateViewOptions}
-        deleteViewOptions={deleteViewOptions}
       >
         {children}
       </WorkItemFiltersHOC>

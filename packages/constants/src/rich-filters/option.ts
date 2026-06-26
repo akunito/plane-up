@@ -45,22 +45,12 @@ export type TUpdateViewOptions<E extends TExternalFilter> = {
 };
 
 /**
- * Delete view config.
- */
-export type TDeleteViewOptions = {
-  label?: string;
-  onViewDelete: () => void | Promise<void>;
-  isDisabled?: boolean;
-};
-
-/**
  * Filter expression options.
  */
 export type TExpressionOptions<E extends TExternalFilter> = {
   clearFilterOptions?: TClearFilterOptions;
   saveViewOptions?: TSaveViewOptions<E>;
   updateViewOptions?: TUpdateViewOptions<E>;
-  deleteViewOptions?: TDeleteViewOptions;
 };
 
 /**

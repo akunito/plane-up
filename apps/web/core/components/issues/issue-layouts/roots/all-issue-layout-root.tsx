@@ -143,7 +143,6 @@ export const AllIssueLayoutRoot = observer(function AllIssueLayoutRoot(props: Pr
           label: "Save as",
         }}
         enableUpdateView
-        enableDeleteView
         entityId={globalViewId}
         entityType={EIssuesStoreType.GLOBAL}
         filtersToShowByLayout={ISSUE_DISPLAY_FILTERS_BY_PAGE.my_issues.filters}
