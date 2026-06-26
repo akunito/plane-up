@@ -5,6 +5,7 @@
  */
 
 import { EIssueLayoutTypes } from "@plane/types";
+import { WorkspaceCalendarLayout } from "@/components/issues/issue-layouts/calendar/roots/workspace-root";
 import { WorkspaceKanbanBoard } from "@/components/issues/issue-layouts/kanban/roots/workspace-root";
 import { WorkspaceIssuesListLayout } from "@/components/issues/issue-layouts/list/roots/workspace-root";
 import { WorkspaceSpreadsheetRoot } from "@/components/issues/issue-layouts/spreadsheet/roots/workspace-root";
@@ -43,6 +44,9 @@ export function WorkspaceActiveLayout(props: TWorkspaceLayoutProps) {
     case EIssueLayoutTypes.KANBAN:
       // Cross-project read-only board (frontend-only; groups the flat workspace list by state-group).
       return <WorkspaceKanbanBoard />;
+    case EIssueLayoutTypes.CALENDAR:
+      // Cross-project read-only calendar (frontend-only; groups the flat workspace list by target_date).
+      return <WorkspaceCalendarLayout />;
     case EIssueLayoutTypes.SPREADSHEET:
       return (
         <WorkspaceSpreadsheetRoot

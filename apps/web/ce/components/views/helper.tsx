@@ -15,11 +15,15 @@ export type TLayoutSelectionProps = {
   workspaceSlug: string;
 };
 
-// Layouts the user can pick on the global/workspace views. Upstream OSS leaves this empty (Board is
-// Enterprise-stubbed); this fork offers Table (spreadsheet) + a cross-project read-only Board.
-// List is intentionally NOT offered as a selectable layout — it still exists as the responsive
-// mobile fallback for the Table layout (see useResponsiveIssueLayout), just not a separate mode.
-export const GLOBAL_VIEW_LAYOUTS = [EIssueLayoutTypes.SPREADSHEET, EIssueLayoutTypes.KANBAN];
+// Layouts the user can pick on the global/workspace views. Upstream OSS leaves this empty (these are
+// Enterprise-stubbed); this fork offers Board + Table + a cross-project read-only Calendar.
+// List is intentionally NOT a selectable layout — it's the responsive mobile fallback for Table
+// (see useResponsiveIssueLayout), not a separate mode.
+export const GLOBAL_VIEW_LAYOUTS = [
+  EIssueLayoutTypes.SPREADSHEET,
+  EIssueLayoutTypes.KANBAN,
+  EIssueLayoutTypes.CALENDAR,
+];
 
 export function GlobalViewLayoutSelection(props: TLayoutSelectionProps) {
   const { onChange, selectedLayout } = props;
