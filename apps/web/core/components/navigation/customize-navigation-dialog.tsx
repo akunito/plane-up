@@ -11,10 +11,13 @@ import { GripVertical, X } from "lucide-react";
 // plane imports
 import { WORKSPACE_SIDEBAR_DYNAMIC_NAVIGATION_ITEMS_LINKS, EUserPermissionsLevel } from "@plane/constants";
 import { useTranslation } from "@plane/i18n";
+import { Logo } from "@plane/propel/emoji-icon-picker";
 import { Checkbox, EModalPosition, EModalWidth, ModalCore, Sortable } from "@plane/ui";
-import { cn } from "@plane/utils";
+import { cn, orderJoinedProjects } from "@plane/utils";
 // hooks
+import { useProject } from "@/hooks/store/use-project";
 import { useUserPermissions } from "@/hooks/store/user";
+import { useAppRouter } from "@/hooks/use-app-router";
 import {
   usePersonalNavigationPreferences,
   useProjectNavigationPreferences,
@@ -22,6 +25,8 @@ import {
 } from "@/hooks/use-navigation-preferences";
 // helpers
 import { getSidebarNavigationItemIcon } from "@/plane-web/components/workspace/sidebar/helper";
+// plane web imports
+import type { TProject } from "@/plane-web/types";
 // types
 import type { TPersonalNavigationItemKey } from "@/types/navigation-preferences";
 
@@ -73,6 +78,39 @@ export const CustomizeNavigationDialog = observer(function CustomizeNavigationDi
     toggleWorkspaceItem,
     updateWorkspaceItemOrder,
   } = useWorkspaceNavigationPreferences();
+  const router = useAppRouter();
+  const { joinedProjectIds, getPartialProjectById, updateProjectView } = useProject();
+
+  // joined projects (for the Projects section list) + drag-reorder
+  const joinedProjectsList = useMemo(
+    () => joinedProjectIds.map((id) => getPartialProjectById(id)).filter((p): p is TProject => !!p),
+    [joinedProjectIds, getPartialProjectById]
+  );
+  const handleProjectReorder = useCallback(
+    (newData: TProject[]) => {
+      if (!workspaceSlug) return;
+      const oldIds = joinedProjectsList.map((p) => p.id);
+      const newIds = newData.map((p) => p.id);
+      let movedId: string | null = null;
+      let maxDelta = -1;
+      newIds.forEach((id, newIdx) => {
+        const delta = Math.abs(newIdx - oldIds.indexOf(id));
+        if (delta > maxDelta) {
+          maxDelta = delta;
+          movedId = id;
+        }
+      });
+      if (!movedId || maxDelta <= 0) return;
+      const sortOrder = orderJoinedProjects(
+        oldIds.indexOf(movedId),
+        newIds.indexOf(movedId),
+        movedId,
+        joinedProjectsList
+      );
+      updateProjectView(workspaceSlug.toString(), movedId, { sort_order: sortOrder }).catch(() => {});
+    },
+    [workspaceSlug, joinedProjectsList, updateProjectView]
+  );
 
   // local state for limited projects count input
   const [projectCountInput, setProjectCountInput] = useState(projectPreferences.limitedProjectsCount.toString());
@@ -273,6 +311,36 @@ export const CustomizeNavigationDialog = observer(function CustomizeNavigationDi
           {(section === "all" || section === "projects") && (
           <div className="flex flex-col gap-2">
             <h3 className="text-13 font-semibold text-placeholder">{t("projects")}</h3>
+
+            {/* Reorderable / navigable project list (drag to reorder, click to open) */}
+            {joinedProjectsList.length > 0 && (
+              <div className="rounded-md border border-subtle bg-surface-2 py-2">
+                <Sortable
+                  data={joinedProjectsList}
+                  onChange={handleProjectReorder}
+                  keyExtractor={(item) => item.id}
+                  id="projects-reorder-list"
+                  render={(project: TProject) => (
+                    <div className="group flex items-center gap-2 rounded-md px-2 py-1.5 transition-all duration-200 hover:bg-surface-2">
+                      <GripVertical className="size-4 cursor-grab text-placeholder transition-colors active:cursor-grabbing" />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          router.push(`/${workspaceSlug}/projects/${project.id}/issues/`);
+                          onClose();
+                        }}
+                        className="flex flex-1 items-center gap-2 overflow-hidden text-left"
+                      >
+                        <span className="grid size-4 flex-shrink-0 place-items-center">
+                          <Logo logo={project.logo_props} size={16} />
+                        </span>
+                        <span className="flex-1 truncate text-13 text-primary">{project.name}</span>
+                      </button>
+                    </div>
+                  )}
+                />
+              </div>
+            )}
 
             <div className="rounded-md border border-subtle bg-surface-2 px-2 py-2">
               <div className="space-y-3">
