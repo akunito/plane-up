@@ -14,7 +14,6 @@ import {
   GLOBAL_VIEW_TRACKER_ELEMENTS,
   DEFAULT_GLOBAL_VIEWS_LIST,
 } from "@plane/constants";
-import { Plus } from "lucide-react";
 import { useTranslation } from "@plane/i18n";
 import { Button } from "@plane/propel/button";
 import { ViewsIcon } from "@plane/propel/icons";
@@ -25,15 +24,16 @@ import { Breadcrumbs, Header, BreadcrumbNavigationSearchDropdown } from "@plane/
 import { BreadcrumbLink } from "@/components/common/breadcrumb-link";
 import { SwitcherLabel } from "@/components/common/switcher-label";
 import { DisplayFiltersSelection, FiltersDropdown } from "@/components/issues/issue-layouts/filters";
+import { LayoutSelection } from "@/components/issues/issue-layouts/filters/header/layout-selection";
 import { WorkItemFiltersToggle } from "@/components/work-item-filters/filters-toggle";
 import { DefaultWorkspaceViewQuickActions } from "@/components/workspace/views/default-view-quick-action";
 import { CreateUpdateWorkspaceViewModal } from "@/components/workspace/views/modal";
 import { WorkspaceViewQuickActions } from "@/components/workspace/views/quick-action";
-import { GlobalViewLayoutSelection } from "@/plane-web/components/views/helper";
 // hooks
 import { useGlobalView } from "@/hooks/store/use-global-view";
 import { useIssues } from "@/hooks/store/use-issues";
 import { useAppRouter } from "@/hooks/use-app-router";
+import { GlobalViewLayoutSelection, GLOBAL_VIEW_LAYOUTS } from "@/plane-web/components/views/helper";
 
 export const GlobalIssuesHeader = observer(function GlobalIssuesHeader() {
   // states
@@ -140,16 +140,29 @@ export const GlobalIssuesHeader = observer(function GlobalIssuesHeader() {
         </Header.LeftItem>
 
         <Header.RightItem className="items-center flex-shrink-0">
+          {/* Layout switcher: desktop only. On phones it lives inside the Display popover (below) to
+              leave room for the breadcrumb view-switcher to stay tappable. */}
           {!isLocked && (
-            <GlobalViewLayoutSelection
-              onChange={handleLayoutChange}
-              selectedLayout={activeLayout ?? EIssueLayoutTypes.SPREADSHEET}
-              workspaceSlug={workspaceSlug.toString()}
-            />
+            <div className="hidden md:flex">
+              <GlobalViewLayoutSelection
+                onChange={handleLayoutChange}
+                selectedLayout={activeLayout ?? EIssueLayoutTypes.SPREADSHEET}
+                workspaceSlug={workspaceSlug.toString()}
+              />
+            </div>
           )}
           {globalViewId && <WorkItemFiltersToggle entityType={EIssuesStoreType.GLOBAL} entityId={globalViewId} />}
           {!isLocked && (
             <FiltersDropdown title={t("common.display")} placement="bottom-end">
+              {/* Layout switcher inside Display on phones (mirrors the desktop header switcher). */}
+              <div className="mb-3 border-b border-subtle pb-3 md:hidden">
+                <div className="mb-2 text-xs font-medium text-tertiary">Layout</div>
+                <LayoutSelection
+                  layouts={GLOBAL_VIEW_LAYOUTS}
+                  selectedLayout={activeLayout ?? EIssueLayoutTypes.SPREADSHEET}
+                  onChange={handleLayoutChange}
+                />
+              </div>
               <DisplayFiltersSelection
                 layoutDisplayFiltersOptions={currentLayoutFilters}
                 displayFilters={issueFilters?.displayFilters ?? {}}
@@ -159,22 +172,31 @@ export const GlobalIssuesHeader = observer(function GlobalIssuesHeader() {
               />
             </FiltersDropdown>
           )}
+          {/* Add view: desktop only — on phones it's an item inside the "⋯" menu (onCreateView). */}
           <Button
             variant="primary"
             size="lg"
-            className="flex-shrink-0"
+            className="hidden flex-shrink-0 md:flex"
             data-ph-element={GLOBAL_VIEW_TRACKER_ELEMENTS.RIGHT_HEADER_ADD_BUTTON}
             onClick={() => setCreateViewModal(true)}
           >
-            {/* icon-only on phones to save width; full label from md up */}
-            <Plus className="size-4 md:hidden" />
-            <span className="hidden md:block">{t("workspace_views.add_view")}</span>
+            {t("workspace_views.add_view")}
           </Button>
-          {/* show the view actions (edit / rename / update / delete) on mobile too, not only desktop */}
+          {/* view actions ("⋯") — shown on mobile too; on phones it also hosts "Add view". */}
           <div className="block">
-            {viewDetails && <WorkspaceViewQuickActions workspaceSlug={workspaceSlug?.toString()} view={viewDetails} />}
+            {viewDetails && (
+              <WorkspaceViewQuickActions
+                workspaceSlug={workspaceSlug?.toString()}
+                view={viewDetails}
+                onCreateView={() => setCreateViewModal(true)}
+              />
+            )}
             {isDefaultView && defaultViewDetails && (
-              <DefaultWorkspaceViewQuickActions workspaceSlug={workspaceSlug?.toString()} view={defaultViewDetails} />
+              <DefaultWorkspaceViewQuickActions
+                workspaceSlug={workspaceSlug?.toString()}
+                view={defaultViewDetails}
+                onCreateView={() => setCreateViewModal(true)}
+              />
             )}
           </div>
         </Header.RightItem>

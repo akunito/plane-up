@@ -6,6 +6,7 @@
 
 import { useState } from "react";
 import { observer } from "mobx-react";
+import { Plus } from "lucide-react";
 // plane imports
 import { EUserPermissions, EUserPermissionsLevel } from "@plane/constants";
 import { TOAST_TYPE, setToast } from "@plane/propel/toast";
@@ -23,10 +24,13 @@ import { CreateUpdateWorkspaceViewModal } from "./modal";
 type Props = {
   workspaceSlug: string;
   view: IWorkspaceView;
+  /** When provided, adds a mobile-only "Add view" item to the menu (used on phones where the
+   * header's standalone Add-view button is hidden). */
+  onCreateView?: () => void;
 };
 
 export const WorkspaceViewQuickActions = observer(function WorkspaceViewQuickActions(props: Props) {
-  const { workspaceSlug, view } = props;
+  const { workspaceSlug, view, onCreateView } = props;
   // states
   const [updateViewModal, setUpdateViewModal] = useState(false);
   const [deleteViewModal, setDeleteViewModal] = useState(false);
@@ -70,6 +74,14 @@ export const WorkspaceViewQuickActions = observer(function WorkspaceViewQuickAct
         closeOnSelect
         buttonClassName="flex-shrink-0 flex items-center justify-center size-[26px] bg-layer-1/70 rounded-sm"
       >
+        {onCreateView && (
+          <CustomMenu.MenuItem className="flex items-center gap-2 md:hidden" onClick={() => onCreateView()}>
+            <Plus className="h-3 w-3" />
+            <div>
+              <h5>Add view</h5>
+            </div>
+          </CustomMenu.MenuItem>
+        )}
         {MENU_ITEMS.items.map((item) => {
           if (item.shouldRender === false) return null;
           return (

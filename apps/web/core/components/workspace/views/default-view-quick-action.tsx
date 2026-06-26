@@ -5,6 +5,7 @@
  */
 
 import { observer } from "mobx-react";
+import { Plus } from "lucide-react";
 
 import { useTranslation } from "@plane/i18n";
 // plane imports
@@ -22,10 +23,12 @@ type Props = {
     key: TStaticViewTypes;
     i18n_label: string;
   };
+  /** When provided, adds a mobile-only "Add view" item (phones hide the header Add-view button). */
+  onCreateView?: () => void;
 };
 
 export const DefaultWorkspaceViewQuickActions = observer(function DefaultWorkspaceViewQuickActions(props: Props) {
-  const { workspaceSlug, view } = props;
+  const { workspaceSlug, view, onCreateView } = props;
 
   const { t } = useTranslation();
 
@@ -63,6 +66,14 @@ export const DefaultWorkspaceViewQuickActions = observer(function DefaultWorkspa
         closeOnSelect
         buttonClassName="flex-shrink-0 flex items-center justify-center size-[26px] bg-layer-1/70 rounded-sm"
       >
+        {onCreateView && (
+          <CustomMenu.MenuItem className="flex items-center gap-2 md:hidden" onClick={() => onCreateView()}>
+            <Plus className="h-3 w-3" />
+            <div>
+              <h5>Add view</h5>
+            </div>
+          </CustomMenu.MenuItem>
+        )}
         {MENU_ITEMS.map((item) => {
           if (item.shouldRender === false) return null;
           return (
