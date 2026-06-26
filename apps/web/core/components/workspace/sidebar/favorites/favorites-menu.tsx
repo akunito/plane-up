@@ -256,6 +256,9 @@ export const SidebarFavoritesMenu = observer(function SidebarFavoritesMenu() {
               ) : (
                 orderBy(Object.values(groupedFavorites), "sequence", "desc")
                   .filter((fav) => !fav.parent)
+                  // Pages + tickets live in the dedicated "Pages" sidebar category (SidebarPinnedList),
+                  // so keep them out of the generic Favorites menu to avoid duplication.
+                  .filter((fav) => fav.entity_type !== "page" && fav.entity_type !== "issue")
                   .map((fav, index, { length }) => (
                     <>
                       {fav?.is_folder ? (
