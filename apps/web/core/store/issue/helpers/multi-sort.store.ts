@@ -8,14 +8,27 @@ import { action, makeObservable, observable } from "mobx";
 import type { TIssueOrderByOptions } from "@plane/types";
 
 /**
- * Frontend-only multi-sort: holds up to 2 SECONDARY sort keys that are applied
- * client-side (in base-issues.store `issuesSortWithMultipleOrderBy`) AFTER the
- * persisted single-key primary `order_by`. In-memory only (resets on reload), a
- * single active multi-sort for the session — keeps the change frontend-only and
- * avoids touching the persisted single-string order_by type / the backend.
+ * Frontend-only multi-sort: holds up to 2 SECONDARY sort keys applied client-side
+ * (in base-issues.store `issuesSortWithMultipleOrderBy`) AFTER the persisted
+ * single-key primary `order_by`. Persisted to localStorage so it survives reloads
+ * (frontend-only — never touches the backend / the single-string order_by type).
+ * A single active multi-sort shared across views.
  */
+const STORAGE_KEY = "plane_multi_sort_secondary_order_by";
+
+const loadFromStorage = (): TIssueOrderByOptions[] => {
+  try {
+    if (typeof window === "undefined") return [];
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? (parsed.slice(0, 2) as TIssueOrderByOptions[]) : [];
+  } catch {
+    return [];
+  }
+};
+
 class MultiSortStore {
-  secondaryOrderBy: TIssueOrderByOptions[] = [];
+  secondaryOrderBy: TIssueOrderByOptions[] = loadFromStorage();
 
   constructor() {
     makeObservable(this, {
@@ -26,6 +39,13 @@ class MultiSortStore {
 
   setSecondaryOrderBy = (keys: TIssueOrderByOptions[]) => {
     this.secondaryOrderBy = keys.slice(0, 2);
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.secondaryOrderBy));
+      }
+    } catch {
+      /* ignore quota / serialization errors */
+    }
   };
 }
 
