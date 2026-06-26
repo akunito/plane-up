@@ -92,6 +92,7 @@ export const ProjectViewLayoutRoot = observer(function ProjectViewLayoutRoot() {
           label: "Save as",
         }}
         enableUpdateView
+        enableDeleteView
         entityId={viewId}
         entityType={EIssuesStoreType.PROJECT_VIEW}
         filtersToShowByLayout={ISSUE_DISPLAY_FILTERS_BY_PAGE.issues.filters}
