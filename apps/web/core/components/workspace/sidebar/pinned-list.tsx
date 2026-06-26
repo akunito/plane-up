@@ -19,9 +19,7 @@ import { cn } from "@plane/utils";
 // hooks
 import { useFavorite } from "@/hooks/store/use-favorite";
 import { useAppRouter } from "@/hooks/use-app-router";
-import useIssuePeekOverviewRedirection from "@/hooks/use-issue-peek-overview-redirection";
 import useLocalStorage from "@/hooks/use-local-storage";
-import { usePlatformOS } from "@/hooks/use-platform-os";
 // local
 import { ManagePinnedDialog } from "./manage-pinned-dialog";
 
@@ -39,8 +37,6 @@ export const SidebarPinnedList = observer(function SidebarPinnedList() {
   const { currentWorkspaceFavorites } = useFavorite();
   const { workspaceSlug } = useParams();
   const router = useAppRouter();
-  const { handleRedirection } = useIssuePeekOverviewRedirection();
-  const { isMobile } = usePlatformOS();
 
   const { pages, tickets } = useMemo(() => {
     const all = Object.values(currentWorkspaceFavorites).filter((f) => !f.parent);
@@ -57,13 +53,13 @@ export const SidebarPinnedList = observer(function SidebarPinnedList() {
   };
 
   const openTicket = (fav: IFavorite) => {
-    if (!workspaceSlug || !fav.entity_identifier) return;
-    handleRedirection(
-      workspaceSlug.toString(),
-      // minimal issue shape — handleRedirection only needs id + project_id (peek on desktop / page on mobile)
-      { id: fav.entity_identifier, project_id: fav.project_id } as any,
-      isMobile
-    );
+    if (!workspaceSlug) return;
+    // The pinned label starts with the work item's identifier (e.g. "IRIN-3 …"); the canonical
+    // permalink is /{slug}/browse/{IDENTIFIER-SEQ}/. Open it directly so it works on mobile too
+    // (the peek side-panel 404s on phones).
+    const token = (fav.name ?? "").trim().split(" ")[0];
+    if (!token) return;
+    router.push(`/${workspaceSlug}/browse/${token}/`);
   };
 
   const rowClass =
@@ -82,7 +78,7 @@ export const SidebarPinnedList = observer(function SidebarPinnedList() {
             className="flex w-full items-center gap-1 text-left text-13 font-semibold whitespace-nowrap text-placeholder"
             onClick={() => toggleOpen(!isOpen)}
           >
-            <span className="text-13 font-semibold">Pages</span>
+            <span className="text-13 font-semibold">Pins</span>
           </Disclosure.Button>
           <div className="flex items-center gap-1">
             <Tooltip tooltipHeading="Manage pinned items" tooltipContent="">
