@@ -39,7 +39,13 @@ export const FilterOrderBy = observer(function FilterOrderBy(props: Props) {
 
   // multi-sort (secondary rules) — frontend-only, applied after the primary order_by
   const secondary = multiSortStore.secondaryOrderBy;
-  const optionList = ISSUE_ORDER_BY_OPTIONS.filter((option) => orderByOptions.includes(option.key));
+  // State is offered as a sort option everywhere (sort-by + multi-sort), regardless of the layout's
+  // order_by allow-list. Project is gated by the layout config (only the global/workspace views
+  // include "project__name" in their order_by — it's meaningless inside a single project).
+  const FORCED_ORDER_BY_KEYS: TIssueOrderByOptions[] = ["-state__name"];
+  const optionList = ISSUE_ORDER_BY_OPTIONS.filter(
+    (option) => orderByOptions.includes(option.key) || FORCED_ORDER_BY_KEYS.includes(option.key)
+  );
   const labelFor = (key: TIssueOrderByOptions) => {
     const opt = optionList.find((o) => baseOf(o.key) === baseOf(key));
     return opt ? t(opt.titleTranslationKey) : key;

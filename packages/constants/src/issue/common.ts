@@ -137,6 +137,10 @@ export const ISSUE_ORDER_BY_OPTIONS: {
   { key: "start_date", titleTranslationKey: "common.order_by.start_date" },
   { key: "target_date", titleTranslationKey: "common.order_by.due_date" },
   { key: "-priority", titleTranslationKey: "common.priority" },
+  { key: "-state__name", titleTranslationKey: "common.state" },
+  // Project order-by is only surfaced on global/workspace views (added to the my_issues order_by
+  // arrays only) — it's meaningless inside a single project.
+  { key: "project__name", titleTranslationKey: "common.project" },
 ];
 
 export const ISSUE_DISPLAY_PROPERTIES_KEYS: (keyof IIssueDisplayProperties)[] = [

@@ -35,6 +35,8 @@ export type TIssueOrderByOptions =
   | "sort_order"
   | "state__name"
   | "-state__name"
+  | "project__name"
+  | "-project__name"
   | "assignees__first_name"
   | "-assignees__first_name"
   | "labels__name"
