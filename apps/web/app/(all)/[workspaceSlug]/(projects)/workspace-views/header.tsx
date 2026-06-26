@@ -123,10 +123,10 @@ export const GlobalIssuesHeader = observer(function GlobalIssuesHeader() {
   return (
     <>
       <CreateUpdateWorkspaceViewModal isOpen={createViewModal} onClose={() => setCreateViewModal(false)} />
-      {/* On phones the right-side controls don't fit beside the breadcrumb — let the header wrap
-          them onto a second line (gap-y-4 is already defined) instead of clipping them off-screen. */}
-      <Header className="max-md:flex-wrap">
-        <Header.LeftItem className="max-md:max-w-full">
+      <Header>
+        {/* The header lives in a fixed-height (h-11) slot, so it must stay on one line. Let the
+            breadcrumb shrink/truncate (min-w-0) so the right-side controls always stay visible. */}
+        <Header.LeftItem className="min-w-0 flex-nowrap overflow-hidden max-md:max-w-[42%]">
           <Breadcrumbs>
             <Breadcrumbs.Item
               component={<BreadcrumbLink label={t("views")} icon={<ViewsIcon className="h-4 w-4 text-tertiary" />} />}
@@ -153,7 +153,7 @@ export const GlobalIssuesHeader = observer(function GlobalIssuesHeader() {
           </Breadcrumbs>
         </Header.LeftItem>
 
-        <Header.RightItem className="items-center">
+        <Header.RightItem className="items-center flex-shrink-0">
           {!isLocked && (
             <GlobalViewLayoutSelection
               onChange={handleLayoutChange}
