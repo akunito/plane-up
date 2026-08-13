@@ -78,6 +78,20 @@ export const GlobalIssuesHeader = observer(function GlobalIssuesHeader() {
     [workspaceSlug, updateFilters, globalViewId]
   );
 
+  const handleLayoutChange = useCallback(
+    (layout: EIssueLayoutTypes) => {
+      if (!workspaceSlug || !globalViewId) return;
+      updateFilters(
+        workspaceSlug.toString(),
+        undefined,
+        EIssueFilterType.DISPLAY_FILTERS,
+        { layout: layout },
+        globalViewId
+      );
+    },
+    [workspaceSlug, updateFilters, globalViewId]
+  );
+
   const isLocked = viewDetails?.is_locked;
 
   const isDefaultView = DEFAULT_GLOBAL_VIEWS_LIST.find((view) => view.key === globalViewId);
@@ -141,7 +155,7 @@ export const GlobalIssuesHeader = observer(function GlobalIssuesHeader() {
           </Breadcrumbs>
         </Header.LeftItem>
 
-        <Header.RightItem className="items-center flex-shrink-0">
+        <Header.RightItem className="flex-shrink-0 items-center">
           {/* Layout switcher: desktop only. On phones it lives inside the Display popover (below) to
               leave room for the breadcrumb view-switcher to stay tappable. */}
           {!isLocked && (
@@ -161,8 +175,8 @@ export const GlobalIssuesHeader = observer(function GlobalIssuesHeader() {
                   box on desktop so the popper sizes normally. */}
               <div className="flex h-[70vh] flex-col overflow-y-auto md:contents">
                 {/* Layout switcher inside Display on phones, with labels (mirrors the desktop switcher). */}
-                <div className="mb-3 border-b border-subtle px-2 pb-3 pt-1 md:hidden">
-                  <div className="mb-2 text-xs font-medium text-tertiary">Layout</div>
+                <div className="mb-3 border-b border-subtle px-2 pt-1 pb-3 md:hidden">
+                  <div className="text-xs mb-2 font-medium text-tertiary">Layout</div>
                   <div className="flex flex-wrap gap-2">
                     {ISSUE_LAYOUTS.filter((l) => GLOBAL_VIEW_LAYOUTS.includes(l.key)).map((l) => {
                       const isActive = (activeLayout ?? EIssueLayoutTypes.SPREADSHEET) === l.key;
