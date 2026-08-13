@@ -6,6 +6,7 @@
 
 import type { Dispatch, ReactElement, SetStateAction } from "react";
 import React, { useCallback, useEffect, useState, useRef } from "react";
+import { usePathname } from "next/navigation";
 // helpers
 import { usePlatformOS } from "@plane/hooks";
 import { cn } from "@plane/utils";
@@ -98,6 +99,22 @@ export function ResizableSidebar({
       clearTimeout(peekTimeoutRef.current);
     }
   }, [toggleCollapsedProp, setShowPeek]);
+
+  // Mobile: close the nav drawer once the user has actually navigated, so the
+  // content they picked is visible instead of the menu sitting on top of it.
+  // Keyed off the pathname rather than link clicks because sidebar rows navigate
+  // three different ways (ControlLink anchors, router.push in the Pins list, and
+  // the peek-overview redirection) — a route change is the one signal common to
+  // all of them, and it stays silent for taps that don't navigate (accordion
+  // chevrons, pin/manage icons, the "+" button).
+  // Desktop is untouched: that sidebar is persistent, not an overlay.
+  const pathname = usePathname();
+  const previousPathnameRef = useRef(pathname);
+  useEffect(() => {
+    if (previousPathnameRef.current === pathname) return;
+    previousPathnameRef.current = pathname;
+    if (isMobile && !isCollapsed) toggleCollapsed();
+  }, [pathname, isMobile, isCollapsed, toggleCollapsed]);
 
   const handlePeekEnter = useCallback(() => {
     if (isCollapsed && showPeek) {
@@ -223,7 +240,7 @@ export function ResizableSidebar({
           handled by the sidebar's existing outside-click detector, so no onClick here
           (it would double-toggle). */}
       {isMobile && !isCollapsed && (
-        <div className="animate-fade-in fixed inset-0 z-[15] bg-black/50 md:hidden" aria-hidden="true" />
+        <div className="fixed inset-0 z-[15] animate-fade-in bg-black/50 md:hidden" aria-hidden="true" />
       )}
       {/* Peek View */}
       <div
