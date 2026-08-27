@@ -11,11 +11,16 @@ from rest_framework.throttling import SimpleRateThrottle, UserRateThrottle
 from rest_framework import status
 from rest_framework.response import Response
 
+# Django imports
+from django.http import HttpResponseRedirect
+
 # Module imports
 from plane.authentication.adapter.error import (
     AuthenticationException,
     AUTHENTICATION_ERROR_CODES,
 )
+from plane.authentication.utils.host import base_host
+from plane.utils.path_validator import get_safe_redirect_url
 
 
 class AuthenticationThrottle(SimpleRateThrottle):

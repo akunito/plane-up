@@ -75,6 +75,21 @@ def django_client():
     return client
 
 
+@pytest.fixture(autouse=True)
+def _reset_authentication_throttle():
+    """
+    Reset the shared AuthenticationThrottle bucket around every test in this module.
+
+    All auth endpoints share one per-IP throttle bucket (scope "authentication")
+    and the test client always presents the same IP, so without clearing the cache
+    between tests the request count accumulates across tests and later ones trip
+    RATE_LIMIT_EXCEEDED. Clearing here keeps each test's rate-limit budget isolated.
+    """
+    cache.clear()
+    yield
+    cache.clear()
+
+
 @pytest.mark.contract
 class TestMagicLinkGenerate:
     """Test magic link generation functionality"""
@@ -696,7 +711,7 @@ class TestMagicSignUpVerifyAttempts:
 
 @pytest.mark.contract
 class TestAuthenticationThrottle:
-    """Per-IP throttle on the redirect-flow magic-link endpoints."""
+    """Per-IP throttle on the redirect-flow magic-link and password endpoints."""
 
     @pytest.fixture(autouse=True)
     def _clear_state(self):
