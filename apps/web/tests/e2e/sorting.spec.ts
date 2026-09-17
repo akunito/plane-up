@@ -7,7 +7,8 @@ import { apiPatch, authFile, closeDrawer, expect, isPhone, manifest, test } from
 
 const QAA = manifest.workspaces.qa.projects.QAA;
 const PROPS = `/api/workspaces/qa/projects/${QAA.id}/user-properties/`;
-const MS_KEY = "plane_multi_sort_secondary_order_by";
+const MS_KEY = "plane_multi_sort_secondary_order_by_v2";
+const LEGACY_MS_KEY = "plane_multi_sort_secondary_order_by";
 const PRIORITY = ["urgent", "high", "medium", "low", "none"];
 
 type Item = { id: string; sequence_id: number; priority: string; target_date: string | null; created_at: string };
@@ -68,12 +69,15 @@ async function openDisplay(page: Page) {
 test.use({ storageState: authFile("qa-alice") });
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript((key) => {
-    if (!sessionStorage.getItem("pt-ms-cleared")) {
-      localStorage.removeItem(key);
-      sessionStorage.setItem("pt-ms-cleared", "1");
-    }
-  }, MS_KEY);
+  await page.addInitScript(
+    (keys) => {
+      if (!sessionStorage.getItem("pt-ms-cleared")) {
+        for (const key of keys) localStorage.removeItem(key);
+        sessionStorage.setItem("pt-ms-cleared", "1");
+      }
+    },
+    [MS_KEY, LEGACY_MS_KEY]
+  );
 });
 
 test("order-by options: State everywhere, Project only on global views (L5-70, B-30/B-31)", async ({ page }, info) => {
@@ -117,7 +121,7 @@ test("rules 2–3: add, flip, reorder, remove — rendered order follows the ora
   await expectOrder(page, oracle(items, "desc"));
 });
 
-test("rules persist across reload and apply without refetching (L5-73/L5-74, B-28)", async ({ page }, info) => {
+test("rules persist per view and apply without refetching (L5-73/L5-74, B-28)", async ({ page }, info) => {
   test.skip(isPhone(info.project.name), "storage + network behaviour is device-independent");
   await apiPatch(page, PROPS, { display_filters: { layout: "list", group_by: null, order_by: "-priority" } });
   await page.goto(`/qa/projects/${QAA.id}/issues/`);
@@ -135,5 +139,15 @@ test("rules persist across reload and apply without refetching (L5-73/L5-74, B-2
 
   await page.reload();
   await expectOrder(page, oracle(items, "asc"));
-  expect(await page.evaluate((k) => localStorage.getItem(k), MS_KEY)).toBe(JSON.stringify(["target_date"]));
+  const stored = JSON.parse((await page.evaluate((k) => localStorage.getItem(k), MS_KEY)) ?? "{}");
+  const scopes = Object.entries(stored).filter(([, keys]) => Array.isArray(keys) && keys.length);
+  expect(scopes, "exactly one view has rules").toHaveLength(1);
+  expect(scopes[0][0], "scoped to this project").toContain(QAA.id);
+  expect(scopes[0][1]).toEqual(["target_date"]);
+
+  // B-27 (P6): another view keeps its own rules — this one must not inherit them
+  await page.goto(`/qa/workspace-views/${manifest.workspaces.qa.views["QA Table"]}/`);
+  await openDisplay(page);
+  await expect(page.getByRole("button", { name: /^\+ Due date$/ }).filter({ visible: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remove sort rule" }).filter({ visible: true })).toHaveCount(0);
 });

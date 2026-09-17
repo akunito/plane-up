@@ -41,6 +41,13 @@ vi.mock("@/hooks/store/use-project-state", () => ({
   useProjectState: () => ({ getStateById: (id: string) => data.states[id] }),
 }));
 vi.mock("@/hooks/store/use-calendar-view", () => ({ useCalendarView: () => ({}) }));
+// the rules editor scopes rules by the route it is rendered on
+const route = vi.hoisted(() => ({
+  workspaceSlug: "qa" as string | undefined,
+  projectId: "p1" as string | undefined,
+  globalViewId: undefined as string | undefined,
+}));
+vi.mock("@/hooks/store/use-router-params", () => ({ useRouterParams: () => route }));
 
 vi.mock("@/components/issues/issue-layouts/kanban/blocks-list", () => ({
   KanbanIssueBlocksList: (p: {
@@ -75,7 +82,7 @@ vi.mock("@plane/i18n", async (orig) => ({
 import { WorkspaceCalendarLayout } from "@/components/issues/issue-layouts/calendar/roots/workspace-root";
 import { FilterOrderBy } from "@/components/issues/issue-layouts/filters/header/display-filters/order-by";
 import { WorkspaceKanbanBoard } from "@/components/issues/issue-layouts/kanban/roots/workspace-root";
-import { multiSortStore } from "@/store/issue/helpers/multi-sort.store";
+import { multiSortScopeKey, multiSortStore } from "@/store/issue/helpers/multi-sort.store";
 
 const GROUP_ORDER = ["backlog", "unstarted", "started", "completed", "cancelled"];
 
@@ -219,9 +226,14 @@ describe("order-by rules editor (L1-14)", () => {
   ] as TIssueOrderByOptions[];
   const GLOBAL_PAGE: TIssueOrderByOptions[] = [...PROJECT_PAGE, "project__name" as TIssueOrderByOptions];
 
+  const scope = () => multiSortScopeKey(route);
+  const rules = () => multiSortStore.secondaryOrderBy(scope());
+
   beforeEach(() => {
     localStorage.clear();
-    multiSortStore.setSecondaryOrderBy([]);
+    route.projectId = "p1";
+    route.globalViewId = undefined;
+    multiSortStore.setSecondaryOrderBy(scope(), []);
   });
 
   const editor = (options: TIssueOrderByOptions[], primary = "-created_at") =>
@@ -255,7 +267,7 @@ describe("order-by rules editor (L1-14)", () => {
   it("adds up to two rules, then hides the adders; a used field is not offered twice", () => {
     const { rerender } = editor(GLOBAL_PAGE);
     fireEvent.click(screen.getByRole("button", { name: "+ common.priority" }));
-    expect(multiSortStore.secondaryOrderBy).toEqual(["-priority"]);
+    expect(rules()).toEqual(["-priority"]);
     rerender(
       <FilterOrderBy
         selectedOrderBy={"-created_at" as TIssueOrderByOptions}
@@ -266,23 +278,41 @@ describe("order-by rules editor (L1-14)", () => {
     );
     expect(adders()).not.toContain("+ common.priority");
     fireEvent.click(screen.getByRole("button", { name: "+ common.project" }));
-    expect(multiSortStore.secondaryOrderBy).toEqual(["-priority", "project__name"]);
+    expect(rules()).toEqual(["-priority", "project__name"]);
     expect(adders()).toEqual([]);
   });
 
   it("toggles direction, reorders within bounds and removes a rule", () => {
-    multiSortStore.setSecondaryOrderBy(["-priority", "project__name"] as TIssueOrderByOptions[]);
+    multiSortStore.setSecondaryOrderBy(scope(), ["-priority", "project__name"] as TIssueOrderByOptions[]);
     editor(GLOBAL_PAGE);
     const up = screen.getAllByRole("button", { name: "Move up" });
     const down = screen.getAllByRole("button", { name: "Move down" });
     expect((up[0] as HTMLButtonElement).disabled).toBe(true);
     expect((down[1] as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getAllByRole("button", { name: "Toggle sort direction" })[1]);
-    expect(multiSortStore.secondaryOrderBy).toEqual(["-priority", "-project__name"]);
+    expect(rules()).toEqual(["-priority", "-project__name"]);
     fireEvent.click(down[0]);
-    expect(multiSortStore.secondaryOrderBy).toEqual(["-project__name", "-priority"]);
+    expect(rules()).toEqual(["-project__name", "-priority"]);
     fireEvent.click(screen.getAllByRole("button", { name: "Remove sort rule" })[0]);
-    expect(multiSortStore.secondaryOrderBy).toEqual(["-priority"]);
+    expect(rules()).toEqual(["-priority"]);
+  });
+
+  it("writes rules to the view it is rendered on (per-view scope)", () => {
+    const projectScope = multiSortScopeKey({ workspaceSlug: "qa", projectId: "p1" });
+    const onProject = editor(GLOBAL_PAGE);
+    fireEvent.click(screen.getByRole("button", { name: "+ common.priority" }));
+    expect(multiSortStore.secondaryOrderBy(projectScope)).toEqual(["-priority"]);
+
+    // same component, different route → its own rules, the project's untouched
+    route.projectId = undefined;
+    route.globalViewId = "all-issues";
+    const globalScope = multiSortScopeKey({ workspaceSlug: "qa", globalViewId: "all-issues" });
+    expect(multiSortStore.secondaryOrderBy(globalScope)).toEqual([]);
+    onProject.unmount(); // otherwise the stale editor (bound to the project scope) takes the click
+    editor(GLOBAL_PAGE);
+    fireEvent.click(screen.getByRole("button", { name: "+ common.project" }));
+    expect(multiSortStore.secondaryOrderBy(globalScope)).toEqual(["project__name"]);
+    expect(multiSortStore.secondaryOrderBy(projectScope)).toEqual(["-priority"]);
   });
 
   it("without enableMultiSort there is no rules editor", () => {

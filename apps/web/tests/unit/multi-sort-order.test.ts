@@ -12,7 +12,7 @@ import type { TIssue, TIssueOrderByOptions } from "@plane/types";
 // (store-context → root store → archived store `extends BaseIssuesStore`) that only resolves in this order.
 import "@/lib/store-context";
 import { BaseIssuesStore } from "@/store/issue/helpers/base-issues.store";
-import { multiSortStore } from "@/store/issue/helpers/multi-sort.store";
+import { multiSortScopeKey, multiSortStore } from "@/store/issue/helpers/multi-sort.store";
 
 // ---------------------------------------------------------------- fixture
 const PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
@@ -52,8 +52,12 @@ class TestIssuesStore extends BaseIssuesStore {
   updateParentStats = () => {};
 }
 
+const SCOPE = multiSortScopeKey({ workspaceSlug: "qa", projectId: "p-test" });
+
 function makeStore(primary?: TIssueOrderByOptions, opts: { projectMap?: unknown } = {}) {
   const rootIssueStore = {
+    workspaceSlug: "qa",
+    projectId: "p-test",
     issues: { getIssuesByIds: (ids: string[]) => ids.map((id) => byId[id]).filter(Boolean), issuesMap: byId },
     stateMap: states,
     projectMap: "projectMap" in opts ? opts.projectMap : projects,
@@ -159,7 +163,7 @@ const ids = ISSUES.map((i) => i.id);
 
 beforeEach(() => {
   localStorage.clear();
-  multiSortStore.setSecondaryOrderBy([]);
+  multiSortStore.setSecondaryOrderBy(SCOPE, []);
 });
 
 describe("getSortDescriptor (L1-03)", () => {
@@ -258,14 +262,14 @@ describe("project sort (L1-08, B-31)", () => {
 describe("sortIds + reapplyMultiSort (L1-09)", () => {
   it("sortIds chains the persisted primary with the active secondary rules", () => {
     const store = makeStore("-priority" as Key);
-    multiSortStore.setSecondaryOrderBy(["project__name", "-target_date"] as Key[]);
+    multiSortStore.setSecondaryOrderBy(SCOPE, ["project__name", "-target_date"] as Key[]);
     expectOrdered(store.sortIds(ids), ["-priority", "project__name", "-target_date"] as Key[]);
   });
 
   it("re-sorts a flat list when the rules change (reaction)", () => {
     const store = makeStore("-priority" as Key);
     store.groupedIssueIds = { "All Issues": [...ids] } as never;
-    multiSortStore.setSecondaryOrderBy(["state__name"] as Key[]);
+    multiSortStore.setSecondaryOrderBy(SCOPE, ["state__name"] as Key[]);
     expectOrdered((store.groupedIssueIds as Record<string, string[]>)["All Issues"], [
       "-priority",
       "state__name",
@@ -277,7 +281,7 @@ describe("sortIds + reapplyMultiSort (L1-09)", () => {
     const half = ids.slice(0, 8),
       rest = ids.slice(8);
     store.groupedIssueIds = { g1: [...half], g2: { sg1: [...rest] } } as never;
-    multiSortStore.setSecondaryOrderBy(["-target_date"] as Key[]);
+    multiSortStore.setSecondaryOrderBy(SCOPE, ["-target_date"] as Key[]);
     const g = store.groupedIssueIds as unknown as { g1: string[]; g2: { sg1: string[] } };
     const check = (list: string[]) => {
       for (let i = 1; i < list.length; i++)
@@ -290,9 +294,20 @@ describe("sortIds + reapplyMultiSort (L1-09)", () => {
     expect(new Set([...g.g1, ...g.g2.sg1])).toEqual(new Set(ids));
   });
 
+  it("rules set on another view do not re-sort this one (per-view scope)", () => {
+    const store = makeStore("-priority" as Key);
+    store.groupedIssueIds = { "All Issues": [...ids] } as never;
+    const before = [...((store.groupedIssueIds as Record<string, string[]>)["All Issues"] ?? [])];
+    multiSortStore.setSecondaryOrderBy(multiSortScopeKey({ workspaceSlug: "qa", projectId: "other" }), [
+      "state__name",
+    ] as Key[]);
+    expect((store.groupedIssueIds as Record<string, string[]>)["All Issues"]).toEqual(before);
+    expect(store.multiSortScope).toBe(SCOPE);
+  });
+
   it("is a no-op without loaded ids", () => {
     const store = makeStore("-priority" as Key);
     store.groupedIssueIds = undefined as never;
-    expect(() => multiSortStore.setSecondaryOrderBy(["state__name"] as Key[])).not.toThrow();
+    expect(() => multiSortStore.setSecondaryOrderBy(SCOPE, ["state__name"] as Key[])).not.toThrow();
   });
 });

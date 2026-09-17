@@ -13,8 +13,10 @@ import type { TIssueOrderByOptions } from "@plane/types";
 
 // components
 import { FilterHeader, FilterOption } from "@/components/issues/issue-layouts/filters";
+// hooks
+import { useRouterParams } from "@/hooks/store/use-router-params";
 // store
-import { multiSortStore } from "@/store/issue/helpers/multi-sort.store";
+import { multiSortScopeKey, multiSortStore } from "@/store/issue/helpers/multi-sort.store";
 
 type Props = {
   selectedOrderBy: TIssueOrderByOptions | undefined;
@@ -37,8 +39,12 @@ export const FilterOrderBy = observer(function FilterOrderBy(props: Props) {
 
   const activeOrderBy = selectedOrderBy ?? "-created_at";
 
-  // multi-sort (secondary rules) — frontend-only, applied after the primary order_by
-  const secondary = multiSortStore.secondaryOrderBy;
+  // multi-sort (secondary rules) — frontend-only, applied after the primary order_by.
+  // Rules belong to the view being looked at, so the scope comes from the route, exactly
+  // like the issue store's own scope.
+  const { workspaceSlug, projectId, cycleId, moduleId, viewId, globalViewId, userId } = useRouterParams();
+  const scope = multiSortScopeKey({ workspaceSlug, projectId, cycleId, moduleId, viewId, globalViewId, userId });
+  const secondary = multiSortStore.secondaryOrderBy(scope);
   // State is offered as a sort option everywhere (sort-by + multi-sort), regardless of the layout's
   // order_by allow-list. Project is gated by the layout config (only the global/workspace views
   // include "project__name" in their order_by — it's meaningless inside a single project).
@@ -53,7 +59,7 @@ export const FilterOrderBy = observer(function FilterOrderBy(props: Props) {
   const usedBases = new Set([baseOf(activeOrderBy), ...secondary.map((k) => baseOf(k))]);
   const addableOptions = optionList.filter((o) => baseOf(o.key) !== "sort_order" && !usedBases.has(baseOf(o.key)));
 
-  const setSecondary = (keys: TIssueOrderByOptions[]) => multiSortStore.setSecondaryOrderBy(keys);
+  const setSecondary = (keys: TIssueOrderByOptions[]) => multiSortStore.setSecondaryOrderBy(scope, keys);
   const removeRule = (idx: number) => setSecondary(secondary.filter((_, i) => i !== idx));
   const toggleDir = (idx: number) => setSecondary(secondary.map((k, i) => (i === idx ? flip(k) : k)));
   const move = (idx: number, dir: -1 | 1) => {
@@ -94,7 +100,10 @@ export const FilterOrderBy = observer(function FilterOrderBy(props: Props) {
               </div>
               {/* rules 2-3 — secondary keys */}
               {secondary.map((key, idx) => (
-                <div key={`${key}-${idx}`} className="flex items-center gap-1.5 rounded-sm px-2 py-1 text-12 text-primary">
+                <div
+                  key={`${key}-${idx}`}
+                  className="flex items-center gap-1.5 rounded-sm px-2 py-1 text-12 text-primary"
+                >
                   <span className="w-3 flex-shrink-0 text-tertiary">{idx + 2}</span>
                   <span className="flex-1 truncate">{labelFor(key)}</span>
                   <button

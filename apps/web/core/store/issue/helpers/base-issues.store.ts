@@ -30,7 +30,7 @@ import { EIssueServiceType, EIssueLayoutTypes } from "@plane/types";
 // helpers
 import { convertToISODateString } from "@plane/utils";
 // plane web imports
-import { multiSortStore } from "./multi-sort.store";
+import { multiSortScopeKey, multiSortStore } from "./multi-sort.store";
 // services
 import { CycleService } from "@/services/cycle.service";
 import { IssueArchiveService, IssueService } from "@/services/issue";
@@ -262,10 +262,10 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
 
     this.controller = new AbortController();
 
-    // Frontend-only multi-sort: re-sort the currently loaded list whenever the
-    // active secondary sort rules change (observable.ref → fires on reassignment).
+    // Frontend-only multi-sort: re-sort the currently loaded list whenever this view's
+    // secondary sort rules change (byScope is observable.ref → fires on reassignment).
     reaction(
-      () => multiSortStore.secondaryOrderBy,
+      () => multiSortStore.secondaryOrderBy(this.multiSortScope),
       () => this.reapplyMultiSort()
     );
   }
@@ -1254,9 +1254,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
         //if update is reorder, reorder it at a particular path
         if (issueUpdate.action === EIssueGroupedAction.REORDER) {
           // re-order/re-sort the issue Ids at the path
-          update(this, ["groupedIssueIds", ...issueUpdate.path], (issueIds: string[] = []) =>
-            this.sortIds(issueIds)
-          );
+          update(this, ["groupedIssueIds", ...issueUpdate.path], (issueIds: string[] = []) => this.sortIds(issueIds));
         }
       }
 
@@ -2000,13 +1998,25 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
       case "sort_order":
         return { iteratees: ["sort_order"], orders: ["asc"] };
       case "state__name":
-        return { iteratees: [(i) => this.populateIssueDataForSorting("state_id", i?.["state_id"], i?.["project_id"])], orders: ["asc"] };
+        return {
+          iteratees: [(i) => this.populateIssueDataForSorting("state_id", i?.["state_id"], i?.["project_id"])],
+          orders: ["asc"],
+        };
       case "-state__name":
-        return { iteratees: [(i) => this.populateIssueDataForSorting("state_id", i?.["state_id"], i?.["project_id"])], orders: ["desc"] };
+        return {
+          iteratees: [(i) => this.populateIssueDataForSorting("state_id", i?.["state_id"], i?.["project_id"])],
+          orders: ["desc"],
+        };
       case "project__name":
-        return { iteratees: [(i) => this.populateIssueDataForSorting("project_id", i?.["project_id"], i?.["project_id"])], orders: ["asc"] };
+        return {
+          iteratees: [(i) => this.populateIssueDataForSorting("project_id", i?.["project_id"], i?.["project_id"])],
+          orders: ["asc"],
+        };
       case "-project__name":
-        return { iteratees: [(i) => this.populateIssueDataForSorting("project_id", i?.["project_id"], i?.["project_id"])], orders: ["desc"] };
+        return {
+          iteratees: [(i) => this.populateIssueDataForSorting("project_id", i?.["project_id"], i?.["project_id"])],
+          orders: ["desc"],
+        };
       case "created_at":
         return { iteratees: [(i) => convertToISODateString(i["created_at"])], orders: ["asc"] };
       case "-created_at":
@@ -2032,9 +2042,21 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
       case "-attachment_count":
         return { iteratees: ["attachment_count"], orders: ["desc"] };
       case "estimate_point__key":
-        return { iteratees: [empty("estimate_point"), (i) => this.populateIssueDataForSorting("estimate_point", i?.["estimate_point"], i?.["project_id"])], orders: ["asc", "asc"] };
+        return {
+          iteratees: [
+            empty("estimate_point"),
+            (i) => this.populateIssueDataForSorting("estimate_point", i?.["estimate_point"], i?.["project_id"]),
+          ],
+          orders: ["asc", "asc"],
+        };
       case "-estimate_point__key":
-        return { iteratees: [empty("estimate_point"), (i) => this.populateIssueDataForSorting("estimate_point", i?.["estimate_point"], i?.["project_id"])], orders: ["asc", "desc"] };
+        return {
+          iteratees: [
+            empty("estimate_point"),
+            (i) => this.populateIssueDataForSorting("estimate_point", i?.["estimate_point"], i?.["project_id"]),
+          ],
+          orders: ["asc", "desc"],
+        };
       case "link_count":
         return { iteratees: ["link_count"], orders: ["asc"] };
       case "-link_count":
@@ -2044,21 +2066,69 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
       case "-sub_issues_count":
         return { iteratees: ["sub_issues_count"], orders: ["desc"] };
       case "labels__name":
-        return { iteratees: [empty("label_ids"), (i) => this.populateIssueDataForSorting("label_ids", i?.["label_ids"], i?.["project_id"], "asc")], orders: ["asc", "asc"] };
+        return {
+          iteratees: [
+            empty("label_ids"),
+            (i) => this.populateIssueDataForSorting("label_ids", i?.["label_ids"], i?.["project_id"], "asc"),
+          ],
+          orders: ["asc", "asc"],
+        };
       case "-labels__name":
-        return { iteratees: [empty("label_ids"), (i) => this.populateIssueDataForSorting("label_ids", i?.["label_ids"], i?.["project_id"], "asc")], orders: ["asc", "desc"] };
+        return {
+          iteratees: [
+            empty("label_ids"),
+            (i) => this.populateIssueDataForSorting("label_ids", i?.["label_ids"], i?.["project_id"], "asc"),
+          ],
+          orders: ["asc", "desc"],
+        };
       case "issue_module__module__name":
-        return { iteratees: [empty("module_ids"), (i) => this.populateIssueDataForSorting("module_ids", i?.["module_ids"], i?.["project_id"], "asc")], orders: ["asc", "asc"] };
+        return {
+          iteratees: [
+            empty("module_ids"),
+            (i) => this.populateIssueDataForSorting("module_ids", i?.["module_ids"], i?.["project_id"], "asc"),
+          ],
+          orders: ["asc", "asc"],
+        };
       case "-issue_module__module__name":
-        return { iteratees: [empty("module_ids"), (i) => this.populateIssueDataForSorting("module_ids", i?.["module_ids"], i?.["project_id"], "asc")], orders: ["asc", "desc"] };
+        return {
+          iteratees: [
+            empty("module_ids"),
+            (i) => this.populateIssueDataForSorting("module_ids", i?.["module_ids"], i?.["project_id"], "asc"),
+          ],
+          orders: ["asc", "desc"],
+        };
       case "issue_cycle__cycle__name":
-        return { iteratees: [empty("cycle_id"), (i) => this.populateIssueDataForSorting("cycle_id", i?.["cycle_id"], i?.["project_id"], "asc")], orders: ["asc", "asc"] };
+        return {
+          iteratees: [
+            empty("cycle_id"),
+            (i) => this.populateIssueDataForSorting("cycle_id", i?.["cycle_id"], i?.["project_id"], "asc"),
+          ],
+          orders: ["asc", "asc"],
+        };
       case "-issue_cycle__cycle__name":
-        return { iteratees: [empty("cycle_id"), (i) => this.populateIssueDataForSorting("cycle_id", i?.["cycle_id"], i?.["project_id"], "asc")], orders: ["asc", "desc"] };
+        return {
+          iteratees: [
+            empty("cycle_id"),
+            (i) => this.populateIssueDataForSorting("cycle_id", i?.["cycle_id"], i?.["project_id"], "asc"),
+          ],
+          orders: ["asc", "desc"],
+        };
       case "assignees__first_name":
-        return { iteratees: [empty("assignee_ids"), (i) => this.populateIssueDataForSorting("assignee_ids", i?.["assignee_ids"], i?.["project_id"], "asc")], orders: ["asc", "asc"] };
+        return {
+          iteratees: [
+            empty("assignee_ids"),
+            (i) => this.populateIssueDataForSorting("assignee_ids", i?.["assignee_ids"], i?.["project_id"], "asc"),
+          ],
+          orders: ["asc", "asc"],
+        };
       case "-assignees__first_name":
-        return { iteratees: [empty("assignee_ids"), (i) => this.populateIssueDataForSorting("assignee_ids", i?.["assignee_ids"], i?.["project_id"], "asc")], orders: ["asc", "desc"] };
+        return {
+          iteratees: [
+            empty("assignee_ids"),
+            (i) => this.populateIssueDataForSorting("assignee_ids", i?.["assignee_ids"], i?.["project_id"], "asc"),
+          ],
+          orders: ["asc", "desc"],
+        };
       default:
         return null;
     }
@@ -2083,9 +2153,26 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
     return getIssueIds(orderBy(array, iteratees as any, orders as any));
   };
 
-  /** Sort a leaf id list by the primary order_by + the active secondary multi-sort keys. */
+  /** This view's multi-sort scope: rules are kept per project / cycle / module / view. */
+  get multiSortScope(): string {
+    const root = this.rootIssueStore;
+    return multiSortScopeKey({
+      workspaceSlug: root?.workspaceSlug,
+      projectId: root?.projectId,
+      cycleId: root?.cycleId,
+      moduleId: root?.moduleId,
+      viewId: root?.viewId,
+      globalViewId: root?.globalViewId,
+      userId: root?.userId,
+    });
+  }
+
+  /** Sort a leaf id list by the primary order_by + this view's secondary multi-sort keys. */
   sortIds = (issueIds: string[]): string[] =>
-    this.issuesSortWithMultipleOrderBy(issueIds, [this.orderBy, ...multiSortStore.secondaryOrderBy]);
+    this.issuesSortWithMultipleOrderBy(issueIds, [
+      this.orderBy,
+      ...multiSortStore.secondaryOrderBy(this.multiSortScope),
+    ]);
 
   /** Re-sort the currently loaded groupedIssueIds in place (used when the secondary multi-sort changes). */
   reapplyMultiSort = () => {
