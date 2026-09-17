@@ -60,6 +60,8 @@ export async function closeDrawer(page: Page, projectName: string) {
   if (!isPhone(projectName)) return;
   await expect(page.getByRole("button", { name: "Open workspace switcher" })).toBeVisible();
   const scrim = page.locator(".fixed.inset-0.bg-black\\/50");
+  // the drawer (and its scrim) render a moment after the header — don't decide too early
+  await scrim.waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
   if (await scrim.isVisible()) {
     const vp = page.viewportSize()!;
     await page.mouse.click(vp.width - 12, Math.round(vp.height * 0.6));
