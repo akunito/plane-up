@@ -122,3 +122,4 @@ packages/i18n/src/types/keys.generated.ts
 apps/web/tests/e2e/.auth/
 apps/web/test-results/
 apps/web/playwright-report/
+apps/web/tests/e2e/.explore/

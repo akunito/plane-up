@@ -18,7 +18,8 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,
-  workers: 2,
+  // one worker: several specs change the same QA user's state (pins, preferences) on every device
+  workers: 1,
   retries: 0,
   reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
   use: {
