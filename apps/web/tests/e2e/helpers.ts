@@ -53,6 +53,32 @@ export async function expectNoHorizontalOverflow(page: Page) {
 export const isPhone = (projectName: string) => projectName === "android" || projectName === "iphone";
 
 /**
+ * Phones start with the nav drawer open over the content. Tests about the content close it
+ * the way a person does: tap the dimmed area to the right of the drawer (B-15 scrim).
+ */
+export async function closeDrawer(page: Page, projectName: string) {
+  if (!isPhone(projectName)) return;
+  await expect(page.getByRole("button", { name: "Open workspace switcher" })).toBeVisible();
+  const scrim = page.locator(".fixed.inset-0.bg-black\\/50");
+  if (await scrim.isVisible()) {
+    const vp = page.viewportSize()!;
+    await page.mouse.click(vp.width - 12, Math.round(vp.height * 0.6));
+    await expect(scrim).toHaveCount(0);
+  }
+}
+
+/** PATCH as the stored session (csrftoken from the storage state; no navigation needed). */
+export async function apiPatch(page: Page, url: string, data: unknown) {
+  const csrf = (await page.context().cookies()).find((c) => c.name === "csrftoken")?.value ?? "";
+  const res = await page.request.patch(url, {
+    data,
+    headers: { "X-CSRFToken": csrf, Referer: `${process.env.PT_BASE_URL ?? "https://plane-dev.local.akunito.com"}/` },
+  });
+  expect(res.ok(), `PATCH ${url} → ${res.status()}`).toBeTruthy();
+  return res;
+}
+
+/**
  * `test` with an automatic guard: uncaught page errors fail the test, and after the body
  * the page must show no error boundary (and no horizontal overflow on phones).
  */
