@@ -117,3 +117,8 @@ packages/i18n/src/types/keys.generated.ts
 
 # Local security notes (not for version control)
 /security/
+
+# plane-tests E2E (APLANE-12): logged-in storage states + reports, never committed
+apps/web/tests/e2e/.auth/
+apps/web/test-results/
+apps/web/playwright-report/

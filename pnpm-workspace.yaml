@@ -183,6 +183,8 @@ catalog:
   "vite-tsconfig-paths": "^5.1.4"
   "vitest": "^4.1.8"
   "jsdom": "29.1.1"
+  # pinned to nixpkgs playwright-driver (browsers come from nix, versions must match exactly)
+  "@playwright/test": "1.61.1"
   "@testing-library/react": "^16.3.3"
   "winston": "^3.17.0"
   "ws": "8.21.0"
