@@ -14,6 +14,7 @@ const baseURL = process.env.PT_BASE_URL ?? "https://plane-dev.local.akunito.com"
 
 export default defineConfig({
   testDir: "tests/e2e",
+  testIgnore: ["**/.explore/**"], // throwaway DOM probes, never part of the suite
   outputDir: "test-results",
   timeout: 60_000,
   expect: { timeout: 15_000 },
