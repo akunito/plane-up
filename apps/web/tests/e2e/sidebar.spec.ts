@@ -249,14 +249,19 @@ test.describe("Pins follow the entity (L5-18b, B-08…B-10)", () => {
       await archived.click();
       await expect(page).toHaveURL(new RegExp(`/qa/projects/${QAA.id}/archives/issues/${issueId}`));
 
+      // archived PAGE: upstream deletes the favourite server-side (deviation from work items,
+      // pinned by L4-03b) — so the pin goes away here, and nothing in the sidebar breaks
+      await apiPost(page, `${base}/pages/${pageId}/archive/`);
+      await page.reload();
+      await openNav(page, device);
+      await expect(pins.getByRole("button", { name: "L5-18b page renamed" })).toHaveCount(0);
+
       // B-10: deleted → the pin disappears and the favourite is dropped server-side (every device)
       await apiDelete(page, `${base}/issues/${issueId}/`);
-      await apiDelete(page, `${base}/pages/${pageId}/`);
-      issueId = pageId = "";
+      issueId = "";
       await page.goto("/qa/projects/");
       await openNav(page, device);
       await expect(pins.getByRole("button", { name: /L5-18b item renamed/ })).toHaveCount(0);
-      await expect(pins.getByRole("button", { name: "L5-18b page renamed" })).toHaveCount(0);
       const left = await (await page.request.get("/api/workspaces/qa/user-favorites/?all=true")).json();
       expect(
         (left as { name?: string }[]).filter((f) => (f.name ?? "").includes("STALE LABEL")),
@@ -265,7 +270,10 @@ test.describe("Pins follow the entity (L5-18b, B-08…B-10)", () => {
       await expect(pins.getByRole("button", { name: /Pin pages or tickets/ })).toBeVisible();
     } finally {
       if (issueId) await page.request.delete(`${base}/issues/${issueId}/`).catch(() => {});
-      if (pageId) await page.request.delete(`${base}/pages/${pageId}/`).catch(() => {});
+      if (pageId) {
+        await page.request.post(`${base}/pages/${pageId}/archive/`).catch(() => {});
+        await page.request.delete(`${base}/pages/${pageId}/`).catch(() => {}); // only archived pages delete
+      }
     }
   });
 });
