@@ -53,19 +53,26 @@ test.describe("@visual", () => {
     await closeDrawer(page, info.project.name);
     // The first baseline captured the board WITHOUT the sheet: "Board Layout" also matched hidden text,
     // and the tap could land while the drawer was still closing. Require the sheet itself, retrying the tap.
-    const sheet = page
-      .locator("div.rounded-t-xl")
-      .filter({ has: page.getByRole("button", { name: "Done", exact: true }) })
-      .filter({ hasText: "Board Layout" });
+    // start from the VISIBLE Done button: hidden Done buttons elsewhere made a board wrapper match
+    const done = page.getByRole("button", { name: "Done", exact: true }).filter({ visible: true });
+    const sheet = done.locator("xpath=ancestor::div[contains(concat(' ', @class, ' '), ' rounded-t-xl ')][1]");
     await expect(async () => {
-      if (!(await sheet.isVisible())) await page.getByRole("button", { name: "Display" }).first().click();
-      await expect(sheet).toBeVisible({ timeout: 2_000 });
+      if (!(await done.count())) await page.getByRole("button", { name: "Display" }).first().click();
+      await expect(sheet.getByRole("button", { name: "Board Layout" })).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 15_000 });
     await page.waitForLoadState("networkidle");
-    await expect(sheet).toHaveScreenshot("vr-06-display-sheet.png", {
-      animations: "disabled",
-      maxDiffPixelRatio: 0.01,
-    });
+    // The sheet fades in (Headless UI Transition). `animations: "disabled"` froze it at its transparent
+    // start state, so wait until it and every ancestor are fully opaque and capture with animations on.
+    await expect
+      .poll(() =>
+        sheet.evaluate((el) => {
+          for (let n: Element | null = el; n; n = n.parentElement)
+            if (getComputedStyle(n).opacity !== "1") return false;
+          return true;
+        })
+      )
+      .toBe(true);
+    await expect(sheet).toHaveScreenshot("vr-06-display-sheet.png", { maxDiffPixelRatio: 0.01 });
   });
 
   test("VR-08 global Board", async ({ page }, info) => {
