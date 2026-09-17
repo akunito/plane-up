@@ -38,6 +38,9 @@ const CONTEXTS = {
 };
 
 async function saveLayout(page: Page, propsUrl: string, layout: Layout) {
+  // Upstream quirk (found on a fresh seed, 2026-09-17): cycle/module user-properties rows are
+  // created by the first GET, and a PATCH before it answers 404. The app always loads them first.
+  await page.request.get(propsUrl);
   await apiPatch(page, propsUrl, { display_filters: { layout } });
 }
 
