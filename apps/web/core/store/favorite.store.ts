@@ -23,6 +23,8 @@ export interface IFavoriteStore {
   // computed actions
   existingFolders: string[];
   groupedFavorites: { [favoriteId: string]: IFavorite };
+  /** Upstream implements this getter but never declared it, so every consumer saw `unknown`. */
+  currentWorkspaceFavorites: { [favoriteId: string]: IFavorite };
   // actions
   fetchFavorite: (workspaceSlug: string) => Promise<IFavorite[]>;
   // CRUD actions

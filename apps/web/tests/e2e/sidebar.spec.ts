@@ -3,7 +3,7 @@
  * Runs on desktop, Android and iPhone; phone-only / desktop-only cases skip themselves.
  */
 import type { Page } from "@playwright/test";
-import { authFile, expect, isPhone, manifest, test } from "./helpers";
+import { apiDelete, apiPatch, apiPost, authFile, expect, isPhone, manifest, test } from "./helpers";
 
 const { QAA, QAB } = manifest.workspaces.qa.projects;
 const sidebar = (page: Page) => page.getByRole("complementary", { name: "Main sidebar" });
@@ -180,6 +180,87 @@ test.describe("Pins (L5-17/L5-18, B-08…B-11)", () => {
     }
     await openNav(page, device);
     await expect(sidebar(page).getByRole("button", { name: /Pin pages or tickets/ })).toBeVisible();
+  });
+});
+
+/**
+ * L5-18b (B-08…B-10, APLANE-13): the sidebar resolves every pin from its UUID, so its label
+ * follows the entity and the pin reacts to what happens to it. The entities are created here
+ * and removed at the end — the test must be re-runnable without a reseed.
+ */
+test.describe("Pins follow the entity (L5-18b, B-08…B-10)", () => {
+  test.use({ storageState: authFile("qa-alice") });
+
+  test("live title, archived kept, deleted gone", async ({ page }, info) => {
+    test.setTimeout(240_000); // create + pin + several reloads + cleanup
+    const device = info.project.name;
+    const base = `/api/workspaces/qa/projects/${QAA.id}`;
+    const pins = sidebar(page);
+    let issueId = "";
+    let pageId = "";
+
+    await page.goto("/qa/projects/");
+    await openNav(page, device);
+    await clearPins(page, device);
+
+    try {
+      const issue = await (await apiPost(page, `${base}/issues/`, { name: "L5-18b item before rename" })).json();
+      issueId = issue.id;
+      pageId = (await (await apiPost(page, `${base}/pages/`, { name: "L5-18b page before rename" })).json()).id;
+      // pinned with a deliberately WRONG stored label: the sidebar must ignore it and read the entity
+      for (const [entity_type, entity_identifier] of [
+        ["issue", issueId],
+        ["page", pageId],
+      ] as const)
+        await apiPost(page, "/api/workspaces/qa/user-favorites/", {
+          entity_type,
+          entity_identifier,
+          project_id: QAA.id,
+          name: "STALE LABEL",
+        });
+
+      await page.reload();
+      await openNav(page, device);
+      const label = `${QAA.identifier}-${issue.sequence_id}`;
+      await expect(pins.getByRole("button", { name: `${label} L5-18b item before rename` })).toBeVisible();
+      await expect(pins.getByRole("button", { name: "L5-18b page before rename" })).toBeVisible();
+      await expect(pins.getByText("STALE LABEL")).toHaveCount(0);
+
+      // B-08: renamed in place — the pin follows, nothing has to be re-pinned
+      await apiPatch(page, `${base}/issues/${issueId}/`, { name: "L5-18b item renamed" });
+      await apiPatch(page, `${base}/pages/${pageId}/`, { name: "L5-18b page renamed" });
+      await page.reload();
+      await openNav(page, device);
+      await expect(pins.getByRole("button", { name: `${label} L5-18b item renamed` })).toBeVisible();
+      await expect(pins.getByRole("button", { name: "L5-18b page renamed" })).toBeVisible();
+
+      // B-09: archived → the pin stays and opens the archived route
+      await apiPost(page, `${base}/issues/${issueId}/archive/`);
+      await page.reload();
+      await openNav(page, device);
+      const archived = pins.getByRole("button", { name: /L5-18b item renamed/ });
+      await expect(archived).toBeVisible();
+      await archived.click();
+      await expect(page).toHaveURL(new RegExp(`/qa/projects/${QAA.id}/archives/issues/${issueId}`));
+
+      // B-10: deleted → the pin disappears and the favourite is dropped server-side (every device)
+      await apiDelete(page, `${base}/issues/${issueId}/`);
+      await apiDelete(page, `${base}/pages/${pageId}/`);
+      issueId = pageId = "";
+      await page.goto("/qa/projects/");
+      await openNav(page, device);
+      await expect(pins.getByRole("button", { name: /L5-18b item renamed/ })).toHaveCount(0);
+      await expect(pins.getByRole("button", { name: "L5-18b page renamed" })).toHaveCount(0);
+      const left = await (await page.request.get("/api/workspaces/qa/user-favorites/?all=true")).json();
+      expect(
+        (left as { name?: string }[]).filter((f) => (f.name ?? "").includes("STALE LABEL")),
+        "the favourites were removed server-side"
+      ).toEqual([]);
+      await expect(pins.getByRole("button", { name: /Pin pages or tickets/ })).toBeVisible();
+    } finally {
+      if (issueId) await page.request.delete(`${base}/issues/${issueId}/`).catch(() => {});
+      if (pageId) await page.request.delete(`${base}/pages/${pageId}/`).catch(() => {});
+    }
   });
 });
 

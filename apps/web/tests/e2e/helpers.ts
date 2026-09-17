@@ -69,16 +69,20 @@ export async function closeDrawer(page: Page, projectName: string) {
   }
 }
 
-/** PATCH as the stored session (csrftoken from the storage state; no navigation needed). */
-export async function apiPatch(page: Page, url: string, data: unknown) {
+/** Call the API as the stored session (csrftoken from the storage state; no navigation needed). */
+async function apiCall(page: Page, method: "patch" | "post" | "delete", url: string, data?: unknown) {
   const csrf = (await page.context().cookies()).find((c) => c.name === "csrftoken")?.value ?? "";
-  const res = await page.request.patch(url, {
-    data,
+  const res = await page.request[method](url, {
+    ...(data === undefined ? {} : { data }),
     headers: { "X-CSRFToken": csrf, Referer: `${process.env.PT_BASE_URL ?? "https://plane-dev.local.akunito.com"}/` },
   });
-  expect(res.ok(), `PATCH ${url} → ${res.status()}`).toBeTruthy();
+  expect(res.ok(), `${method.toUpperCase()} ${url} → ${res.status()}`).toBeTruthy();
   return res;
 }
+
+export const apiPatch = (page: Page, url: string, data: unknown) => apiCall(page, "patch", url, data);
+export const apiPost = (page: Page, url: string, data?: unknown) => apiCall(page, "post", url, data);
+export const apiDelete = (page: Page, url: string) => apiCall(page, "delete", url);
 
 /**
  * `test` with an automatic guard: uncaught page errors fail the test, and after the body

@@ -14,12 +14,11 @@ import { ChevronRightIcon } from "@plane/propel/icons";
 import { IconButton } from "@plane/propel/icon-button";
 import { Logo } from "@plane/propel/emoji-icon-picker";
 import { Tooltip } from "@plane/propel/tooltip";
-import type { IFavorite } from "@plane/types";
 import { cn } from "@plane/utils";
 // hooks
-import { useFavorite } from "@/hooks/store/use-favorite";
 import { useAppRouter } from "@/hooks/use-app-router";
 import useLocalStorage from "@/hooks/use-local-storage";
+import { usePinnedEntities } from "@/hooks/use-pinned-entities";
 // local
 import { ManagePinnedDialog } from "./manage-pinned-dialog";
 
@@ -34,38 +33,17 @@ export const SidebarPinnedList = observer(function SidebarPinnedList() {
   const [isManageOpen, setIsManageOpen] = useState(false);
   const { setValue: toggleOpen, storedValue: isOpen } = useLocalStorage<boolean>("is_pinned_menu_open", true);
   // store
-  const { currentWorkspaceFavorites } = useFavorite();
   const { workspaceSlug } = useParams();
   const router = useAppRouter();
-
-  const { pages, tickets } = useMemo(() => {
-    const all = Object.values(currentWorkspaceFavorites).filter((f) => !f.parent);
-    const bySeq = (a: IFavorite, b: IFavorite) => (b.sequence ?? 0) - (a.sequence ?? 0);
-    return {
-      pages: all.filter((f) => f.entity_type === "page").sort(bySeq),
-      tickets: all.filter((f) => f.entity_type === "issue").sort(bySeq),
-    };
-  }, [currentWorkspaceFavorites]);
-
-  const openPage = (fav: IFavorite) => {
-    if (!workspaceSlug || !fav.project_id || !fav.entity_identifier) return;
-    router.push(`/${workspaceSlug}/projects/${fav.project_id}/pages/${fav.entity_identifier}`);
-  };
-
-  const openTicket = (fav: IFavorite) => {
-    if (!workspaceSlug) return;
-    // The pinned label starts with the work item's identifier (e.g. "IRIN-3 …"); the canonical
-    // permalink is /{slug}/browse/{IDENTIFIER-SEQ}/. Open it directly so it works on mobile too
-    // (the peek side-panel 404s on phones).
-    const token = (fav.name ?? "").trim().split(" ")[0];
-    if (!token) return;
-    router.push(`/${workspaceSlug}/browse/${token}/`);
-  };
+  // Pins are resolved from their UUIDs: live titles and identifiers, deleted ones dropped,
+  // ones this user can no longer open hidden (see usePinnedEntities).
+  const { pages, tickets, hasFavourites } = usePinnedEntities(workspaceSlug?.toString());
 
   const rowClass =
     "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-13 text-secondary hover:bg-layer-transparent-hover";
 
   const groupLabelClass = "px-2 pb-0.5 pt-1.5 text-11 font-medium uppercase tracking-wide text-tertiary";
+  const isEmpty = !hasFavourites || (pages.length === 0 && tickets.length === 0);
 
   return (
     <>
@@ -113,7 +91,7 @@ export const SidebarPinnedList = observer(function SidebarPinnedList() {
         >
           {isOpen && (
             <Disclosure.Panel as="div" className="flex flex-col gap-0.5" static>
-              {pages.length === 0 && tickets.length === 0 && (
+              {isEmpty && (
                 <button
                   type="button"
                   onClick={() => setIsManageOpen(true)}
@@ -126,14 +104,15 @@ export const SidebarPinnedList = observer(function SidebarPinnedList() {
               {pages.length > 0 && (
                 <>
                   <div className={groupLabelClass}>Pages</div>
-                  {pages.map((fav) => (
-                    <button key={fav.id} type="button" className={rowClass} onClick={() => openPage(fav)}>
-                      {fav.entity_data?.logo_props ? (
-                        <Logo logo={fav.entity_data.logo_props} size={14} />
-                      ) : (
-                        <FileText className="size-3.5 flex-shrink-0 text-tertiary" />
-                      )}
-                      <span className="truncate">{fav.entity_data?.name ?? fav.name}</span>
+                  {pages.map((pin) => (
+                    <button
+                      key={pin.favoriteId}
+                      type="button"
+                      className={rowClass}
+                      onClick={() => router.push(pin.href)}
+                    >
+                      <FileText className="size-3.5 flex-shrink-0 text-tertiary" />
+                      <span className="truncate">{pin.name}</span>
                     </button>
                   ))}
                 </>
@@ -142,10 +121,15 @@ export const SidebarPinnedList = observer(function SidebarPinnedList() {
               {tickets.length > 0 && (
                 <>
                   <div className={groupLabelClass}>Tickets</div>
-                  {tickets.map((fav) => (
-                    <button key={fav.id} type="button" className={rowClass} onClick={() => openTicket(fav)}>
+                  {tickets.map((pin) => (
+                    <button
+                      key={pin.favoriteId}
+                      type="button"
+                      className={rowClass}
+                      onClick={() => router.push(pin.href)}
+                    >
                       <Ticket className="size-3.5 flex-shrink-0 text-tertiary" />
-                      <span className="truncate">{fav.entity_data?.name ?? fav.name}</span>
+                      <span className="truncate">{pin.label ? `${pin.label} ${pin.name}` : pin.name}</span>
                     </button>
                   ))}
                 </>

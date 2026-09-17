@@ -15,6 +15,7 @@ import { EModalPosition, EModalWidth, ModalCore } from "@plane/ui";
 // hooks
 import { useFavorite } from "@/hooks/store/use-favorite";
 import useDebounce from "@/hooks/use-debounce";
+import { usePinnedEntities } from "@/hooks/use-pinned-entities";
 // services
 import { WorkspaceService } from "@/services/workspace.service";
 
@@ -34,6 +35,14 @@ export const ManagePinnedDialog = observer(function ManagePinnedDialog({ isOpen,
   const { workspaceSlug } = useParams();
   const slug = workspaceSlug?.toString();
   const { currentWorkspaceFavorites, addFavorite, deleteFavorite, updateFavorite } = useFavorite();
+  // live titles / identifiers, same source as the sidebar list (APLANE-13)
+  const { pages: livePages, tickets: liveTickets } = usePinnedEntities(slug);
+  const liveLabel = useMemo(() => {
+    const byFavourite: Record<string, string> = {};
+    for (const pin of [...livePages, ...liveTickets])
+      byFavourite[pin.favoriteId] = pin.label ? `${pin.label} ${pin.name}` : pin.name;
+    return byFavourite;
+  }, [livePages, liveTickets]);
 
   // search state (one box per entity type; both hit the same workspace search endpoint)
   const [pageQuery, setPageQuery] = useState("");
@@ -145,12 +154,12 @@ export const ManagePinnedDialog = observer(function ManagePinnedDialog({ isOpen,
         {/* search */}
         <div>
           <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-tertiary" />
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-tertiary" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={placeholder}
-              className="w-full rounded-md border border-subtle bg-surface-2 py-1.5 pl-8 pr-2 text-13 text-primary outline-none placeholder:text-tertiary focus:border-accent-primary"
+              className="focus:border-accent-primary w-full rounded-md border border-subtle bg-surface-2 py-1.5 pr-2 pl-8 text-13 text-primary outline-none placeholder:text-tertiary"
             />
           </div>
           {/* results render inline (not absolutely positioned) so they aren't clipped by the modal's
@@ -190,7 +199,9 @@ export const ManagePinnedDialog = observer(function ManagePinnedDialog({ isOpen,
               ) : (
                 <Icon className="size-3.5 flex-shrink-0 text-tertiary" />
               )}
-              <span className="flex-1 truncate text-13 text-secondary">{fav.entity_data?.name ?? fav.name}</span>
+              <span className="flex-1 truncate text-13 text-secondary">
+                {liveLabel[fav.id] ?? fav.entity_data?.name ?? fav.name}
+              </span>
               <button
                 type="button"
                 disabled={index === 0}
@@ -212,7 +223,7 @@ export const ManagePinnedDialog = observer(function ManagePinnedDialog({ isOpen,
               <button
                 type="button"
                 onClick={() => remove(fav.id)}
-                className="text-tertiary hover:text-danger-text"
+                className="hover:text-danger-text text-tertiary"
                 aria-label="Remove"
               >
                 <X className="size-4" />
