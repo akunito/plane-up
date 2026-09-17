@@ -20,6 +20,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["tests/unit/**/*.test.{ts,tsx}"],
+    setupFiles: ["tests/unit/setup.ts"],
     restoreMocks: true,
   },
 });
