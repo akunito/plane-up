@@ -20,6 +20,7 @@ type Project = {
   pages?: Record<string, string>;
   cycle?: string;
   module?: string;
+  states?: Record<string, string>;
   archived_issue?: string;
 };
 export type Manifest = {

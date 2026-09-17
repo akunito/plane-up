@@ -204,7 +204,13 @@ test.describe("Pins follow the entity (L5-18b, B-08…B-10)", () => {
     await clearPins(page, device);
 
     try {
-      const issue = await (await apiPost(page, `${base}/issues/`, { name: "L5-18b item before rename" })).json();
+      // only a completed / cancelled work item can be archived, so start it there
+      const issue = await (
+        await apiPost(page, `${base}/issues/`, {
+          name: "L5-18b item before rename",
+          state_id: QAA.states!.completed,
+        })
+      ).json();
       issueId = issue.id;
       pageId = (await (await apiPost(page, `${base}/pages/`, { name: "L5-18b page before rename" })).json()).id;
       // pinned with a deliberately WRONG stored label: the sidebar must ignore it and read the entity
