@@ -44,12 +44,8 @@ if [ -z "$APP_RELEASE_VERSION" ]; then
     exit 1
 fi
 
-# Install yq if not present
-if ! command -v yq &> /dev/null; then
-    echo "Installing yq..."
-    sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${CPU_ARCH}
-    sudo chmod +x /usr/local/bin/yq
-fi
+# (upstream installed yq here with sudo; nothing in this script ever calls it, and the
+# build runner has no passwordless sudo — the install was the only thing that could fail)
 
 cd $(dirname "$0")
 
