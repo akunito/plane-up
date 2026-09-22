@@ -306,7 +306,11 @@ def notifications(
                 assignee__in=Subquery(project_members),
             ).values_list("assignee", flat=True)
 
-            issue_subscribers = list(set(issue_subscribers) - {uuid.UUID(actor_id)})
+            # Assignees are notified too, not only explicit subscribers: being assigned work is
+            # the notification people actually expect. v1.4.1 auto-subscribes on assignment, so
+            # this only matters for an assignee who unsubscribed. Was a sed patch at container
+            # start until APLANE-15 put it in the source.
+            issue_subscribers = list((set(issue_subscribers) | set(issue_assignees)) - {uuid.UUID(actor_id)})
 
             for subscriber in issue_subscribers:
                 if issue.created_by_id and issue.created_by_id == subscriber:
