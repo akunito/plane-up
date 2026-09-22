@@ -3,6 +3,13 @@
 		max_size {$FILE_SIZE_LIMIT}
 	}
 
+	# Presigned MinIO uploads go through us, so the browser only ever talks to one host over
+	# https (APLANE-15, was the bind-mounted Caddyfile). BUCKET_NAME is written by start.sh.
+	@minio path /{$BUCKET_NAME} /{$BUCKET_NAME}/*
+	handle @minio {
+		reverse_proxy plane-minio:9000
+	}
+
     handle /spaces/* {
         reverse_proxy localhost:3002
     }

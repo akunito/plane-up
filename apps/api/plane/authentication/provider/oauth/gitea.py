@@ -1,14 +1,24 @@
 # Copyright (c) 2023-present Plane Software, Inc. and contributors
 # SPDX-License-Identifier: AGPL-3.0-only
 # See the LICENSE file for details.
+#
+# The built-in "gitea" OAuth slot is
+# repurposed as a generic Pocket ID (auth.akunito.com) OIDC login. Gitea's
+# adapter already uses OIDC scopes + a configurable host and a confidential
+# (client_secret) code exchange with no PKCE, so only the endpoint paths and
+# the userinfo claim parsing differ. GITEA_HOST/CLIENT_ID/CLIENT_SECRET env
+# vars carry the Pocket ID values; the /auth/gitea/ routes are reused as-is.
+#
+# Was a bind-mounted file over the container's gitea.py until APLANE-15 built our own image.
+# The slot name stays "gitea" on purpose: the routes, the instance configuration rows and the
+# existing users' provider_id all key off it, so renaming it would log everyone out.
 
 import os
 from datetime import datetime, timedelta
 from urllib.parse import urlencode, urlparse
-import pytz
-import requests
 
-# Module imports
+import pytz
+
 from plane.authentication.adapter.oauth import OauthAdapter
 from plane.license.utils.instance_value import get_configuration_value
 from plane.authentication.adapter.error import (
@@ -19,7 +29,7 @@ from plane.authentication.adapter.error import (
 
 class GiteaOAuthProvider(OauthAdapter):
     provider = "gitea"
-    scope = "openid email profile read:user"
+    scope = "openid email profile"
 
     def __init__(self, request, code=None, state=None, callback=None):
         (GITEA_CLIENT_ID, GITEA_CLIENT_SECRET, GITEA_HOST) = get_configuration_value(
@@ -50,13 +60,13 @@ class GiteaOAuthProvider(OauthAdapter):
         if not parsed.scheme or parsed.scheme not in ("https", "http"):
             raise AuthenticationException(
                 error_code=AUTHENTICATION_ERROR_CODES["GITEA_NOT_CONFIGURED"],
-                error_message="GITEA_NOT_CONFIGURED",  # avoid leaking details to query params
+                error_message="GITEA_NOT_CONFIGURED",
             )
         GITEA_HOST = GITEA_HOST.rstrip("/")
 
-        # Set URLs based on the host
-        self.token_url = f"{GITEA_HOST}/login/oauth/access_token"
-        self.userinfo_url = f"{GITEA_HOST}/api/v1/user"
+        # Pocket ID / standard OIDC discovery endpoints
+        self.token_url = f"{GITEA_HOST}/api/oidc/token"
+        self.userinfo_url = f"{GITEA_HOST}/api/oidc/userinfo"
 
         client_id = GITEA_CLIENT_ID
         client_secret = GITEA_CLIENT_SECRET
@@ -69,7 +79,7 @@ class GiteaOAuthProvider(OauthAdapter):
             "response_type": "code",
             "state": state,
         }
-        auth_url = f"{GITEA_HOST}/login/oauth/authorize?{urlencode(url_params)}"
+        auth_url = f"{GITEA_HOST}/authorize?{urlencode(url_params)}"
 
         super().__init__(
             request,
@@ -104,71 +114,27 @@ class GiteaOAuthProvider(OauthAdapter):
                     if token_response.get("expires_in")
                     else None
                 ),
-                "refresh_token_expired_at": (
-                    datetime.fromtimestamp(token_response.get("refresh_token_expired_at"), tz=pytz.utc)
-                    if token_response.get("refresh_token_expired_at")
-                    else None
-                ),
+                "refresh_token_expired_at": None,
                 "id_token": token_response.get("id_token", ""),
             }
         )
 
-    def __get_email(self, headers):
-        try:
-            # Gitea may not provide email in user response, so fetch it separately
-            emails_url = f"{self.userinfo_url}/emails"
-            response = requests.get(emails_url, headers=headers)
-            if not response.ok:
-                raise AuthenticationException(
-                    error_code=AUTHENTICATION_ERROR_CODES["GITEA_OAUTH_PROVIDER_ERROR"],
-                    error_message="GITEA_OAUTH_PROVIDER_ERROR: Failed to fetch emails",
-                )
-            emails_response = response.json()
-
-            if not emails_response:
-                raise AuthenticationException(
-                    error_code=AUTHENTICATION_ERROR_CODES["GITEA_OAUTH_PROVIDER_ERROR"],
-                    error_message="GITEA_OAUTH_PROVIDER_ERROR: No emails found",
-                )
-            # Prefer primary+verified, then any verified. Never fall back to an unverified
-            # email — an attacker with a self-hosted Gitea instance could assert any address
-            # to take over an existing account (GHSA-7j95-vh8g-f365).
-            email = next((e.get("email") for e in emails_response if e.get("primary") and e.get("verified")), None)
-            if not email:
-                email = next((e.get("email") for e in emails_response if e.get("verified")), None)
-            if not email:
-                raise AuthenticationException(
-                    error_code=AUTHENTICATION_ERROR_CODES["OAUTH_PROVIDER_UNVERIFIED_EMAIL"],
-                    error_message="OAUTH_PROVIDER_UNVERIFIED_EMAIL",
-                )
-            return email
-        except requests.RequestException:
-            raise AuthenticationException(
-                error_code=AUTHENTICATION_ERROR_CODES["GITEA_OAUTH_PROVIDER_ERROR"],
-                error_message="GITEA_OAUTH_PROVIDER_ERROR: Exception occurred while fetching emails",
-            )
-
     def set_user_data(self):
         user_info_response = self.get_user_response()
-        headers = {
-            "Authorization": f"Bearer {self.token_data.get('access_token')}",
-            "Accept": "application/json",
-        }
-
-        # Always use __get_email() which enforces the verified-email requirement.
-        # The user object's .email field carries no verification flag, so it cannot
-        # be trusted directly (GHSA-7j95-vh8g-f365).
-        email = self.__get_email(headers=headers)
-
+        email = user_info_response.get("email")
         super().set_user_data(
             {
                 "email": email,
                 "user": {
-                    "provider_id": str(user_info_response.get("id")),
+                    "provider_id": str(user_info_response.get("sub")),
                     "email": email,
-                    "avatar": user_info_response.get("avatar_url"),
-                    "first_name": user_info_response.get("full_name") or user_info_response.get("login"),
-                    "last_name": "",  # Gitea doesn't provide separate first/last name
+                    "avatar": user_info_response.get("picture"),
+                    "first_name": (
+                        user_info_response.get("given_name")
+                        or user_info_response.get("name")
+                        or ""
+                    ),
+                    "last_name": user_info_response.get("family_name") or "",
                     "is_password_autoset": True,
                 },
             }

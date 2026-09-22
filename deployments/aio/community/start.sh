@@ -142,7 +142,14 @@ update_env_file(){
     update_env_value "AWS_S3_BUCKET_NAME" "$AWS_S3_BUCKET_NAME"
     update_env_value "AWS_S3_ENDPOINT_URL" "${AWS_S3_ENDPOINT_URL:-https://s3.${AWS_REGION}.amazonaws.com}"
     update_env_value "BUCKET_NAME" "$AWS_S3_BUCKET_NAME"
-    update_env_value "USE_MINIO" "0"
+    # plane.env wins over the container environment (see the export below), so anything the
+    # deployment needs to set has to be written here. Upstream hardcoded USE_MINIO=0 and never
+    # wrote the other two at all; we serve MinIO through our own proxy over https and the
+    # Telegram bot's webhook targets the host, so all three follow the environment (APLANE-15,
+    # was start-override.sh Fix 1 / Fix 2 / Fix 2b).
+    update_env_value "USE_MINIO" "${USE_MINIO:-0}"
+    update_env_value "MINIO_ENDPOINT_SSL" "${MINIO_ENDPOINT_SSL:-0}"
+    update_env_value "WEBHOOK_ALLOWED_HOSTS" "${WEBHOOK_ALLOWED_HOSTS:-}"
 
     # Optional environment variables
     # SECRET_KEY: if absent or set to a known placeholder/insecure value, preserve whatever
