@@ -21,7 +21,10 @@ export default defineConfig({
   fullyParallel: false,
   // one worker: several specs change the same QA user's state (pins, preferences) on every device
   workers: 1,
-  retries: 0,
+  // One retry, and never more: a deploy gate that a single timing hiccup can turn red is a gate
+  // people learn to override. A test that only passes on the retry is reported as flaky (the
+  // deploy prints them), so an intermittent bug still shows up instead of hiding behind a pass.
+  retries: 1,
   reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
   use: {
     baseURL,
