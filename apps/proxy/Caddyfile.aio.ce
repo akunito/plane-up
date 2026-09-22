@@ -4,10 +4,11 @@
 	}
 
 	# Presigned MinIO uploads go through us, so the browser only ever talks to one host over
-	# https (APLANE-15, was the bind-mounted Caddyfile). BUCKET_NAME is written by start.sh.
+	# https (APLANE-15, was the bind-mounted Caddyfile). Both values come from start.sh, and
+	# the upstream MUST NOT be a container name: prod's is plane-minio, dev's plane-dev-minio.
 	@minio path /{$BUCKET_NAME} /{$BUCKET_NAME}/*
 	handle @minio {
-		reverse_proxy plane-minio:9000
+		reverse_proxy {$AWS_S3_ENDPOINT_URL}
 	}
 
     handle /spaces/* {
