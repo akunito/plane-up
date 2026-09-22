@@ -173,6 +173,10 @@ test.describe("Pins (L5-17/L5-18, B-08…B-11)", () => {
       await ticket.click();
       await expect(page).toHaveURL(/\/qa\/browse\/QAB-2\/?$/);
       await expect(page.getByText("QAB case 02", { exact: false }).first()).toBeVisible();
+      // Let the work item finish loading before the cleanup navigates away: WebKit reports an
+      // in-flight XHR killed by navigation as an uncaught page error, which the guard fails on.
+      // Only shows up under a full run, where the page is slow enough to still be fetching.
+      await page.waitForLoadState("networkidle");
     } finally {
       await page.goto("/qa/projects/");
       await openNav(page, device);
