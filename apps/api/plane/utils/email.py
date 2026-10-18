@@ -15,6 +15,29 @@ import re
 # Django imports
 from django.utils.html import strip_tags
 
+_STYLE_OPEN_RE = re.compile(r"<style", re.IGNORECASE)
+_STYLE_CLOSE_RE = re.compile(r"</style>", re.IGNORECASE)
+
+
+def _remove_style_blocks(html_content):
+    """
+    Remove `<style ...>...</style>` blocks (case-insensitive) in a single
+    forward scan, leaving the surrounding content unchanged.
+    """
+    parts = []
+    pos = 0
+    while start := _STYLE_OPEN_RE.search(html_content, pos):
+        tag_end = html_content.find(">", start.end())
+        if tag_end == -1:
+            break
+        close = _STYLE_CLOSE_RE.search(html_content, tag_end + 1)
+        if close is None:
+            break
+        parts.append(html_content[pos : start.start()])
+        pos = close.end()
+    parts.append(html_content[pos:])
+    return "".join(parts)
+
 
 def generate_plain_text_from_html(html_content):
     """
@@ -28,7 +51,7 @@ def generate_plain_text_from_html(html_content):
         str: Clean plain text without HTML tags, styles, or excessive whitespace
     """
     # Remove style tags and their content
-    html_content = re.sub(r"<style[^>]*>.*?</style>", "", html_content, flags=re.DOTALL | re.IGNORECASE)
+    html_content = _remove_style_blocks(html_content)
 
     # Strip HTML tags
     text_content = strip_tags(html_content)
