@@ -95,6 +95,9 @@ docker run --name myaio --rm -it \
 - `SECRET_KEY`: Django secret key (default provided)
 - `LIVE_SERVER_SECRET_KEY`: Live server secret (default provided)
 
+- `REDIS_SSL_CERT_REQS`: For a `rediss://` `REDIS_URL`, the Redis server certificate and hostname are verified by default (`required`). Set it to `none` to skip verification.
+- `REDIS_SSL_CA_CERTS`: Path inside the container to a CA bundle, for a Redis server whose certificate is issued by a private CA. Mount the file with `-v`, for example `-v /path/to/redis-ca.pem:/certs/redis-ca.pem:ro -e REDIS_SSL_CA_CERTS=/certs/redis-ca.pem`.
+
 #### File Handling
 
 - `FILE_SIZE_LIMIT`: Maximum file upload size in bytes (default: `5242880` = 5MB)
