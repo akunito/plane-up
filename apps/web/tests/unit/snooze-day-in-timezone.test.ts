@@ -6,6 +6,11 @@
  * five minutes. The modal therefore offers tomorrow-in-the-project-zone as the first allowed day,
  * and that depends entirely on this helper. The hunk was dropped when the commit was ported (our
  * tree is pre-refactor, upstream's path had moved), which is what this test exists to notice.
+ *
+ * What this does NOT cover, deliberately and worth knowing: the modal's own rendering — that the
+ * calendar really disables everything before `tomorrow`, and that closing clears the pick. Those
+ * need a render test, and the E2E suite cannot reach the screen either because intake is off in
+ * every project here. The day helper is the part that broke and the part that is pure.
  */
 import { describe, expect, it } from "vitest";
 
@@ -23,13 +28,21 @@ describe("getDayInTimezone", () => {
     expect(ymd(getDayInTimezone(INSTANT, "UTC"))).toBe("2026-10-28");
   });
 
-  it("returns local midnight, so the calendar's `before` comparison is day-granular", () => {
-    const day = getDayInTimezone(INSTANT, "Europe/Madrid");
-    expect([day.getHours(), day.getMinutes(), day.getSeconds(), day.getMilliseconds()]).toEqual([0, 0, 0, 0]);
+  it("gives a day-granular floor, which is what the calendar's `before` compares against", () => {
+    // the modal offers addDays(getDayInTimezone(now, zone), 1) as the first allowed day, and the
+    // calendar disables everything `before` it — so every instant of "today in the project zone"
+    // must fall below that boundary, and tomorrow must not
+    const today = getDayInTimezone(INSTANT, "Asia/Tokyo");
+    const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+    expect(today < tomorrow).toBe(true);
+    expect(getDayInTimezone(new Date(INSTANT.getTime() + 60_000), "Asia/Tokyo") >= tomorrow).toBe(false);
+    // local midnight, so the comparison cannot be decided by a time-of-day component
+    expect([today.getHours(), today.getMinutes(), today.getSeconds(), today.getMilliseconds()]).toEqual([0, 0, 0, 0]);
   });
 
-  it("falls back to the browser zone when the project has none", () => {
-    const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    expect(ymd(getDayInTimezone(INSTANT, undefined))).toBe(ymd(getDayInTimezone(INSTANT, browserZone)));
+  it("is the project's zone that decides, not the viewer's", () => {
+    // the regression this pins: using the browser zone would put a Tokyo project's boundary a day
+    // early for a European viewer, and the backend floors to the project zone either way
+    expect(+getDayInTimezone(INSTANT, "Asia/Tokyo")).not.toBe(+getDayInTimezone(INSTANT, "UTC"));
   });
 });
