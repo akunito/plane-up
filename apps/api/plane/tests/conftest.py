@@ -16,6 +16,24 @@ def django_db_setup(django_db_setup):  # noqa: F811
     pass
 
 
+@pytest.fixture(autouse=True)
+def _reset_throttle_cache():
+    """
+    Every throttle in this codebase counts in the shared cache, and the harness points that
+    cache at one valkey for the whole run. `api_token` always mints the same literal token, so
+    ApiKeyRateThrottle buckets every external-API test into one `api_key:test-api-token-12345`
+    key: once the suite grew past 60 of them in a minute, later tests got 429 instead of their
+    answer. The auth-throttle tests have the mirror problem — they patch the rate down to 1-2
+    and expect the first call to pass, which an already-full per-IP bucket denies.
+
+    Clearing before each test makes the bucket per-test, which is what every one of them assumes.
+    """
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+
+
 @pytest.fixture
 def api_client():
     """Return an unauthenticated API client"""
