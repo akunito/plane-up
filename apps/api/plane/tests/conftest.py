@@ -16,6 +16,35 @@ def django_db_setup(django_db_setup):  # noqa: F811
     pass
 
 
+# Hostnames whose cache is a throwaway. An exact hostname and not a substring: the LOCATION is
+# the whole REDIS_URL, credentials included, and a failing `assert "x" not in location` prints
+# both operands — pytest rewrites asserts in conftest.py — so a blocklist on the raw URL leaks the
+# password into the L2 log, which plane-deploy forwards to Telegram. Residual risk, accepted: a
+# live instance reachable as localhost would pass. The real invariant is CACHES pointing at the
+# harness's own valkey, which docker-compose-test.yml does.
+_THROWAWAY_CACHE_HOSTS = frozenset({"test-redis", "localhost", "127.0.0.1", "::1"})
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _cache_is_throwaway():
+    """
+    Session-scoped on purpose: `cache.clear()` is a FLUSHDB on django-redis, and the suite calls it
+    from a dozen places besides the fixture below (test_authentication.py clears in a module-level
+    autouse fixture and inside tests). A function-scoped check would only happen to run first.
+    """
+    from urllib.parse import urlparse
+
+    from django.conf import settings
+
+    locations = settings.CACHES.get("default", {}).get("LOCATION", "")
+    for one in [locations] if isinstance(locations, str) else list(locations):
+        host = urlparse(str(one)).hostname or ""
+        assert host in _THROWAWAY_CACHE_HOSTS, (
+            f"the cache host {host!r} is not a throwaway one and the suite FLUSHDBs it; "
+            f"point CACHES['default']['LOCATION'] at one of {sorted(_THROWAWAY_CACHE_HOSTS)}"
+        )
+
+
 @pytest.fixture(autouse=True)
 def _reset_throttle_cache():
     """
@@ -27,20 +56,8 @@ def _reset_throttle_cache():
     and expect the first call to pass, which an already-full per-IP bucket denies.
 
     Clearing before each test makes the bucket per-test, which is what every one of them assumes.
-
-    The clear is a FLUSHDB on django-redis, not a prefixed delete, so it refuses to run unless the
-    cache really is a throwaway: pointed at dev's or prod's REDIS_URL it would wipe that instance's
-    entity caches, in-flight magic/email-change codes and throttle counters once per test.
     """
-    from django.conf import settings
     from django.core.cache import cache
-
-    location = str(settings.CACHES.get("default", {}).get("LOCATION", ""))
-    for forbidden in ("plane-dev-redis", "plane-redis", "host.docker.internal"):
-        assert forbidden not in location, (
-            f"the test cache points at a live instance ({forbidden}); refusing to FLUSHDB it. "
-            "Point CACHES['default']['LOCATION'] at the throwaway valkey or at locmem."
-        )
 
     cache.clear()
     yield

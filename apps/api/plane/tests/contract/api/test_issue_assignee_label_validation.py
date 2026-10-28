@@ -109,6 +109,22 @@ class TestIssueAssigneeLabelValidationContract:
         assert list(create_issue.assignees.all()) == []
 
     @pytest.mark.django_db
+    def test_the_error_names_the_rejected_id(self, api_key_client, workspace, project, create_issue, outsider_user):
+        """
+        Ours, not upstream's: plane-bot's /assign is a read-modify-write of its mirror's assignee
+        list, and 52 of our work items still carry a member who left. It retries once without
+        exactly the ids this error names, so the id has to be IN the error. Upstream asserts only
+        the status code, so a reworded message would silently turn every such /assign into a
+        failure again — with nothing going red. This test is that dependency, written down.
+        """
+        url = self.get_detail_url(workspace.slug, project.id, create_issue.id)
+
+        response = api_key_client.patch(url, {"assignees": [str(outsider_user.id)]}, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert str(outsider_user.id) in str(response.data).lower()
+
+    @pytest.mark.django_db
     def test_create_with_mix_of_valid_and_invalid_assignee_is_rejected_entirely(
         self, api_key_client, workspace, project, create_user, outsider_user
     ):
