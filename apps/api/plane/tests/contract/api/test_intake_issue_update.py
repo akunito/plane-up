@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # See the LICENSE file for details.
 
+# Arrived with #10048; the two cross-project label cases pin upstream #9925's intake fix,
+# hand-applied here (that commit also rewrites the AIO Dockerfile, which is ours).
+
 import pytest
 from rest_framework import status
 
