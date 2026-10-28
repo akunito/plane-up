@@ -27,8 +27,20 @@ def _reset_throttle_cache():
     and expect the first call to pass, which an already-full per-IP bucket denies.
 
     Clearing before each test makes the bucket per-test, which is what every one of them assumes.
+
+    The clear is a FLUSHDB on django-redis, not a prefixed delete, so it refuses to run unless the
+    cache really is a throwaway: pointed at dev's or prod's REDIS_URL it would wipe that instance's
+    entity caches, in-flight magic/email-change codes and throttle counters once per test.
     """
+    from django.conf import settings
     from django.core.cache import cache
+
+    location = str(settings.CACHES.get("default", {}).get("LOCATION", ""))
+    for forbidden in ("plane-dev-redis", "plane-redis", "host.docker.internal"):
+        assert forbidden not in location, (
+            f"the test cache points at a live instance ({forbidden}); refusing to FLUSHDB it. "
+            "Point CACHES['default']['LOCATION'] at the throwaway valkey or at locmem."
+        )
 
     cache.clear()
     yield

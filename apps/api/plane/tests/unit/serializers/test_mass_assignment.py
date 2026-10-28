@@ -9,7 +9,7 @@ value in the request payload is ignored.
 """
 
 import pytest
-from crum import set_current_user
+from crum import impersonate
 
 from plane.app.serializers.cycle import CycleWriteSerializer
 from plane.app.serializers.project import ProjectSerializer
@@ -19,10 +19,17 @@ from plane.db.models import Cycle, IssueView, Project, User
 
 @pytest.fixture
 def current_user(create_user):
-    """Set crum's current user, which BaseModel.save() reads for the audit fields."""
-    set_current_user(create_user)
-    yield create_user
-    set_current_user(None)
+    """
+    Set crum's current user, which BaseModel.save() reads for the audit fields.
+
+    `impersonate` and not `set_current_user(...)` / `set_current_user(None)`: crum clears with the
+    sentinel False, so a teardown that stores None leaves a real "the current user is None" in the
+    thread local for the rest of the session. BaseModel.save() then nulls created_by/updated_by on
+    every later save, and the first test to notice was a v1 API comment delete three directories
+    away (403 instead of 204, green in isolation, red in the full run).
+    """
+    with impersonate(create_user):
+        yield create_user
 
 
 @pytest.fixture
