@@ -10,6 +10,7 @@
 # NOTICE: Proprietary and confidential. Unauthorized use or distribution is prohibited.
 
 # Python imports
+import html
 import re
 
 # Django imports
@@ -53,8 +54,10 @@ def generate_plain_text_from_html(html_content):
     # Remove style tags and their content
     html_content = _remove_style_blocks(html_content)
 
-    # Strip HTML tags
-    text_content = strip_tags(html_content)
+    # Strip HTML tags, then decode character references. `strip_tags` re-emits
+    # entity refs verbatim, so URLs escaped for the HTML part would otherwise
+    # reach the text/plain part as `?a=1&amp;b=2` and break when pasted.
+    text_content = html.unescape(strip_tags(html_content))
 
     # Remove excessive empty lines
     text_content = re.sub(r"\n\s*\n\s*\n+", "\n\n", text_content)

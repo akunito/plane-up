@@ -15,6 +15,10 @@ from plane.utils.email import generate_plain_text_from_html
 class TestGeneratePlainTextFromHtml:
     """Covers the HTML-to-plain-text conversion used for the text/plain part of emails."""
 
+    # The two entity-decoding cases below pin upstream #9841, hand-applied here (we keep our
+    # licence header, which that commit also rewrites): without it strip_tags leaves &amp;
+    # in the text/plain part of every invitation mail.
+
     def test_decodes_escaped_query_separators_in_invitation_urls(self):
         """The copy-paste fallback link must keep `&` so query params survive."""
         url = "https://example.com/workspace-invitations/?invitation_id=abc&slug=acme&token=xyz"
