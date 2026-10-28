@@ -18,6 +18,8 @@ class TestGeneratePlainTextFromHtml:
     # The two entity-decoding cases below pin upstream #9841, hand-applied here (we keep our
     # licence header, which that commit also rewrites): without it strip_tags leaves &amp;
     # in the text/plain part of every invitation mail.
+    # The `test_email` management command shares this helper for the same reason (#9841's second
+    # file, ported separately after an audit found the hunk had been dropped).
 
     def test_decodes_escaped_query_separators_in_invitation_urls(self):
         """The copy-paste fallback link must keep `&` so query params survive."""
