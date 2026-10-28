@@ -4,7 +4,6 @@
 
 import redis
 from django.conf import settings
-from urllib.parse import urlparse
 
 
 def redis_instance():

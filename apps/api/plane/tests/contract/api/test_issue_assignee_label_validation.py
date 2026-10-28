@@ -17,10 +17,12 @@ def celery_eager():
     tests only care about the HTTP response contract, not async delivery.
     """
     original = celery_app.conf.task_always_eager
+    original_eager_propagates = celery_app.conf.task_eager_propagates
     celery_app.conf.task_always_eager = True
     celery_app.conf.task_eager_propagates = False
     yield
     celery_app.conf.task_always_eager = original
+    celery_app.conf.task_eager_propagates = original_eager_propagates
 
 
 @pytest.fixture
