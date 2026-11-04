@@ -15,6 +15,22 @@ from rest_framework.response import Response
 from rest_framework import status
 
 
+# Keep in step with DEFAULT_PINNED_WORKSPACE_ITEMS in apps/web/core/hooks/use-navigation-preferences.ts
+# (APLANE-22, B-02). The frontend's default only applies when NO row exists, and the first GET here
+# bulk-creates a row for every key — so a key missing from this list is stored as False and the
+# frontend default can never kick in. That is why a fresh user saw no Views or Analytics in the
+# sidebar while Diego's prod account looked fine: his rows had been corrected by hand in June.
+DEFAULT_PINNED_PREFERENCE_KEYS = frozenset(
+    {
+        WorkspaceUserPreference.UserPreferenceKeys.DRAFTS,
+        WorkspaceUserPreference.UserPreferenceKeys.YOUR_WORK,
+        WorkspaceUserPreference.UserPreferenceKeys.STICKIES,
+        WorkspaceUserPreference.UserPreferenceKeys.VIEWS,
+        WorkspaceUserPreference.UserPreferenceKeys.ANALYTICS,
+    }
+)
+
+
 class WorkspaceUserPreferenceViewSet(BaseAPIView):
     model = WorkspaceUserPreference
     use_read_replica = True
@@ -43,16 +59,7 @@ class WorkspaceUserPreferenceViewSet(BaseAPIView):
                             user=request.user,
                             workspace=workspace,
                             sort_order=(65535 + (i * 10000)),
-                            is_pinned=(
-                                True
-                                if key
-                                in [
-                                    WorkspaceUserPreference.UserPreferenceKeys.DRAFTS,
-                                    WorkspaceUserPreference.UserPreferenceKeys.YOUR_WORK,
-                                    WorkspaceUserPreference.UserPreferenceKeys.STICKIES,
-                                ]
-                                else False
-                            ),
+                            is_pinned=(key in DEFAULT_PINNED_PREFERENCE_KEYS),
                         )
                         for i, key in enumerate(create_preference_keys)
                     ],

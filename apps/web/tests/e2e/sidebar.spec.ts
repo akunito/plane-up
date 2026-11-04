@@ -46,10 +46,6 @@ async function clickHeaderIcon(page: Page, project: string, section: RegExp | st
 test.describe("workspace nav defaults (L5-10, B-02)", () => {
   test.use({ storageState: authFile("qa-carol") });
   test("a user who never touched preferences sees Views and Analytics", async ({ page }, info) => {
-    test.fail(
-      true,
-      "APLANE-22: v1.4.1 seeds sidebar preference rows with views/analytics unpinned, so the fork default never applies"
-    );
     await page.goto(`/qa/projects/${QAA.id}/issues/`);
     await openNav(page, info.project.name);
     await expect(sidebar(page).getByRole("link", { name: "Views" })).toBeVisible();
