@@ -610,7 +610,15 @@ def create_issue_activity(
     issue_activity.actor_id = issue.created_by_id
     issue_activity.save(update_fields=["created_at", "actor_id"])
     requested_data = json.loads(requested_data) if requested_data is not None else None
-    if requested_data.get("assignee_ids") is not None:
+    # "assignees" is the external API's name for the same field (api/serializers/issue.py:55,
+    # against the app API's assignee_ids). update_issue_activity already maps both — see the
+    # "External endpoint keys" block in its ISSUE_ACTIVITY_MAPPER — and track_assignees itself
+    # reads either through extract_ids. Only this guard was left behind, so a work item CREATED
+    # through /api/v1/... with assignees never ran track_assignees, never got its IssueSubscriber
+    # row, and so notified nobody: Plane notifies subscribers minus the actor, and the actor was
+    # the only subscriber. That is why items created by n8n and the MCP landed silently while the
+    # bot's /assign, which is a PATCH, worked all along (APLANE-5, measured 2026-11-04).
+    if requested_data.get("assignee_ids") is not None or requested_data.get("assignees") is not None:
         track_assignees(
             requested_data,
             current_instance,
