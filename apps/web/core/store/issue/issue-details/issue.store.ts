@@ -6,6 +6,7 @@
 
 import { makeObservable, observable } from "mobx";
 import { computedFn } from "mobx-utils";
+import { background } from "./background";
 // types
 import type { TIssue, TIssueServiceType } from "@plane/types";
 import { EIssueServiceType } from "@plane/types";
@@ -101,9 +102,11 @@ export class IssueStore implements IIssueStore {
     // store handlers from issue detail
     // parent
     if (issue && issue?.parent && issue?.parent?.id && issue?.parent?.project_id) {
-      this.issueService.retrieve(workspaceSlug, issue.parent.project_id, issue?.parent?.id).then((res) => {
-        this.rootIssueDetailStore.rootIssueStore.issues.addIssue([res]);
-      });
+      background(
+        this.issueService.retrieve(workspaceSlug, issue.parent.project_id, issue?.parent?.id).then((res) => {
+          this.rootIssueDetailStore.rootIssueStore.issues.addIssue([res]);
+        })
+      );
     }
     // assignees
     // labels
@@ -121,20 +124,20 @@ export class IssueStore implements IIssueStore {
     this.rootIssueDetailStore.addSubscription(issueId, issue.is_subscribed);
 
     // fetch issue activity
-    this.rootIssueDetailStore.activity.fetchActivities(workspaceSlug, projectId, issueId);
+    background(this.rootIssueDetailStore.activity.fetchActivities(workspaceSlug, projectId, issueId));
 
     // fetch issue comments
-    this.rootIssueDetailStore.comment.fetchComments(workspaceSlug, projectId, issueId);
+    background(this.rootIssueDetailStore.comment.fetchComments(workspaceSlug, projectId, issueId));
 
     // fetch sub issues
-    this.rootIssueDetailStore.subIssues.fetchSubIssues(workspaceSlug, projectId, issueId);
+    background(this.rootIssueDetailStore.subIssues.fetchSubIssues(workspaceSlug, projectId, issueId));
 
     // fetch issue relations
-    this.rootIssueDetailStore.relation.fetchRelations(workspaceSlug, projectId, issueId);
+    background(this.rootIssueDetailStore.relation.fetchRelations(workspaceSlug, projectId, issueId));
 
     // fetching states
     // TODO: check if this function is required
-    this.rootIssueDetailStore.rootIssueStore.rootStore.state.fetchProjectStates(workspaceSlug, projectId);
+    background(this.rootIssueDetailStore.rootIssueStore.rootStore.state.fetchProjectStates(workspaceSlug, projectId));
 
     return issue;
   };
