@@ -34,7 +34,7 @@ catalog:
   "@react-pdf/renderer": "^4.3.0"
   "@react-pdf/types": "^2.9.2"
   "@react-router/dev": "7.17.0"
-  "@react-router/node": "7.18.1"
+  "@react-router/node": "7.18.2"
   "@react-router/serve": "7.18.1"
   "@storybook/addon-designs": "11.1.3"
   "@storybook/addon-docs": "10.4.6"
@@ -91,14 +91,14 @@ catalog:
   "@vitest/coverage-v8": "^4.1.8"
   "ast-types": "0.14.2"
   "autoprefixer": "^10.4.19"
-  "axios": "1.18.1"
+  "axios": "1.20.0"
   "buffer": "^6.0.3"
   "chroma-js": "^3.2.0"
   "class-variance-authority": "0.7.1"
   "clsx": "^2.1.1"
   "cmdk": "^1.1.1"
   "comlink": "^4.4.1"
-  "compression": "1.8.1"
+  "compression": "1.8.2"
   "cors": "^2.8.5"
   "date-fns": "^4.1.0"
   "dotenv": "16.4.7"
@@ -155,16 +155,16 @@ catalog:
   "react-masonry-component": "^6.3.0"
   "react-pdf-html": "^2.1.2"
   "react-popper": "^2.3.0"
-  "react-router": "7.18.1"
+  "react-router": "7.18.2"
   "recharts": "^2.15.1"
   "reflect-metadata": "^0.2.2"
   "rehype-parse": "^9.0.1"
   "rehype-remark": "^10.0.1"
   "remark-gfm": "^4.0.1"
   "remark-stringify": "^11.0.0"
-  "sanitize-html": "2.17.5"
+  "sanitize-html": "2.18.1"
   "serve": "14.2.5"
-  "sharp": "^0.35.3"
+  "sharp": "^0.35.5"
   "smooth-scroll-into-view-if-needed": "^2.0.2"
   "storybook": "10.4.6"
   "swr": "2.2.4"
@@ -199,30 +199,30 @@ overrides:
   mdast-util-to-hast: 13.2.1
   valibot: 1.4.2
   glob: 11.1.0
-  brace-expansion: 5.0.7
-  nanoid: 3.3.8
+  brace-expansion: 5.0.12
+  nanoid: 3.3.18
   esbuild: 0.28.1
   "@babel/core": 7.29.7
   "@babel/helpers": 7.29.7
   "@babel/runtime": 7.29.7
   chokidar: 3.6.0
-  prosemirror-view: 1.40.0
+  prosemirror-view: 1.42.3
   "@types/express": 4.17.23
   typescript: "catalog:"
   vite: "catalog:"
-  qs: 6.15.2
+  qs: 6.16.1
   diff: 5.2.2
   webpack: 5.104.1
   lodash-es: "catalog:"
   lodash: 4.18.1
-  markdown-it: 14.2.0
+  markdown-it: 14.3.3
   rollup: 4.59.0
   "minimatch@3": 3.1.4
   "minimatch@10": 10.2.3
   serialize-javascript: 7.0.5
   "ajv@6": 6.14.0
   "ajv@8": 8.18.0
-  "undici@7": 7.29.0
+  "undici@7": 7.30.1
   flatted: 3.4.2
   picomatch: 2.3.2
   "yaml@1": 1.10.3
@@ -231,13 +231,13 @@ overrides:
   defu: 6.1.5
   postcss: 8.5.25
   axios: "catalog:"
-  follow-redirects: 1.16.0
+  follow-redirects: 1.16.2
   uuid: "catalog:"
-  "fast-uri@<3.1.5": "3.1.5"
-  "js-yaml@4": 4.3.0
+  "fast-uri@<3.1.9": "3.1.9"
+  "js-yaml@4": 4.3.2
   linkify-it: 5.0.2
-  body-parser: 1.20.6
-  "@react-router/node": 7.18.1
+  body-parser: 1.20.9
+  "@react-router/node": 7.18.2
   tmp: 0.2.7
   form-data: 4.0.6
   "ws@8": 8.21.0
@@ -245,7 +245,10 @@ overrides:
   "@opentelemetry/core": 2.8.0
   "@opentelemetry/resources": 2.8.0
   "@opentelemetry/sdk-trace-base": 2.8.0
-  morgan: 1.11.0
+  morgan: 1.12.1
+  compression: 1.8.2
+  proxy-addr: 2.0.8
+  tinypool: 2.1.2
 
 allowBuilds:
   "@parcel/watcher": true
