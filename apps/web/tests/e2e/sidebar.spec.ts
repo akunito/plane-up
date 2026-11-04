@@ -121,17 +121,31 @@ test.describe("project row (L5-14, B-07)", () => {
   });
 });
 
-async function clearPins(page: Page, project: string) {
-  await clickHeaderIcon(page, project, /^Pins$/, "Manage pinned items");
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.getByRole("heading", { name: "Manage pinned items" })).toBeVisible();
-  for (let i = 0; i < 20 && (await dialog.getByRole("button", { name: "Remove" }).count()); i++) {
-    const before = await dialog.getByRole("button", { name: "Remove" }).count();
-    await dialog.getByRole("button", { name: "Remove" }).first().click();
-    await expect(dialog.getByRole("button", { name: "Remove" })).toHaveCount(before - 1);
+const FAVOURITES = "/api/workspaces/qa/user-favorites/?all=true";
+
+const listPins = async (page: Page) => (await (await page.request.get(FAVOURITES)).json()) as { id: string }[];
+
+/**
+ * Setup, not coverage: drop every pin this user has, through the API.
+ *
+ * It used to click "Remove" in the Manage pinned items dialog, which cannot clear a pin whose
+ * entity no longer exists — such a pin is not listed in the dialog at all. So a test that died
+ * between pinning something and deleting its entity left a pin nothing could reach, and the
+ * damage showed up in a *different* test as "the favourites were removed server-side" with a pile
+ * of leftovers (14 of them on 2026-11-04, from earlier failed runs). One bug then read as two.
+ * Setup has to be deterministic, so it goes through the API and asserts the result.
+ *
+ * Re-lists on every pass instead of deleting a snapshot of ids: deleting a folder takes its
+ * contents with it, and a stale id would make apiDelete fail the test on a 404.
+ */
+async function clearPins(page: Page) {
+  for (let i = 0; i < 40; i++) {
+    const pins = await listPins(page);
+    if (!pins.length) break;
+    await apiDelete(page, `/api/workspaces/qa/user-favorites/${pins[0].id}/`);
   }
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(await listPins(page), "clearPins could not empty the pins").toEqual([]);
+  await page.reload(); // the sidebar store still holds what we just deleted
 }
 
 test.describe("Pins (L5-17/L5-18, B-08…B-11)", () => {
@@ -142,7 +156,7 @@ test.describe("Pins (L5-17/L5-18, B-08…B-11)", () => {
     const device = info.project.name;
     await page.goto("/qa/projects/");
     await openNav(page, device);
-    await clearPins(page, device); // a previous failed run may have left pins behind
+    await clearPins(page); // a previous failed run may have left pins behind
     await openNav(page, device);
     const pins = sidebar(page);
     await expect(pins.getByRole("button", { name: /Pin pages or tickets/ })).toBeVisible();
@@ -176,10 +190,38 @@ test.describe("Pins (L5-17/L5-18, B-08…B-11)", () => {
     } finally {
       await page.goto("/qa/projects/");
       await openNav(page, device);
-      await clearPins(page, device);
+      await clearPins(page);
     }
     await openNav(page, device);
     await expect(sidebar(page).getByRole("button", { name: /Pin pages or tickets/ })).toBeVisible();
+  });
+
+  /**
+   * The dialog's Remove button used to be exercised only as a side effect of clearPins(). Now that
+   * clearPins goes through the API — so it can also clear a pin whose entity is gone — this covers
+   * it on purpose, and goes one better than the old helper did by checking the server too: the old
+   * loop only asserted that a row disappeared from the dialog.
+   */
+  test("the Manage pinned items dialog removes a pin, server-side too (L5-13)", async ({ page }, info) => {
+    const device = info.project.name;
+    await page.goto("/qa/projects/");
+    await clearPins(page);
+    await openNav(page, device);
+
+    await clickHeaderIcon(page, device, /^Pins$/, "Manage pinned items");
+    const dialog = page.getByRole("dialog");
+    await dialog.getByPlaceholder("Search pages to pin…").fill("QA page to pin");
+    await dialog.getByRole("button", { name: "QA page to pin" }).click();
+    const remove = dialog.getByRole("button", { name: "Remove" });
+    await expect(remove).toHaveCount(1);
+    expect(await listPins(page)).toHaveLength(1);
+
+    await remove.click();
+
+    await expect(remove).toHaveCount(0);
+    expect(await listPins(page), "Remove must delete the favourite, not just hide the row").toEqual([]);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 });
 
@@ -201,7 +243,7 @@ test.describe("Pins follow the entity (L5-18b, B-08…B-10)", () => {
 
     await page.goto("/qa/projects/");
     await openNav(page, device);
-    await clearPins(page, device);
+    await clearPins(page);
 
     try {
       // only a completed / cancelled work item can be archived, so start it there
