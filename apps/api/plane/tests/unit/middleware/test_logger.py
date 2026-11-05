@@ -295,3 +295,109 @@ class TestRequestBodyAndQueryAreRedacted:
         body = json.dumps({name: "leak"}).encode()
 
         assert "leak" not in self._log_data(request_factory, body=body)["body"]
+
+
+@pytest.mark.unit
+class TestTheRedactorCannotSuppressTheAuditRow:
+    """APLANE-34 follow-up. The first version of the redactor could delete the audit row.
+
+    `_redact_tree` recursed without a bound, so a ~2 KB body of nested brackets raised
+    RecursionError; `process_request`'s broad `except Exception` swallowed it and NO row was
+    written. Since the row is written after the response, an API-key holder could run a request
+    that succeeded — or hammer a token guess — and leave no trace. Measured 2026-11-05.
+    """
+
+    API_KEY = "plane_api_supersecretvalue"
+
+    def _log_data(self, request_factory, body=None, path="/api/v1/workspaces/"):
+        middleware = APITokenLogMiddleware(Mock(return_value=HttpResponse(b"{}")))
+        request = request_factory.get(path, HTTP_X_API_KEY=self.API_KEY)
+        request.user = AnonymousUser()
+        with patch("plane.middleware.logger.process_logs") as process_logs:
+            middleware.process_request(request, HttpResponse(b"{}"), request_body=body)
+            return process_logs
+
+    def test_a_deeply_nested_body_still_writes_a_row(self, request_factory):
+        body = (b"[" * 1000) + (b"]" * 1000)
+
+        process_logs = self._log_data(request_factory, body=body)
+
+        assert process_logs.delay.called, "the audit row was suppressed by the body"
+        assert "TOO DEEP" in process_logs.delay.call_args.kwargs["log_data"]["body"]
+
+    def test_a_body_too_deep_for_json_itself_still_writes_a_row(self, request_factory):
+        """Past ~20k levels json.loads raises RecursionError before the walk even starts."""
+        body = (b"[" * 60000) + (b"]" * 60000)
+
+        process_logs = self._log_data(request_factory, body=body)
+
+        assert process_logs.delay.called
+        assert "DROPPED" in process_logs.delay.call_args.kwargs["log_data"]["body"]
+
+    def test_a_secret_just_inside_the_depth_bound_is_still_redacted(self, request_factory):
+        depth = APITokenLogMiddleware.MAX_DEPTH - 1
+        body = (b"[" * depth) + b'{"token":"leak"}' + (b"]" * depth)
+
+        stored = self._log_data(request_factory, body=body).delay.call_args.kwargs["log_data"]["body"]
+
+        assert "leak" not in stored
+
+    def test_an_oversized_body_is_capped(self, request_factory):
+        cap = APITokenLogMiddleware.BODY_MAX_BYTES
+        body = json.dumps({"description_html": "x" * (cap * 3)}).encode()
+
+        stored = self._log_data(request_factory, body=body).delay.call_args.kwargs["log_data"]["body"]
+
+        assert stored.endswith("… [truncated]")
+        assert len(stored.encode()) == cap + len("… [truncated]".encode())
+
+    def test_non_ascii_is_not_escape_expanded(self, request_factory):
+        """json.dumps' default would store every non-ASCII code point as a six-character escape —
+        1.68x measured on Polish text, in the column whose 901 MB is why this file was touched."""
+        text = "Zażółć gęślą jaźń" * 20
+        body = json.dumps({"description_html": text}, ensure_ascii=False).encode()
+
+        stored = self._log_data(request_factory, body=body).delay.call_args.kwargs["log_data"]["body"]
+
+        assert "ż" in stored, "stored as real characters, not as escapes"
+        assert "\\u017c" not in stored
+        assert len(stored.encode()) <= len(body), "and it did not grow"
+
+    @pytest.mark.parametrize("name", ["code", "totp", "passphrase", "jwt", "apikey", "sessionid", "bearer"])
+    def test_the_concatenated_and_one_time_credential_names_are_redacted(self, request_factory, name):
+        """`code` is Plane's own magic code, read from a JSON body in the email-change flow and
+        returned as ?code= by every OAuth callback; the others are spellings the word split alone
+        cannot reach."""
+        body = json.dumps({name: "leak"}).encode()
+
+        stored = self._log_data(request_factory, body=body).delay.call_args.kwargs["log_data"]["body"]
+
+        assert "leak" not in stored
+
+    def test_an_oauth_code_in_the_query_string_is_redacted(self, request_factory):
+        log_data = self._log_data(request_factory, path="/api/v1/x/?code=leak&state=keep").delay.call_args.kwargs[
+            "log_data"
+        ]
+
+        assert "leak" not in log_data["query_params"]
+        assert "state=keep" in log_data["query_params"]
+
+    def test_a_credential_header_outside_the_exact_list_is_redacted(self, request_factory):
+        """The exact list is x-api-key/authorization/cookie. The word matcher now covers the ones
+        nobody enumerated: proxy-authorization, x-auth-token, x-amz-security-token, and whatever a
+        future proxy adds."""
+        middleware = APITokenLogMiddleware(Mock(return_value=HttpResponse(b"{}")))
+        request = request_factory.get(
+            "/api/v1/x/",
+            HTTP_X_API_KEY=self.API_KEY,
+            HTTP_PROXY_AUTHORIZATION="Basic leak1",
+            HTTP_X_AUTH_TOKEN="leak2",
+            HTTP_X_REQUEST_ID="keep-me",
+        )
+        request.user = AnonymousUser()
+        with patch("plane.middleware.logger.process_logs") as process_logs:
+            middleware.process_request(request, HttpResponse(b"{}"), request_body=None)
+            headers = process_logs.delay.call_args.kwargs["log_data"]["headers"]
+
+        assert "leak1" not in headers and "leak2" not in headers
+        assert "keep-me" in headers, "and ordinary headers are still logged"

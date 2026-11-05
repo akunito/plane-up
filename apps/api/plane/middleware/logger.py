@@ -140,12 +140,39 @@ class APITokenLogMiddleware:
             "authorization",
             "signature",
             "otp",
+            # Plane's own one-time credential: read from a JSON body in the email-change flow
+            # (app/views/user/base.py:199, "Verify the magic code") and returned as `?code=` by all
+            # six OAuth callbacks. No serializer in plane/api has a `code` field, so this is free.
+            "code",
+            "codes",
+            # Concatenated and acronym spellings the word split alone cannot reach.
+            "apikey",
+            "accesstoken",
+            "authtoken",
+            "sessionid",
+            "passphrase",
+            "totp",
+            "jwt",
+            "bearer",
+            "salt",
+            "nonce",
+            "hmac",
+            "sig",
         }
     )
-    # Known, accepted over-redaction: a field like `keyResults` matches on "key". Over-redacting a
-    # harmless field costs a little audit detail; under-redacting a secret keeps it for 14 days and
-    # in every backup taken in that window. The safe direction is the one chosen.
+    # Known, accepted over-redaction, with the real example rather than a guess: EstimatePoint.key
+    # (db/models/estimate.py:45) is an integer the external API writes through `fields = "__all__"`,
+    # so estimate-point writes now log `"key": "[REDACTED]"` instead of the point number. Over-
+    # redacting a harmless field costs a little audit detail; under-redacting a secret keeps it for
+    # the 14-day retention, the daily dump and the offsite copy — the HOURLY dumps already exclude
+    # this table (VPS_PROD-config.nix), so "every backup" overstated it. Safe direction chosen.
     REDACTED = "[REDACTED]"
+    # Mirrors RESPONSE_BODY_MAX_BYTES below. Django accepts a 5 MB body
+    # (DATA_UPLOAD_MAX_MEMORY_SIZE), and a row is written for any request merely BEARING an
+    # X-Api-Key, valid or not — so uncapped, an unauthenticated caller could write 5 MB rows.
+    BODY_MAX_BYTES = 4000
+    # Deeper than anything this API accepts; see _redact_tree for why the bound exists at all.
+    MAX_DEPTH = 32
     # What _safe_decode_body returns instead of content it could not use. Compared exactly rather
     # than with a `startswith("[")` test, which the first draft of this used and which would have
     # passed a JSON ARRAY body straight through unredacted.
@@ -170,8 +197,14 @@ class APITokenLogMiddleware:
         not happen.
 
         Parsed and re-encoded rather than regex-patched, so a value containing `&` or `=` cannot
-        hide a second parameter from the redactor. An unparseable query string is replaced wholesale
-        rather than stored: it is not worth guessing at.
+        hide a second parameter from the redactor. The limit of that, measured: `parse_qsl` splits
+        only on `&`, so `?a=1;token=SECRET` is ONE parameter whose value holds the secret in
+        plaintext. Harmless in practice — Django's own parsing does not split on `;` either, so a
+        client doing that would be leaking its secret for nothing rather than authenticating.
+
+        The except branch is belt-and-braces, not a behaviour: with `strict_parsing=False` and
+        str-to-str re-encoding, neither call raises on any input I could construct (an invalid
+        percent escape comes back mangled to U+FFFD rather than raising).
         """
         raw = request.META.get("QUERY_STRING", "")
         if not raw:
@@ -185,11 +218,15 @@ class APITokenLogMiddleware:
     def _redacted_body(self, request_body):
         """The request body with credential-looking values removed (APLANE-34).
 
-        JSON objects and arrays are walked and redacted by key name, at any depth, because that is
-        what this API receives — arrays matter because the bulk endpoints post lists of objects. Anything else — form encoding, XML, a raw upload — cannot be
-        redacted by key, so it is dropped rather than stored in the clear: an unreadable audit field
-        is a smaller loss than a secret kept for 14 days. JSON that is not an object (a bare string
-        or number) is dropped for the same reason.
+        JSON objects and arrays are walked and redacted by key name, down to MAX_DEPTH — arrays
+        matter because the bulk endpoints post lists of objects. Anything else (form encoding,
+        XML, a raw upload) cannot be redacted by key, so it is dropped with a marker rather than
+        stored in the clear: an unreadable audit field is a smaller loss than a secret kept for
+        the retention window. JSON that is not an object or array is dropped for the same reason.
+
+        `ensure_ascii=False` and compact separators are deliberate. The default re-encodes every
+        non-ASCII code point as a six-character backslash-u escape — measured at 1.68x on a realistic Polish
+        payload — in the exact column whose 901 MB is why this file is being touched at all.
         """
         if not request_body:
             return None
@@ -198,20 +235,38 @@ class APITokenLogMiddleware:
             return decoded
         try:
             parsed = json.loads(decoded)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, RecursionError):
             return "[NOT JSON — DROPPED, MAY CONTAIN SECRETS]"
         if not isinstance(parsed, (dict, list)):
             return "[NON-OBJECT JSON — DROPPED, MAY CONTAIN SECRETS]"
-        return json.dumps(self._redact_tree(parsed))
+        try:
+            redacted = json.dumps(self._redact_tree(parsed), ensure_ascii=False, separators=(",", ":"))
+        except (RecursionError, ValueError, TypeError):
+            return "[UNREDACTABLE JSON — DROPPED, MAY CONTAIN SECRETS]"
+        encoded = redacted.encode("utf-8")
+        if len(encoded) <= self.BODY_MAX_BYTES:
+            return redacted
+        return f"{encoded[: self.BODY_MAX_BYTES].decode('utf-8', errors='ignore')}… [truncated]"
 
-    def _redact_tree(self, value):
+    def _redact_tree(self, value, depth: int = 0):
+        """Walk a parsed JSON value, redacting by key name.
+
+        Depth-bounded, and the bound is not cosmetic. An unbounded walk raised `RecursionError` on
+        a 2 KB body of nested brackets (measured 2026-11-05); `process_request`'s broad
+        `except Exception` swallowed it, and **no audit row was written at all** — so an API-key
+        holder could run a request that succeeded and leave no trace of it. Past the bound the
+        subtree is replaced rather than walked: a payload nested deeper than this is not something
+        this API has a use for.
+        """
+        if depth >= self.MAX_DEPTH:
+            return "[TOO DEEP — NOT REDACTED, DROPPED]"
         if isinstance(value, dict):
             return {
-                key: (self.REDACTED if self._is_sensitive_name(key) else self._redact_tree(item))
+                key: (self.REDACTED if self._is_sensitive_name(key) else self._redact_tree(item, depth + 1))
                 for key, item in value.items()
             }
         if isinstance(value, list):
-            return [self._redact_tree(item) for item in value]
+            return [self._redact_tree(item, depth + 1) for item in value]
         return value
 
     # Cap on a stored failure body, in BYTES — the column is TEXT and the cost is bytes, not code
@@ -261,7 +316,10 @@ class APITokenLogMiddleware:
         so that credentials such as the API key are never stored in plaintext.
         """
         redacted = {
-            key: ("[REDACTED]" if key.lower() in self.SENSITIVE_HEADERS else value)
+            # The exact list first, then the same word matcher the body and query string use, so a
+            # credential-bearing header this code has never enumerated — proxy-authorization,
+            # x-auth-token, x-amz-security-token, cf-access-client-secret — is covered anyway.
+            key: (self.REDACTED if key.lower() in self.SENSITIVE_HEADERS or self._is_sensitive_name(key) else value)
             for key, value in request.headers.items()
         }
         return str(redacted)
