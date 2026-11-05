@@ -59,6 +59,7 @@ from plane.db.models import (
     ModuleIssue,
     Project,
     ProjectMember,
+    UserFavorite,
     UserRecentVisit,
 )
 from plane.utils.filters import ComplexFilterBackend, IssueFilterSet
@@ -720,6 +721,12 @@ class IssueViewSet(BaseViewSet):
         issue = Issue.objects.get(workspace__slug=slug, project_id=project_id, pk=pk)
 
         issue.delete()
+        # Drop the sidebar pins pointing at it, for every user (APLANE-29). Cycles, modules,
+        # projects and pages already do this in their own destroy; work items did not, so the only
+        # cleanup was client-side in usePinnedEntities, which fires a DELETE after it resolves a
+        # 404. That left the row behind until some browser happened to render the sidebar, and made
+        # the E2E assertion a race against that fetch.
+        UserFavorite.objects.filter(entity_type="issue", entity_identifier=pk, project_id=project_id).delete()
         # delete the issue from recent visits
         UserRecentVisit.objects.filter(
             project_id=project_id,
@@ -789,6 +796,11 @@ class BulkDeleteIssuesEndpoint(BaseAPIView):
 
         # Then, delete all related module issues
         ModuleIssue.objects.filter(issue__in=issues).delete()
+
+        # Same pin cleanup as the single destroy above (APLANE-29)
+        UserFavorite.objects.filter(
+            entity_type="issue", entity_identifier__in=issue_ids, project_id=project_id
+        ).delete()
 
         # Finally, delete the issues themselves
         issues.delete()

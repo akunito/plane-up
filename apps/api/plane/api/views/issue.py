@@ -76,6 +76,7 @@ from plane.db.models import (
     Project,
     ProjectMember,
     CycleIssue,
+    UserFavorite,
     Workspace,
     WorkspaceMember,
 )
@@ -927,6 +928,8 @@ class IssueDetailAPIEndpoint(BaseAPIView):
             )
         current_instance = json.dumps(IssueSerializer(issue).data, cls=DjangoJSONEncoder)
         issue.delete()
+        # Drop the sidebar pins pointing at it, as the app viewset does (APLANE-29)
+        UserFavorite.objects.filter(entity_type="issue", entity_identifier=pk, project_id=project_id).delete()
         issue_activity.delay(
             type="issue.activity.deleted",
             requested_data=json.dumps({"issue_id": str(pk)}),
