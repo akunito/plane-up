@@ -5,8 +5,11 @@
 # Python imports
 import hashlib
 import hmac
+import json
 import logging
+import re
 import time
+from urllib.parse import parse_qsl, urlencode
 
 # Django imports
 from django.conf import settings
@@ -116,6 +119,101 @@ class APITokenLogMiddleware:
     # Headers whose values must never be persisted in plaintext logs
     SENSITIVE_HEADERS = frozenset({"x-api-key", "authorization", "cookie"})
 
+    # Name fragments that mark a value as a credential, matched per word rather than as a
+    # substring (APLANE-34). A substring test on "key" would redact `keywords`; splitting on
+    # non-alphanumerics gives ["keywords"], which does not match, while `api_key` gives
+    # ["api", "key"], which does. Same reason "authorization" is listed but "auth" is not:
+    # "author" and "authored_by" are ordinary field names.
+    SENSITIVE_PARTS = frozenset(
+        {
+            "token",
+            "tokens",
+            "secret",
+            "secrets",
+            "password",
+            "passwd",
+            "pwd",
+            "key",
+            "keys",
+            "credential",
+            "credentials",
+            "authorization",
+            "signature",
+            "otp",
+        }
+    )
+    # Known, accepted over-redaction: a field like `keyResults` matches on "key". Over-redacting a
+    # harmless field costs a little audit detail; under-redacting a secret keeps it for 14 days and
+    # in every backup taken in that window. The safe direction is the one chosen.
+    REDACTED = "[REDACTED]"
+    # What _safe_decode_body returns instead of content it could not use. Compared exactly rather
+    # than with a `startswith("[")` test, which the first draft of this used and which would have
+    # passed a JSON ARRAY body straight through unredacted.
+    DECODE_SENTINELS = frozenset({"[Binary Content]", "[Could not decode content]"})
+    _WORDS = re.compile(r"[^a-z0-9]+")
+    # camelCase and ACRONYMCase have to be split before lowercasing, or `apiKey` collapses to the
+    # single word "apikey" and slips through — which the first version of this did, and JS clients
+    # send camelCase as a matter of course (`accessToken`, `clientSecret`, `refreshToken`).
+    _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+
+    @classmethod
+    def _is_sensitive_name(cls, name) -> bool:
+        words = cls._WORDS.split(cls._CAMEL.sub("_", str(name)).lower())
+        return any(part in cls.SENSITIVE_PARTS for part in words if part)
+
+    def _redacted_query_string(self, request) -> str:
+        """The query string with credential-looking values removed (APLANE-34).
+
+        A client that passes its token as a query parameter rather than a header used to land it
+        here in plaintext, for the full retention window and into every backup taken in it — while
+        the headers right next to it were carefully redacted, which made that easy to assume could
+        not happen.
+
+        Parsed and re-encoded rather than regex-patched, so a value containing `&` or `=` cannot
+        hide a second parameter from the redactor. An unparseable query string is replaced wholesale
+        rather than stored: it is not worth guessing at.
+        """
+        raw = request.META.get("QUERY_STRING", "")
+        if not raw:
+            return ""
+        try:
+            pairs = parse_qsl(raw, keep_blank_values=True, strict_parsing=False)
+            return urlencode([(key, self.REDACTED if self._is_sensitive_name(key) else value) for key, value in pairs])
+        except Exception:
+            return "[UNPARSEABLE QUERY STRING]"
+
+    def _redacted_body(self, request_body):
+        """The request body with credential-looking values removed (APLANE-34).
+
+        JSON objects and arrays are walked and redacted by key name, at any depth, because that is
+        what this API receives — arrays matter because the bulk endpoints post lists of objects. Anything else — form encoding, XML, a raw upload — cannot be
+        redacted by key, so it is dropped rather than stored in the clear: an unreadable audit field
+        is a smaller loss than a secret kept for 14 days. JSON that is not an object (a bare string
+        or number) is dropped for the same reason.
+        """
+        if not request_body:
+            return None
+        decoded = self._safe_decode_body(request_body)
+        if decoded is None or decoded in self.DECODE_SENTINELS:
+            return decoded
+        try:
+            parsed = json.loads(decoded)
+        except (ValueError, TypeError):
+            return "[NOT JSON — DROPPED, MAY CONTAIN SECRETS]"
+        if not isinstance(parsed, (dict, list)):
+            return "[NON-OBJECT JSON — DROPPED, MAY CONTAIN SECRETS]"
+        return json.dumps(self._redact_tree(parsed))
+
+    def _redact_tree(self, value):
+        if isinstance(value, dict):
+            return {
+                key: (self.REDACTED if self._is_sensitive_name(key) else self._redact_tree(item))
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._redact_tree(item) for item in value]
+        return value
+
     # Cap on a stored failure body, in BYTES — the column is TEXT and the cost is bytes, not code
     # points. 8192 *characters* was the first version of this and it bounded almost nothing: 8192
     # multi-byte characters is up to 32 KB, so if plane-bot ever starts getting a persistent 4xx
@@ -187,9 +285,9 @@ class APITokenLogMiddleware:
                 ).hexdigest(),
                 "path": request.path,
                 "method": request.method,
-                "query_params": request.META.get("QUERY_STRING", ""),
+                "query_params": self._redacted_query_string(request),
                 "headers": self._redacted_headers(request),
-                "body": self._safe_decode_body(request_body) if request_body else None,
+                "body": self._redacted_body(request_body),
                 "response_body": self._response_body_to_log(response),
                 "response_code": response.status_code,
                 "ip_address": get_client_ip(request=request),

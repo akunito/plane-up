@@ -13,6 +13,7 @@ Covers the credential-hygiene guarantees of the external API request logger:
 
 import hashlib
 import hmac
+import json
 from unittest.mock import Mock, patch
 
 import pytest
@@ -181,3 +182,116 @@ class TestResponseBodyIsOnlyKeptForFailures:
 
         assert log_data["response_body"] is None
         assert log_data["response_code"] == 200, "and the row is still logged, which it was not before"
+
+
+@pytest.mark.unit
+class TestRequestBodyAndQueryAreRedacted:
+    """APLANE-34: the logger redacted headers carefully and stored the body and query string raw.
+
+    A client that passes its token as a query parameter — or posts anything secret — used to land it
+    in `api_activity_logs` in plaintext for the full 14-day retention and into every backup taken
+    in that window, right next to headers that were being redacted with care.
+    """
+
+    API_KEY = "plane_api_supersecretvalue"
+
+    def _log_data(self, request_factory, path="/api/v1/workspaces/", body=None, **extra):
+        middleware = APITokenLogMiddleware(Mock(return_value=HttpResponse(b"{}")))
+        request = request_factory.get(path, HTTP_X_API_KEY=self.API_KEY, **extra)
+        request.user = AnonymousUser()
+        with patch("plane.middleware.logger.process_logs") as process_logs:
+            middleware.process_request(request, HttpResponse(b"{}"), request_body=body)
+            assert process_logs.delay.called
+            return process_logs.delay.call_args.kwargs["log_data"]
+
+    # --- the one that matters most: the key must not survive anywhere in the row ---
+
+    def test_a_key_passed_in_the_query_string_appears_in_no_field(self, request_factory):
+        log_data = self._log_data(request_factory, path=f"/api/v1/x/?key={self.API_KEY}&page=2")
+
+        assert self.API_KEY not in json.dumps(log_data), "the API key survived somewhere in the row"
+        assert "page=2" in log_data["query_params"], "and the harmless parameters are still there"
+
+    def test_a_secret_posted_in_the_body_appears_in_no_field(self, request_factory):
+        body = json.dumps({"name": "hook", "webhook_secret": self.API_KEY}).encode()
+
+        log_data = self._log_data(request_factory, body=body)
+
+        assert self.API_KEY not in json.dumps(log_data)
+        assert "hook" in log_data["body"], "and the rest of the body is still logged"
+
+    # --- query string ---
+
+    @pytest.mark.parametrize("name", ["key", "api_key", "apiKey", "token", "access_token", "password", "signature"])
+    def test_sensitive_query_values_are_redacted(self, request_factory, name):
+        log_data = self._log_data(request_factory, path=f"/api/v1/x/?{name}=leak&cursor=abc")
+
+        assert "leak" not in log_data["query_params"]
+        assert "cursor=abc" in log_data["query_params"]
+
+    def test_a_value_containing_an_ampersand_cannot_hide_a_parameter(self, request_factory):
+        """Parsed and re-encoded rather than regex-patched, so an encoded `&token=` inside another
+        value is a value, not a parameter the redactor might miss."""
+        log_data = self._log_data(request_factory, path="/api/v1/x/?key=leak&name=hello%26token%3Dnope")
+
+        assert "leak" not in log_data["query_params"]
+        assert "hello" in log_data["query_params"]
+
+    def test_an_empty_query_string_stays_empty(self, request_factory):
+        assert self._log_data(request_factory)["query_params"] == ""
+
+    # --- body ---
+
+    def test_nested_and_listed_secrets_are_redacted(self, request_factory):
+        body = json.dumps(
+            {"name": "x", "meta": {"api_key": "leak1", "keywords": ["fine"]}, "items": [{"token": "leak2", "id": 1}]}
+        ).encode()
+
+        stored = self._log_data(request_factory, body=body)["body"]
+
+        assert "leak1" not in stored and "leak2" not in stored
+        assert "fine" in stored and '"id": 1' in stored
+
+    def test_a_json_array_body_is_redacted_not_passed_through(self, request_factory):
+        """A JSON array starts with "[", which an earlier draft used to detect the decode
+        sentinels — so an array body would have been stored verbatim."""
+        body = json.dumps([{"token": "leak", "id": 1}]).encode()
+
+        stored = self._log_data(request_factory, body=body)["body"]
+
+        assert "leak" not in stored
+        assert '"id": 1' in stored
+
+    def test_a_non_json_body_is_dropped_rather_than_stored(self, request_factory):
+        stored = self._log_data(request_factory, body=b"password=leak&grant_type=x")["body"]
+
+        assert "leak" not in stored
+        assert "DROPPED" in stored, "and it says why, so the gap is visible in the row"
+
+    def test_a_bare_json_scalar_is_dropped(self, request_factory):
+        assert "DROPPED" in self._log_data(request_factory, body=b'"just a string"')["body"]
+
+    def test_an_empty_body_is_none(self, request_factory):
+        assert self._log_data(request_factory, body=b"")["body"] is None
+
+    def test_binary_content_keeps_its_sentinel(self, request_factory):
+        assert self._log_data(request_factory, body=b"\x89PNG\r\n")["body"] == "[Binary Content]"
+
+    # --- the names themselves ---
+
+    @pytest.mark.parametrize(
+        "name", ["keywords", "author", "authoredBy", "monkey", "sequenceId", "assignee_ids", "description_html"]
+    )
+    def test_ordinary_field_names_are_not_redacted(self, request_factory, name):
+        """A substring test on "key" would redact `keywords`; matching per word does not."""
+        body = json.dumps({name: "kept"}).encode()
+
+        assert "kept" in self._log_data(request_factory, body=body)["body"]
+
+    @pytest.mark.parametrize("name", ["apiKey", "accessToken", "clientSecret", "refreshToken", "OTPCode"])
+    def test_camel_case_credentials_are_redacted(self, request_factory, name):
+        """camelCase has to be split before lowercasing or `apiKey` collapses to one word and slips
+        through — which the first version did, and JS clients send camelCase as a matter of course."""
+        body = json.dumps({name: "leak"}).encode()
+
+        assert "leak" not in self._log_data(request_factory, body=body)["body"]
