@@ -3,7 +3,7 @@
  * Runs on desktop, Android and iPhone; phone-only / desktop-only cases skip themselves.
  */
 import type { Page } from "@playwright/test";
-import { apiDelete, apiPatch, apiPost, authFile, expect, isPhone, manifest, settledReload, test } from "./helpers";
+import { apiDelete, apiPatch, apiPost, authFile, expect, isPhone, manifest, resilientReload, test } from "./helpers";
 
 const { QAA, QAB } = manifest.workspaces.qa.projects;
 const sidebar = (page: Page) => page.getByRole("complementary", { name: "Main sidebar" });
@@ -145,7 +145,7 @@ async function clearPins(page: Page) {
     await apiDelete(page, `/api/workspaces/qa/user-favorites/${pins[0].id}/`);
   }
   expect(await listPins(page), "clearPins could not empty the pins").toEqual([]);
-  await settledReload(page); // the sidebar store still holds what we just deleted
+  await resilientReload(page); // the sidebar store still holds what we just deleted
 }
 
 test.describe("Pins (L5-17/L5-18, B-08…B-11)", () => {
@@ -173,7 +173,7 @@ test.describe("Pins (L5-17/L5-18, B-08…B-11)", () => {
     await expect(page.getByRole("dialog")).toHaveCount(0);
 
     try {
-      await settledReload(page);
+      await resilientReload(page);
       await openNav(page, device);
       await expect(pins.getByRole("button", { name: "QA page to pin" })).toBeVisible();
       // B-11: a pinned page is listed under Pins only, never duplicated in Favorites
@@ -267,7 +267,7 @@ test.describe("Pins follow the entity (L5-18b, B-08…B-10)", () => {
           name: "STALE LABEL",
         });
 
-      await settledReload(page);
+      await resilientReload(page);
       await openNav(page, device);
       const label = `${QAA.identifier}-${issue.sequence_id}`;
       await expect(pins.getByRole("button", { name: `${label} L5-18b item before rename` })).toBeVisible();
@@ -277,14 +277,14 @@ test.describe("Pins follow the entity (L5-18b, B-08…B-10)", () => {
       // B-08: renamed in place — the pin follows, nothing has to be re-pinned
       await apiPatch(page, `${base}/issues/${issueId}/`, { name: "L5-18b item renamed" });
       await apiPatch(page, `${base}/pages/${pageId}/`, { name: "L5-18b page renamed" });
-      await settledReload(page);
+      await resilientReload(page);
       await openNav(page, device);
       await expect(pins.getByRole("button", { name: `${label} L5-18b item renamed` })).toBeVisible();
       await expect(pins.getByRole("button", { name: "L5-18b page renamed" })).toBeVisible();
 
       // B-09: archived → the pin stays and opens the archived route
       await apiPost(page, `${base}/issues/${issueId}/archive/`);
-      await settledReload(page);
+      await resilientReload(page);
       await openNav(page, device);
       const archived = pins.getByRole("button", { name: /L5-18b item renamed/ });
       await expect(archived).toBeVisible();
@@ -294,7 +294,7 @@ test.describe("Pins follow the entity (L5-18b, B-08…B-10)", () => {
       // archived PAGE: upstream deletes the favourite server-side (deviation from work items,
       // pinned by L4-03b) — so the pin goes away here, and nothing in the sidebar breaks
       await apiPost(page, `${base}/pages/${pageId}/archive/`);
-      await settledReload(page);
+      await resilientReload(page);
       await openNav(page, device);
       await expect(pins.getByRole("button", { name: "L5-18b page renamed" })).toHaveCount(0);
 

@@ -86,29 +86,57 @@ export const apiPost = (page: Page, url: string, data?: unknown) => apiCall(page
 export const apiDelete = (page: Page, url: string) => apiCall(page, "delete", url);
 
 /**
- * `page.reload()` that survives WebKit aborting a reload which raced the SPA's own navigation.
+ * `page.reload()` that retries a WebKit load abort.
  *
- * Measured on the iphone project 2026-11-05, in the prod deploy's dev gate: `page.reload: Frame
- * load interrupted` / `waiting for navigation until "load"` on the first attempt, green on the
- * retry. The only reload in that test is the one clearPins does right after a goto, i.e. while
- * React Router is still settling the route. Chromium never does this.
+ * Measured on the iphone project 2026-11-05 in a deploy gate: `page.reload: Frame load
+ * interrupted` / `waiting for navigation until "load"` on the first attempt, green on Playwright's
+ * own test-level retry. Chromium did not reproduce it. The failing trace was wiped by the next
+ * gate run before it could be read, so **the cause is not established** — only the symptom.
  *
- * Retrying is legitimate rather than masking: the reload is the TEST's action, not a user's —
- * nobody hits reload mid-navigation. If this ever appears together with a real symptom (a redirect
- * loop, a route that never finishes loading), look at the app instead of widening the retry.
+ * What is NOT the cause, so nobody re-derives it (the first version of this comment claimed it and
+ * was wrong): a React Router client-side navigation. Those go through `history.pushState` (see
+ * app/compat/next/navigation.ts), which does not abort a document load in any engine.
+ * `Frame load interrupted` needs a competing DOCUMENT-level navigation, or a cancelled provisional
+ * load.
  *
- * `domcontentloaded` rather than the default `load`: the app renders from it and every caller
- * asserts on what it actually needs, so waiting for every subresource only widens the race.
+ * The only document-level navigation the app itself can make on an authenticated route is the 401
+ * interceptor in core/services/api.service.ts, which does `window.location.replace("/")`. That is
+ * the leading suspect — a session failure mid-test would abort the reload — which is what the URL
+ * guard below is for: if the abort was the app bailing out to the login page, this has to fail
+ * loudly, not retry into a successfully reloaded "/" and leave the caller to fail somewhere
+ * unrelated.
+ *
+ * There is no `waitForLoadState` here on purpose. It resolves against the already-committed
+ * document and does NOT wait for a pending navigation to commit, so in this exact race it returns
+ * immediately and buys nothing. The backoff is what makes the retry different from the attempt
+ * that just failed: after an abort the old document is still current and already
+ * `domcontentloaded`, so a bare retry fires within microseconds and lands in the same window.
+ *
+ * Retrying is a harness measure, not a fix, and it does not close the flake. If this appears next
+ * to a real symptom — a redirect loop, a route that never finishes loading, a burst of 401s — the
+ * app is the thing to look at.
+ *
+ * To capture the next occurrence: the gate wipes apps/web/test-results on its next run, and the
+ * VPS has no `unzip` — read trace.zip with python's zipfile, and copy the directory before
+ * re-running anything.
  */
-export async function settledReload(page: Page, attempts = 3) {
+export async function resilientReload(page: Page, attempts = 3) {
+  const before = new URL(page.url()).pathname;
   for (let attempt = 1; ; attempt++) {
     try {
-      await page.waitForLoadState("domcontentloaded");
       await page.reload({ waitUntil: "domcontentloaded" });
       return;
     } catch (error) {
       const aborted = /Frame load interrupted|interrupted by another navigation/i.test(String(error));
       if (!aborted || attempt >= attempts) throw error;
+      await page.waitForTimeout(250 * attempt);
+      const now = new URL(page.url()).pathname;
+      if (now !== before)
+        throw new Error(
+          `resilientReload: reloading ${before} was aborted and the page is now at ${now}. ` +
+            `The app navigated away rather than losing a race — a lost session (the 401 ` +
+            `interceptor redirects to "/") is the first thing to check. Original: ${error}`
+        );
     }
   }
 }
