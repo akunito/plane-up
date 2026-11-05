@@ -86,6 +86,34 @@ export const apiPost = (page: Page, url: string, data?: unknown) => apiCall(page
 export const apiDelete = (page: Page, url: string) => apiCall(page, "delete", url);
 
 /**
+ * `page.reload()` that survives WebKit aborting a reload which raced the SPA's own navigation.
+ *
+ * Measured on the iphone project 2026-11-05, in the prod deploy's dev gate: `page.reload: Frame
+ * load interrupted` / `waiting for navigation until "load"` on the first attempt, green on the
+ * retry. The only reload in that test is the one clearPins does right after a goto, i.e. while
+ * React Router is still settling the route. Chromium never does this.
+ *
+ * Retrying is legitimate rather than masking: the reload is the TEST's action, not a user's —
+ * nobody hits reload mid-navigation. If this ever appears together with a real symptom (a redirect
+ * loop, a route that never finishes loading), look at the app instead of widening the retry.
+ *
+ * `domcontentloaded` rather than the default `load`: the app renders from it and every caller
+ * asserts on what it actually needs, so waiting for every subresource only widens the race.
+ */
+export async function settledReload(page: Page, attempts = 3) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.waitForLoadState("domcontentloaded");
+      await page.reload({ waitUntil: "domcontentloaded" });
+      return;
+    } catch (error) {
+      const aborted = /Frame load interrupted|interrupted by another navigation/i.test(String(error));
+      if (!aborted || attempt >= attempts) throw error;
+    }
+  }
+}
+
+/**
  * `test` with an automatic guard: uncaught page errors fail the test, and after the body
  * the page must show no error boundary (and no horizontal overflow on phones).
  */

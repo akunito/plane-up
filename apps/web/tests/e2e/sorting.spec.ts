@@ -3,7 +3,7 @@
  * oracle in this file and compared with the order the rows are actually rendered in.
  */
 import type { Page } from "@playwright/test";
-import { apiPatch, authFile, closeDrawer, expect, isPhone, manifest, test } from "./helpers";
+import { apiPatch, authFile, closeDrawer, expect, isPhone, manifest, settledReload, test } from "./helpers";
 
 const QAA = manifest.workspaces.qa.projects.QAA;
 const PROPS = `/api/workspaces/qa/projects/${QAA.id}/user-properties/`;
@@ -137,7 +137,7 @@ test("rules persist per view and apply without refetching (L5-73/L5-74, B-28)", 
   await expectOrder(page, oracle(items, "asc"));
   expect(listFetches, "re-sorting must not refetch the list").toBe(0);
 
-  await page.reload();
+  await settledReload(page);
   await expectOrder(page, oracle(items, "asc"));
   const stored = JSON.parse((await page.evaluate((k) => localStorage.getItem(k), MS_KEY)) ?? "{}");
   const scopes = Object.entries(stored).filter(([, keys]) => Array.isArray(keys) && keys.length);
