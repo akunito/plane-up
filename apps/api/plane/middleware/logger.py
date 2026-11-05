@@ -116,6 +116,34 @@ class APITokenLogMiddleware:
     # Headers whose values must never be persisted in plaintext logs
     SENSITIVE_HEADERS = frozenset({"x-api-key", "authorization", "cookie"})
 
+    # Cap on a stored failure body. A validation error can enumerate a large payload, and the
+    # point of keeping these is the error, not the volume.
+    RESPONSE_BODY_MAX_CHARS = 8192
+
+    def _response_body_to_log(self, response):
+        """The response body to persist: failures only, capped (APLANE-18).
+
+        Storing every successful response made prod's `api_activity_logs` 901 MB of a 947 MB
+        database — 95%, 718 MB of it TOASTed work-item list payloads, because plane-bot's mirror
+        polls the v1 API every 60 s and this middleware kept each full response. A 2xx body is
+        something the caller already received and nothing reads it back: nothing in the fork or in
+        the test suite selects `api_activity_logs.response_body`. A failure's body is the one case
+        where this row is the only copy, so that is what is kept.
+
+        The status check comes first on purpose, so a successful streaming response is never
+        touched here at all (`.content` does not exist on one, and reaching for it only ever
+        raised into the caller's except).
+        """
+        if 200 <= response.status_code < 300:
+            return None
+        content = getattr(response, "content", None)
+        if not content:
+            return None
+        body = self._safe_decode_body(content)
+        if body and len(body) > self.RESPONSE_BODY_MAX_CHARS:
+            return f"{body[: self.RESPONSE_BODY_MAX_CHARS]}… [truncated]"
+        return body
+
     def _redacted_headers(self, request):
         """
         Returns the request headers as a string with sensitive values redacted,
@@ -149,7 +177,7 @@ class APITokenLogMiddleware:
                 "query_params": request.META.get("QUERY_STRING", ""),
                 "headers": self._redacted_headers(request),
                 "body": self._safe_decode_body(request_body) if request_body else None,
-                "response_body": self._safe_decode_body(response.content) if response.content else None,
+                "response_body": self._response_body_to_log(response),
                 "response_code": response.status_code,
                 "ip_address": get_client_ip(request=request),
                 "user_agent": request.META.get("HTTP_USER_AGENT", None),

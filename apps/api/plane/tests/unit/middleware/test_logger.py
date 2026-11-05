@@ -8,6 +8,7 @@ Unit tests for APITokenLogMiddleware.
 Covers the credential-hygiene guarantees of the external API request logger:
 - the raw API key is never persisted (a non-reversible hash is stored instead)
 - sensitive request headers are redacted before being logged
+- and what it stores of the response body (APLANE-18): failures only, capped
 """
 
 import hashlib
@@ -17,7 +18,7 @@ from unittest.mock import Mock, patch
 import pytest
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
-from django.http import HttpResponse
+from django.http import HttpResponse, StreamingHttpResponse
 from django.test import RequestFactory
 
 from plane.middleware.logger import APITokenLogMiddleware
@@ -39,7 +40,7 @@ class TestAPITokenLogMiddleware:
     AUTHORIZATION = "Bearer secret-bearer-token"
     COOKIE = "sessionid=secret-session-value"
 
-    def _captured_log_data(self, middleware, request_factory):
+    def _captured_log_data(self, middleware, request_factory, response=None):
         request = request_factory.get(
             "/api/v1/workspaces/",
             HTTP_X_API_KEY=self.API_KEY,
@@ -47,7 +48,7 @@ class TestAPITokenLogMiddleware:
             HTTP_COOKIE=self.COOKIE,
         )
         request.user = AnonymousUser()
-        response = HttpResponse(b"{}")
+        response = HttpResponse(b"{}") if response is None else response
         with patch("plane.middleware.logger.process_logs") as process_logs:
             middleware.process_request(request, response, request_body=b"")
             assert process_logs.delay.called
@@ -77,3 +78,79 @@ class TestAPITokenLogMiddleware:
         with patch("plane.middleware.logger.process_logs") as process_logs:
             middleware.process_request(request, HttpResponse(b"{}"), request_body=b"")
             assert not process_logs.delay.called
+
+
+@pytest.mark.unit
+class TestResponseBodyIsOnlyKeptForFailures:
+    """APLANE-18: successful response bodies are not persisted.
+
+    Storing them made prod's api_activity_logs 901 MB of a 947 MB database — 95%, because
+    plane-bot's mirror polls the v1 API every 60 s and each full work-item list response was kept.
+    Nothing reads the column back, so a 2xx body buys nothing; a failure's body is the one case
+    where the log row is the only copy.
+    """
+
+    API_KEY = "plane_api_supersecretvalue"
+
+    def _log_data(self, request_factory, response):
+        middleware = APITokenLogMiddleware(Mock(return_value=response))
+        request = request_factory.get("/api/v1/workspaces/", HTTP_X_API_KEY=self.API_KEY)
+        request.user = AnonymousUser()
+        with patch("plane.middleware.logger.process_logs") as process_logs:
+            middleware.process_request(request, response, request_body=b"")
+            assert process_logs.delay.called, "the request must still be logged"
+            return process_logs.delay.call_args.kwargs["log_data"]
+
+    @pytest.mark.parametrize("status", [200, 201, 204, 299])
+    def test_successful_bodies_are_not_stored(self, request_factory, status):
+        payload = b'{"results": ["a very large work item list"]}'
+        log_data = self._log_data(request_factory, HttpResponse(payload, status=status))
+
+        assert log_data["response_body"] is None
+        # the row itself must survive — this is a storage change, not a logging change
+        assert log_data["response_code"] == status
+        assert log_data["path"] == "/api/v1/workspaces/"
+
+    @pytest.mark.parametrize("status", [400, 401, 403, 404, 429, 500, 503])
+    def test_failure_bodies_are_stored(self, request_factory, status):
+        log_data = self._log_data(request_factory, HttpResponse(b'{"error": "boom"}', status=status))
+
+        assert log_data["response_body"] == '{"error": "boom"}'
+
+    def test_a_redirect_is_kept_too(self, request_factory):
+        """3xx is not success; whatever it carries is cheap and may explain a misrouted client."""
+        log_data = self._log_data(request_factory, HttpResponse(b"moved", status=302))
+
+        assert log_data["response_body"] == "moved"
+
+    def test_a_large_failure_body_is_truncated(self, request_factory):
+        oversized = b"x" * (APITokenLogMiddleware.RESPONSE_BODY_MAX_CHARS + 5000)
+        log_data = self._log_data(request_factory, HttpResponse(oversized, status=400))
+
+        body = log_data["response_body"]
+        assert body.endswith("… [truncated]")
+        assert len(body) == APITokenLogMiddleware.RESPONSE_BODY_MAX_CHARS + len("… [truncated]")
+
+    def test_a_failure_body_at_the_cap_is_not_truncated(self, request_factory):
+        exact = b"x" * APITokenLogMiddleware.RESPONSE_BODY_MAX_CHARS
+        log_data = self._log_data(request_factory, HttpResponse(exact, status=400))
+
+        assert log_data["response_body"] == exact.decode()
+
+    def test_an_empty_failure_body_is_none(self, request_factory):
+        log_data = self._log_data(request_factory, HttpResponse(b"", status=404))
+
+        assert log_data["response_body"] is None
+
+    def test_a_streaming_success_is_never_touched(self, request_factory):
+        """The status check comes first so `.content` is not reached on a 2xx.
+
+        A StreamingHttpResponse has no `.content`; the old code reached for it and raised into
+        process_request's except, which silently dropped the whole log row.
+        """
+        response = StreamingHttpResponse((b"chunk" for _ in range(3)), status=200)
+
+        log_data = self._log_data(request_factory, response)
+
+        assert log_data["response_body"] is None
+        assert log_data["response_code"] == 200, "and the row is still logged, which it was not before"
