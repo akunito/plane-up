@@ -48,14 +48,22 @@ API_URL = "/api/v1/workspaces/{slug}/projects/{project_id}/issues/{pk}/"
 
 @pytest.fixture(autouse=True)
 def _no_broker(db):
-    """The delete paths fan out to celery; the tests only care about the rows left behind."""
+    """The delete paths fan out to celery; the tests only care about the rows left behind.
+
+    Yields the patched cascade task so a test can assert whether the path under test queued it.
+    That matters because `cascade=True/False` per call site is justified entirely by whether the
+    delete is an instance delete (queues it) or a soft queryset delete (does not) — and with the
+    task patched out, "the sub-item is still alive" is true either way. Without these call-count
+    assertions, someone fixing upstream's bulk delete to iterate `for issue in issues:
+    issue.delete()` would make `cascade=False` silently wrong, with the whole gate still green.
+    """
     with (
-        mock.patch("plane.db.mixins.soft_delete_related_objects"),
+        mock.patch("plane.db.mixins.soft_delete_related_objects") as cascade,
         mock.patch("plane.app.views.issue.base.issue_activity"),
         mock.patch("plane.app.views.issue.archive.issue_activity"),
         mock.patch("plane.api.views.issue.issue_activity"),
     ):
-        yield
+        yield cascade
 
 
 @pytest.fixture
@@ -210,7 +218,7 @@ def test_external_api_delete_drops_the_pin(api_key_client, workspace, project, c
 # left the same stale-row bug one level down.
 
 
-def test_destroy_drops_a_sub_items_pin(session_client, workspace, project, create_user):
+def test_destroy_drops_a_sub_items_pin(session_client, workspace, project, create_user, _no_broker):
     parent = _issue(project, "parent")
     child = _child(project, parent)
     parent_pin = _pin(create_user, parent, project)
@@ -218,6 +226,10 @@ def test_destroy_drops_a_sub_items_pin(session_client, workspace, project, creat
 
     session_client.delete(APP_URL.format(slug=workspace.slug, project_id=project.id, pk=parent.id))
 
+    assert _no_broker.delay.call_count >= 1, (
+        "premise of cascade=True here: the single destroy is an INSTANCE delete and must queue "
+        "soft_delete_related_objects, which is what takes the sub-item with it"
+    )
     assert not _alive(parent_pin)
     assert not _alive(child_pin), "the cascade soft-deletes the sub-item, so its pin must go too"
 
@@ -282,7 +294,7 @@ def test_intake_destroy_drops_the_pin(session_client, workspace, project, create
     assert not _alive(pin)
 
 
-def test_bulk_delete_keeps_a_live_sub_items_pin(session_client, workspace, project, create_user):
+def test_bulk_delete_keeps_a_live_sub_items_pin(session_client, workspace, project, create_user, _no_broker):
     """The regression this test exists for: the bulk endpoint uses the QUERYSET delete, which is a
     bare `update(deleted_at=…)` and never queues `soft_delete_related_objects`. So sub-items of a
     bulk-deleted parent stay alive and listable, and their pins must stay too — otherwise a pin
@@ -300,9 +312,14 @@ def test_bulk_delete_keeps_a_live_sub_items_pin(session_client, workspace, proje
 
     assert response.status_code == status.HTTP_200_OK
     assert not _alive(parent_pin)
+    assert _no_broker.delay.call_count == 0, (
+        "premise of cascade=False here: a soft QUERYSET delete must NOT queue "
+        "soft_delete_related_objects. If this ever fires, the bulk endpoint started cascading and "
+        "cascade=False became wrong — the sub-items would then be deleted with their pins left "
+        "behind, which is the stale-row race this work removed"
+    )
     assert Issue.objects.filter(pk=child.pk).exists(), (
-        "sanity: the queryset delete does not cascade, so the sub-item must still be alive — "
-        "if this fails the premise of the test is gone"
+        "and the sub-item really is still alive, so the kept pin below is correct"
     )
     assert _alive(child_pin), "the sub-item is still there, so it must keep its pin"
 

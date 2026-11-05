@@ -32,24 +32,34 @@ def drop_work_item_favorites(issue_ids, project_id, *, cascade=True):
     their pins have to go too. Walked level by level, over `all_objects` so it does not matter
     whether the celery cascade has already soft-deleted them by the time we get here.
 
-    **`cascade=False` is mandatory on a QUERYSET delete.** `SoftDeletionQuerySet.delete()` is a
-    bare `update(deleted_at=…)`: it never calls the instance `delete()`, so
+    **`cascade=False` is mandatory on a SOFT queryset delete.** `SoftDeletionQuerySet.delete()` is
+    a bare `update(deleted_at=…)`: it never calls the instance `delete()`, so
     `soft_delete_related_objects` is never queued and the sub-items stay alive and listable. Taking
     their pins there would be the same wrong-pin-state bug this helper exists to fix, inverted —
     a pin vanishing from a work item the user can still open. (That bulk delete orphans sub-items
     at all is upstream's, and is not this helper's to fix.)
 
-    The sub-tree pins are dropped eagerly while the cascade that justifies them is only
-    *eventually* attempted: if the broker is down, the worker dies, or the task swallows an error
-    (`deletion_task.py` catches per relation and prints), the children survive with no pins. Known
-    and accepted — the alternative is leaving the stale rows that made B-10 a race.
+    The opposite holds for a HARD queryset delete: `all_objects` is a plain `models.Manager`, so
+    `Issue.all_objects.filter(…).delete()` (as in `deletion_task.hard_delete`) is Django's real
+    delete and DOES cascade to the children for real. Do not read the rule above as "queryset ⇒
+    cascade=False"; read the delete.
 
-    The child query is project-scoped while the cascade is NOT (it walks `parent_issue` across
-    projects), so a cross-project sub-item's pin would be missed. Measured on prod 2026-11-05:
-    133 sub-items, 0 with a parent in another project — and this fork's API cannot create one
+    The sub-tree pins are dropped eagerly, while the cascade that justifies them is attempted
+    exactly ONCE, best-effort, and never retried: `soft_delete_related_objects` is a bare
+    `@shared_task` with no `autoretry_for`, its relation loop catches per relation and only prints,
+    and nothing reconciles afterwards. So if the broker is down, the worker dies, or one child's
+    save() raises, those children stay alive and listable with no pins — permanently, not just for
+    a while. Known and accepted: the alternative is the stale rows that made B-10 a race, and an
+    orphaned sub-item can simply be re-pinned.
+
+    Both queries are project-scoped while the cascade is NOT (it walks `parent_issue` across
+    projects), so a cross-project sub-item's pin would be missed, and so would a pin row whose own
+    `project_id` does not match its issue. Measured on prod 2026-11-05: 133 sub-items, 0 with a
+    parent in another project; 8 live issue pins, 0 with a mismatched or NULL `project_id`, 0
+    already orphaned (so no backfill was needed). This fork's API cannot create either case
     (`SubIssuesEndpoint` and both `IssueCreateSerializer.validate`s require the parent in the same
-    project, and nothing moves an item between projects). If cross-project sub-issues ever land,
-    drop `project_id` from the child query and scope the final filter by workspace instead.
+    project; `WorkspaceFavoriteEndpoint.post` validates the issue through `project_id`). If
+    cross-project sub-issues ever land, drop `project_id` from both queries and scope by workspace.
 
     Deliberately not scoped to a user: the work item is gone for everybody. Archiving must NOT
     call this — an archived work item keeps its pin (L4-03b), unlike an archived page.
