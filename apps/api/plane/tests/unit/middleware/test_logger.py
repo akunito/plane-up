@@ -250,7 +250,13 @@ class TestRequestBodyAndQueryAreRedacted:
         stored = self._log_data(request_factory, body=body)["body"]
 
         assert "leak1" not in stored and "leak2" not in stored
-        assert "fine" in stored and '"id": 1' in stored
+        # Parsed rather than substring-matched: these two assertions were written against
+        # json.dumps' default spacing and broke the moment the serialisation went compact
+        # (`"id": 1` → `"id":1`). What matters is that the data survived, not how it is spelled.
+        parsed = json.loads(stored)
+        assert parsed["meta"]["keywords"] == ["fine"]
+        assert parsed["items"][0]["id"] == 1
+        assert parsed["meta"]["api_key"] == "[REDACTED]"
 
     def test_a_json_array_body_is_redacted_not_passed_through(self, request_factory):
         """A JSON array starts with "[", which an earlier draft used to detect the decode
@@ -260,7 +266,9 @@ class TestRequestBodyAndQueryAreRedacted:
         stored = self._log_data(request_factory, body=body)["body"]
 
         assert "leak" not in stored
-        assert '"id": 1' in stored
+        parsed = json.loads(stored)
+        assert parsed[0]["id"] == 1
+        assert parsed[0]["token"] == "[REDACTED]"
 
     def test_a_non_json_body_is_dropped_rather_than_stored(self, request_factory):
         stored = self._log_data(request_factory, body=b"password=leak&grant_type=x")["body"]
