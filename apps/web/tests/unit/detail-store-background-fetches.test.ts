@@ -35,15 +35,25 @@ const SECONDARY_FETCHES = [
   "fetchProjectStates",
 ] as const;
 
-/** Lines that call one of them, with their 1-based numbers, excluding the import and comments. */
+/** Lines that call one of them, with their 1-based numbers, excluding comments. */
 const callSites = (name: string) =>
   SOURCE.split("\n")
     .map((text, i) => ({ line: i + 1, text: text.trim() }))
     .filter(({ text }) => text.includes(`.${name}(`) && !text.startsWith("//") && !text.startsWith("*"));
 
+/**
+ * Only a complete statement can be fire-and-forget. A line ending in anything else is an element or
+ * an argument of a larger expression, and whoever owns that expression owns the error handling —
+ * issue.store.ts:192 is one of these, a member of `await Promise.all([...])`, which the first draft
+ * of this test flagged wrongly.
+ */
+const isStatement = ({ text }: { text: string }) => text.endsWith(";");
+
 describe("work-item detail store: secondary fetches are guarded (L1-19)", () => {
   it.each(SECONDARY_FETCHES)("every %s call is wrapped in background() or awaited", (name) => {
-    const unguarded = callSites(name).filter(({ text }) => !text.includes("background(") && !text.includes("await "));
+    const unguarded = callSites(name)
+      .filter(isStatement)
+      .filter(({ text }) => !text.includes("background(") && !text.includes("await "));
 
     expect(unguarded, `unwrapped ${name} call(s) — an unhandled rejection when the work item is gone`).toEqual([]);
   });
