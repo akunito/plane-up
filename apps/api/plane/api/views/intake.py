@@ -28,6 +28,7 @@ from plane.api.serializers import (
 from plane.app.permissions import ProjectLitePermission
 from plane.bgtasks.issue_activities_task import issue_activity
 from plane.db.models import Intake, IntakeIssue, Issue, Project, ProjectMember, State, StateGroup, WorkspaceMember
+from plane.utils.favorites import drop_work_item_favorites
 from plane.utils.host import base_host
 from plane.utils.serializers import writable_data
 from plane.utils.content_validator import validate_html_content
@@ -518,6 +519,8 @@ class IntakeIssueDetailAPIEndpoint(BaseAPIView):
         if intake_issue.status in [-2, -1, 0, 2]:
             # Delete the issue also
             issue.delete()
+            # Its sidebar pins, and its sub-items' (APLANE-29)
+            drop_work_item_favorites([issue.id], project_id)
 
         intake_issue.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

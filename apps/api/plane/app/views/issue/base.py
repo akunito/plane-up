@@ -59,9 +59,9 @@ from plane.db.models import (
     ModuleIssue,
     Project,
     ProjectMember,
-    UserFavorite,
     UserRecentVisit,
 )
+from plane.utils.favorites import drop_work_item_favorites
 from plane.utils.filters import ComplexFilterBackend, IssueFilterSet
 from plane.utils.global_paginator import paginate
 from plane.utils.grouper import (
@@ -721,12 +721,8 @@ class IssueViewSet(BaseViewSet):
         issue = Issue.objects.get(workspace__slug=slug, project_id=project_id, pk=pk)
 
         issue.delete()
-        # Drop the sidebar pins pointing at it, for every user (APLANE-29). Cycles, modules,
-        # projects and pages already do this in their own destroy; work items did not, so the only
-        # cleanup was client-side in usePinnedEntities, which fires a DELETE after it resolves a
-        # 404. That left the row behind until some browser happened to render the sidebar, and made
-        # the E2E assertion a race against that fetch.
-        UserFavorite.objects.filter(entity_type="issue", entity_identifier=pk, project_id=project_id).delete()
+        # Drop the sidebar pins pointing at it, and at its sub-items, for every user (APLANE-29).
+        drop_work_item_favorites([pk], project_id)
         # delete the issue from recent visits
         UserRecentVisit.objects.filter(
             project_id=project_id,
@@ -797,19 +793,17 @@ class BulkDeleteIssuesEndpoint(BaseAPIView):
         # Then, delete all related module issues
         ModuleIssue.objects.filter(issue__in=issues).delete()
 
-        # Same pin cleanup as the single destroy above (APLANE-29), but keyed off the queryset
-        # rather than the request body: issue_objects excludes archived, draft, triage and
-        # archived-project items, so an id in issue_ids is not necessarily an id we delete — and an
-        # archived work item must KEEP its pin (L4-03b). Materialised before the delete, while the
-        # rows are still visible to issue_objects.
-        UserFavorite.objects.filter(
-            entity_type="issue",
-            entity_identifier__in=list(issues.values_list("id", flat=True)),
-            project_id=project_id,
-        ).delete()
+        # The ids we are actually deleting, read off the queryset rather than the request body:
+        # issue_objects excludes archived, draft, triage and archived-project items, so an id in
+        # issue_ids is not necessarily an id we delete — and an archived work item must KEEP its
+        # pin (L4-03b). Materialised here, while the rows are still visible to issue_objects.
+        deleted_ids = list(issues.values_list("id", flat=True))
 
         # Finally, delete the issues themselves
         issues.delete()
+
+        # Pins of those work items and of their sub-items (APLANE-29)
+        drop_work_item_favorites(deleted_ids, project_id)
 
         return Response(
             {"message": f"{total_issues} issues were deleted"},

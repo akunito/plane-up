@@ -53,6 +53,7 @@ from plane.utils.global_paginator import paginate
 from plane.utils.host import base_host
 from plane.utils.serializers import writable_data
 from plane.db.models.intake import SourceType
+from plane.utils.favorites import drop_work_item_favorites
 
 
 class IntakeViewSet(BaseViewSet):
@@ -566,6 +567,8 @@ class IntakeIssueViewSet(BaseViewSet):
             # Delete the issue also
             issue = Issue.objects.filter(workspace__slug=slug, project_id=project_id, pk=pk).first()
             issue.delete()
+            # Its sidebar pins, and its sub-items' (APLANE-29)
+            drop_work_item_favorites([pk], project_id)
 
         intake_issue.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

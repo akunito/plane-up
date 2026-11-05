@@ -76,10 +76,10 @@ from plane.db.models import (
     Project,
     ProjectMember,
     CycleIssue,
-    UserFavorite,
     Workspace,
     WorkspaceMember,
 )
+from plane.utils.favorites import drop_work_item_favorites
 from plane.settings.storage import S3Storage
 from plane.utils.path_validator import sanitize_filename
 from plane.utils.order_queryset import (
@@ -929,7 +929,7 @@ class IssueDetailAPIEndpoint(BaseAPIView):
         current_instance = json.dumps(IssueSerializer(issue).data, cls=DjangoJSONEncoder)
         issue.delete()
         # Drop the sidebar pins pointing at it, as the app viewset does (APLANE-29)
-        UserFavorite.objects.filter(entity_type="issue", entity_identifier=pk, project_id=project_id).delete()
+        drop_work_item_favorites([pk], project_id)
         issue_activity.delay(
             type="issue.activity.deleted",
             requested_data=json.dumps({"issue_id": str(pk)}),

@@ -26,9 +26,20 @@ from rest_framework import status
 
 from django.utils import timezone
 
-from plane.db.models import Issue, Project, ProjectMember, State, User, UserFavorite, WorkspaceMember
+from plane.db.models import (
+    Intake,
+    IntakeIssue,
+    Issue,
+    Project,
+    ProjectMember,
+    State,
+    User,
+    UserFavorite,
+    WorkspaceMember,
+)
 
 APP_URL = "/api/workspaces/{slug}/projects/{project_id}/issues/{pk}/"
+INTAKE_URL = "/api/workspaces/{slug}/projects/{project_id}/intake-issues/{pk}/"
 APP_ARCHIVE_URL = "/api/workspaces/{slug}/projects/{project_id}/issues/{pk}/archive/"
 BULK_URL = "/api/workspaces/{slug}/projects/{project_id}/bulk-delete-issues/"
 API_URL = "/api/v1/workspaces/{slug}/projects/{project_id}/issues/{pk}/"
@@ -62,6 +73,10 @@ def project(workspace, create_user):
 
 def _issue(project, name="pinned item"):
     return Issue.objects.create(name=name, project=project, workspace=project.workspace)
+
+
+def _child(project, parent, name="sub item"):
+    return Issue.objects.create(name=name, project=project, workspace=project.workspace, parent=parent)
 
 
 def _archived_issue(project, name="archived item"):
@@ -186,3 +201,75 @@ def test_external_api_delete_drops_the_pin(api_key_client, workspace, project, c
 
     assert response.status_code == status.HTTP_204_NO_CONTENT
     assert not _alive(pin), "the v1 endpoint deletes the same work item and must clean up the same rows"
+
+
+# --- sub-items (APLANE-29 follow-up) -------------------------------------------------------------
+# Issue.parent is CASCADE and Issue.objects is the plain soft-delete manager, so deleting a work
+# item soft-deletes its whole sub-tree. Nothing cleared those children's pins, so the original fix
+# left the same stale-row bug one level down.
+
+
+def test_destroy_drops_a_sub_items_pin(session_client, workspace, project, create_user):
+    parent = _issue(project, "parent")
+    child = _child(project, parent)
+    parent_pin = _pin(create_user, parent, project)
+    child_pin = _pin(create_user, child, project)
+
+    session_client.delete(APP_URL.format(slug=workspace.slug, project_id=project.id, pk=parent.id))
+
+    assert not _alive(parent_pin)
+    assert not _alive(child_pin), "the cascade soft-deletes the sub-item, so its pin must go too"
+
+
+def test_destroy_walks_more_than_one_level_of_sub_items(session_client, workspace, project, create_user):
+    parent = _issue(project, "parent")
+    child = _child(project, parent, "child")
+    grandchild = _child(project, child, "grandchild")
+    pins = [_pin(create_user, item, project) for item in (parent, child, grandchild)]
+
+    session_client.delete(APP_URL.format(slug=workspace.slug, project_id=project.id, pk=parent.id))
+
+    assert not any(_alive(pin) for pin in pins), "the walk must follow the whole sub-tree, not one level"
+
+
+def test_destroy_drops_an_archived_sub_items_pin(session_client, workspace, project, create_user):
+    """Archiving an item keeps its pin, but deleting its PARENT does not: the cascade covers
+    archived children (Issue.objects ignores archived_at), so the item itself is gone."""
+    parent = _issue(project, "parent")
+    child = _child(project, parent, "archived child")
+    Issue.all_objects.filter(pk=child.pk).update(archived_at=timezone.now())
+    child_pin = _pin(create_user, child, project)
+
+    session_client.delete(APP_URL.format(slug=workspace.slug, project_id=project.id, pk=parent.id))
+
+    assert not _alive(child_pin)
+
+
+def test_destroy_leaves_a_sibling_subtree_alone(session_client, workspace, project, create_user):
+    doomed = _issue(project, "doomed parent")
+    _child(project, doomed, "doomed child")
+    survivor = _issue(project, "survivor parent")
+    survivor_child = _child(project, survivor, "survivor child")
+    survivor_pin = _pin(create_user, survivor_child, project)
+
+    session_client.delete(APP_URL.format(slug=workspace.slug, project_id=project.id, pk=doomed.id))
+
+    assert _alive(survivor_pin), "the walk must not escape the deleted sub-tree"
+
+
+# --- intake (APLANE-29 follow-up) ----------------------------------------------------------------
+
+
+def test_intake_destroy_drops_the_pin(session_client, workspace, project, create_user):
+    """The intake destroy deletes the work item itself when the item was never accepted, and had
+    no pin cleanup of its own."""
+    intake = Intake.objects.create(name="Intake", project=project, workspace=workspace, is_default=True)
+    issue = _issue(project, "intake item")
+    IntakeIssue.objects.create(intake=intake, issue=issue, project=project, workspace=workspace, status=-2)
+    pin = _pin(create_user, issue, project)
+
+    response = session_client.delete(INTAKE_URL.format(slug=workspace.slug, project_id=project.id, pk=issue.id))
+
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+    assert not Issue.objects.filter(pk=issue.pk).exists(), "sanity: status -2 means the item is deleted too"
+    assert not _alive(pin)
