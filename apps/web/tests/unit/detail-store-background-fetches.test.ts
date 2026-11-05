@@ -11,11 +11,20 @@
  * the pattern appearing later — which is the failure mode that actually happened. So the assertion
  * is about the shape of the code: if you add a secondary fetch, it has to be wrapped.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const SOURCE = readFileSync(new URL("../../core/store/issue/issue-details/issue.store.ts", import.meta.url), "utf8");
+// Resolved from cwd, not from import.meta.url: under jsdom that URL is http://localhost/..., and
+// readFileSync rejects it with "The URL must be of scheme file". Tried from apps/web (where
+// vitest.config.ts lives, so the usual cwd) and from the repo root, so it does not depend on where
+// the runner was invoked.
+const RELATIVE = join("core", "store", "issue", "issue-details", "issue.store.ts");
+const CANDIDATES = [join(process.cwd(), RELATIVE), join(process.cwd(), "apps", "web", RELATIVE)];
+const STORE_PATH = CANDIDATES.find(existsSync);
+if (!STORE_PATH) throw new Error(`issue.store.ts not found; looked in:\n  ${CANDIDATES.join("\n  ")}`);
+const SOURCE = readFileSync(STORE_PATH, "utf8");
 
 /** The fire-and-forget section fetches: all 404 at once when the work item has just been deleted. */
 const SECONDARY_FETCHES = [
