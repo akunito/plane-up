@@ -10,7 +10,7 @@
  */
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL = process.env.PT_BASE_URL ?? "https://plane-dev.local.akunito.com";
+const baseURL = process.env.PT_BASE_URL || "https://plane-dev.local.akunito.com";
 
 export default defineConfig({
   testDir: "tests/e2e",

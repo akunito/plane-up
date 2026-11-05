@@ -1,9 +1,14 @@
 /** L5-01 login page · L5-02 route crawl as a signed-in QA admin. */
-import { authFile, expect, manifest, test } from "./helpers";
+import { authFile, BASE_URL, expect, manifest, test } from "./helpers";
 
 const QAA = manifest.workspaces.qa.projects.QAA;
 
 test.describe("login page (L5-01)", () => {
+  // The only unauthenticated test in the suite: `GET /api/users/me/` answers 401 here by design,
+  // so the guard's session tripwire must not apply. Opted out per test rather than by exempting
+  // that URL globally, which would blind the tripwire on every other test (see helpers.ts).
+  test.use({ unauthenticated: true });
+
   test("offers Sign in with Pocket ID and sends the browser to Pocket ID", async ({ page }) => {
     await page.goto("/");
     const button = page.getByRole("button", { name: /Sign in with Pocket ID/ });
@@ -21,8 +26,7 @@ test.describe("login page (L5-01)", () => {
     await button.click();
     await expect.poll(() => authorizeUrl).toMatch(/^https:\/\/auth\.akunito\.com\/authorize\?/);
     const params = new URL(authorizeUrl).searchParams;
-    const base = process.env.PT_BASE_URL ?? "https://plane-dev.local.akunito.com";
-    expect(params.get("redirect_uri")).toBe(`${base}/auth/gitea/callback/`);
+    expect(params.get("redirect_uri")).toBe(`${BASE_URL}/auth/gitea/callback/`);
     expect(params.get("client_id")).toBeTruthy();
     await page.goto("about:blank");
   });

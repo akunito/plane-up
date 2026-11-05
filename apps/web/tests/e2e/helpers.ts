@@ -33,7 +33,9 @@ export type Manifest = {
 };
 export const manifest: Manifest = JSON.parse(fs.readFileSync(process.env.PT_MANIFEST ?? "qa-manifest.json", "utf8"));
 
-export const BASE_URL = process.env.PT_BASE_URL ?? "https://plane-dev.local.akunito.com";
+// `||` not `??`: an empty PT_BASE_URL would make `new URL("")` throw at module scope and every
+// spec would fail to collect with an error naming neither the variable nor this file.
+export const BASE_URL = process.env.PT_BASE_URL || "https://plane-dev.local.akunito.com";
 const APP_ORIGIN = new URL(BASE_URL).origin;
 
 /** Something the global or the per-layout error boundary renders. */
@@ -171,8 +173,27 @@ export async function resilientReload(page: Page, attempts = 3) {
  *     (the Caddyfile proxies even presigned MinIO uploads through the app host, APLANE-15), so a
  *     cross-origin failure here is real and must fail. That turns a deployment fact into an
  *     enforced invariant: point assets at a real S3 host and its CORS faults fail the suite again.
- *   - it arrived within NAVIGATION_GRACE_MS of a main-frame navigation, which is what makes it an
- *     *abandoned* load rather than a *failed* one.
+ *   - it arrived within NAVIGATION_GRACE_MS of a main-frame navigation — correlated at TEARDOWN,
+ *     against every navigation of the test, because the error can land on either side of the
+ *     protocol event (see below).
+ *
+ * Do not over-read the navigation half. `framenavigated` also fires for `history.pushState`
+ * (verified in the running playwright-core 1.64.1: the same-document path builds its event with
+ * `isPublic: true` at coreBundle.js:24561, and the dispatcher only drops `!isPublic`), and every
+ * in-app navigation in this SPA is a pushState. So in practice it means "a navigation of some kind
+ * happened near this error", not "this load was abandoned rather than failed". It still rejects a
+ * message that arrives in a quiet stretch, which is worth having; it is not strong evidence.
+ *
+ * **Why teardown and not a live window.** The error is delivered BEFORE the navigation event, and
+ * deterministically so: WebKit cancels the old document's subresources in `stopAllLoaders()`, so
+ * `XMLHttpRequest::didFail` logs its console error before the new document commits, while
+ * `Page.frameNavigated` is dispatched from `didCommitLoad` — one main-resource round trip later.
+ * Playwright's delivery is fully ordered (one pipe, one `setImmediate` per message, FIFO), so
+ * comparing against the *previous* navigation is simply wrong: in the L5-17 test several seconds
+ * of assertions sit between the last navigation and the `goto` that abandons the loads, so a live
+ * one-sided window would have failed exactly the flake it was written to classify. A reverse
+ * ordering is also possible (a `didFail` already in flight landing after the commit), so the
+ * window is two-sided.
  *
  * No count threshold on purpose: a page genuinely fetching on every navigation can legitimately
  * abandon dozens of requests, so a number would just invent a new flake.
@@ -202,34 +223,41 @@ const abortedLoadOrigin = (msg: string): string | null => {
  * `test` with an automatic guard: uncaught page errors fail the test, and after the body
  * the page must show no error boundary (and no horizontal overflow on phones).
  */
-export const test = base.extend<{ guard: void }>({
+export const test = base.extend<{ guard: void; unauthenticated: boolean }>({
+  /**
+   * Opt a test out of the 401 tripwire below. Only the login-page test needs it, and it needs it
+   * because it is unauthenticated by design.
+   */
+  unauthenticated: [false, { option: true }],
   guard: [
-    async ({ page }, use, testInfo) => {
+    async ({ page, unauthenticated }, use, testInfo) => {
       const pageErrors: string[] = [];
       const consoleErrors: string[] = [];
       const hydrationNoise: string[] = [];
       const abortedLoads: string[] = [];
       const unauthorized: string[] = [];
-      let lastNavigation = 0;
+      /** Every main-frame navigation, so an aborted load can be correlated at teardown. */
+      const navigations: number[] = [];
+      /** Candidates: same-origin abandoned-load messages, classified after the body runs. */
+      const maybeAbandoned: { msg: string; at: number }[] = [];
       page.on("framenavigated", (frame) => {
-        if (frame === page.mainFrame()) lastNavigation = Date.now();
+        if (frame === page.mainFrame()) navigations.push(Date.now());
       });
       // A 401 means the session was lost, and that has to fail loudly: the burst of page errors
       // that used to reveal it (the 401 interceptor's window.location.replace abandons every
-      // in-flight XHR at once) is now classified as noise above, so without this a mid-run session
-      // loss would surface as some unrelated assertion failing much later.
+      // in-flight XHR at once) is now classified as noise, so without this a session loss would
+      // surface as some unrelated assertion failing much later.
       //
-      // Except on the session probe. `GET /api/users/me/` IS the "is anyone signed in?" question,
-      // so a 401 from it is an answer, not a failure — the unauthenticated login-page test
-      // (shell.spec.ts:7) produces three of them by design. I first shipped this without the
-      // exception because I grepped the specs for "401" and found nothing; that only proved no
-      // test *mentions* one, not that none produces one, and the gate caught it on all three
-      // projects. A lost session still fails here, because it 401s the data endpoints the page
-      // was fetching, not just this probe.
-      const SESSION_PROBE = /\/api\/users\/me\b/;
+      // Opted out per test rather than per URL. The first version exempted `/api/users/me` so the
+      // unauthenticated login-page test would pass, and that was wrong twice over: `\b` after
+      // "me" also exempted eight real data endpoints (profile, settings, accounts,
+      // notification-preferences, workspaces, invitations, project-roles…), and worse, it blinded
+      // the tripwire to the commonest session loss of all. `currentUser()` fetches the probe with
+      // `validateStatus: null` precisely to bypass the interceptor, and store/user gates the three
+      // follow-up fetches on that probe succeeding — so a stale storageState produces ONLY probe
+      // 401s on every authenticated test, and an exemption there would see nothing.
       page.on("response", (response) => {
-        if (response.status() === 401 && !SESSION_PROBE.test(response.url()))
-          unauthorized.push(`${response.request().method()} ${response.url()}`);
+        if (response.status() === 401) unauthorized.push(`${response.request().method()} ${response.url()}`);
       });
       page.on("pageerror", (e) => {
         const msg = `${e.name}: ${e.message}`;
@@ -237,21 +265,21 @@ export const test = base.extend<{ guard: void }>({
         // recoverable errors #418/#423/#425 on every route and re-renders on the client. Known
         // upstream noise (2026-09-17) — attached for visibility, not a failure.
         if (/Minified React error #(418|423|425)\b/.test(msg)) hydrationNoise.push(msg);
-        else if (
-          ABORTED_LOAD.test(msg) &&
-          abortedLoadOrigin(msg) === APP_ORIGIN &&
-          Date.now() - lastNavigation < NAVIGATION_GRACE_MS
-        )
-          abortedLoads.push(msg);
+        else if (ABORTED_LOAD.test(msg) && abortedLoadOrigin(msg) === APP_ORIGIN)
+          maybeAbandoned.push({ msg, at: Date.now() });
         else pageErrors.push(msg);
       });
       page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
       await use();
+      // Now that every navigation of the test is known, decide which candidates were abandoned.
+      for (const { msg, at } of maybeAbandoned)
+        if (navigations.some((when) => Math.abs(when - at) < NAVIGATION_GRACE_MS)) abortedLoads.push(msg);
+        else pageErrors.push(msg);
       if (consoleErrors.length) await testInfo.attach("console-errors", { body: consoleErrors.join("\n") });
       if (hydrationNoise.length)
         await testInfo.attach("hydration-noise", { body: `${hydrationNoise.length} recoverable hydration errors` });
       if (abortedLoads.length) await testInfo.attach("aborted-loads", { body: abortedLoads.join("\n") });
-      expect(unauthorized, "the session was lost mid-test (401)").toEqual([]);
+      if (!unauthenticated) expect(unauthorized, "the session was lost (401)").toEqual([]);
       expect(pageErrors, "uncaught errors in the page").toEqual([]);
       if (!page.isClosed() && page.url().startsWith("http")) {
         await expectNoErrorBoundary(page);

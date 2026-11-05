@@ -3,7 +3,7 @@
  * oracle in this file and compared with the order the rows are actually rendered in.
  */
 import type { Page } from "@playwright/test";
-import { apiPatch, authFile, closeDrawer, expect, isPhone, manifest, resilientReload, test } from "./helpers";
+import { apiPatch, authFile, BASE_URL, closeDrawer, expect, isPhone, manifest, resilientReload, test } from "./helpers";
 
 const QAA = manifest.workspaces.qa.projects.QAA;
 const PROPS = `/api/workspaces/qa/projects/${QAA.id}/user-properties/`;
@@ -15,7 +15,7 @@ type Item = { id: string; sequence_id: number; priority: string; target_date: st
 
 async function loadItems(page: Page): Promise<Item[]> {
   const res = await page.request.get(`/api/v1/workspaces/qa/projects/${QAA.id}/issues/?per_page=100`, {
-    headers: { Referer: `${process.env.PT_BASE_URL}/` },
+    headers: { Referer: `${BASE_URL}/` },
   });
   if (res.ok()) return (await res.json()).results;
   // session auth on the internal API as a fallback (v1 needs an API key)
