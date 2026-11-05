@@ -802,8 +802,12 @@ class BulkDeleteIssuesEndpoint(BaseAPIView):
         # Finally, delete the issues themselves
         issues.delete()
 
-        # Pins of those work items and of their sub-items (APLANE-29)
-        drop_work_item_favorites(deleted_ids, project_id)
+        # Pins of those work items only — cascade=False (APLANE-29). This is a QUERYSET delete, and
+        # SoftDeletionQuerySet.delete() is a bare update(deleted_at=…): it never calls the instance
+        # delete(), so soft_delete_related_objects is never queued and the sub-items stay alive and
+        # listable. Dropping their pins here would make a pin vanish from a work item the user can
+        # still open. (That bulk delete orphans sub-items at all is upstream's bug, not ours.)
+        drop_work_item_favorites(deleted_ids, project_id, cascade=False)
 
         return Response(
             {"message": f"{total_issues} issues were deleted"},

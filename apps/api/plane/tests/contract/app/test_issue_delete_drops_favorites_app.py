@@ -40,6 +40,7 @@ from plane.db.models import (
 
 APP_URL = "/api/workspaces/{slug}/projects/{project_id}/issues/{pk}/"
 INTAKE_URL = "/api/workspaces/{slug}/projects/{project_id}/intake-issues/{pk}/"
+API_INTAKE_URL = "/api/v1/workspaces/{slug}/projects/{project_id}/intake-issues/{pk}/"
 APP_ARCHIVE_URL = "/api/workspaces/{slug}/projects/{project_id}/issues/{pk}/archive/"
 BULK_URL = "/api/workspaces/{slug}/projects/{project_id}/bulk-delete-issues/"
 API_URL = "/api/v1/workspaces/{slug}/projects/{project_id}/issues/{pk}/"
@@ -233,8 +234,14 @@ def test_destroy_walks_more_than_one_level_of_sub_items(session_client, workspac
 
 
 def test_destroy_drops_an_archived_sub_items_pin(session_client, workspace, project, create_user):
-    """Archiving an item keeps its pin, but deleting its PARENT does not: the cascade covers
-    archived children (Issue.objects ignores archived_at), so the item itself is gone."""
+    """Archiving an item keeps its pin, but deleting its PARENT takes the pin with it.
+
+    What this actually asserts is that the WALK does not skip archived children. It cannot assert
+    that the cascade soft-deletes them, because `_no_broker` patches `soft_delete_related_objects`
+    out. That half is an argument, not a measurement: `soft_delete_related_objects` reaches children
+    via `(manager="objects")`, and `Issue.objects` is the plain `SoftDeletionManager`, which filters
+    `deleted_at` only — so archived and draft children are included. If upstream ever points
+    `Issue.objects` at `IssueManager`, that argument breaks and nothing here will notice."""
     parent = _issue(project, "parent")
     child = _child(project, parent, "archived child")
     Issue.all_objects.filter(pk=child.pk).update(archived_at=timezone.now())
@@ -269,6 +276,49 @@ def test_intake_destroy_drops_the_pin(session_client, workspace, project, create
     pin = _pin(create_user, issue, project)
 
     response = session_client.delete(INTAKE_URL.format(slug=workspace.slug, project_id=project.id, pk=issue.id))
+
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+    assert not Issue.objects.filter(pk=issue.pk).exists(), "sanity: status -2 means the item is deleted too"
+    assert not _alive(pin)
+
+
+def test_bulk_delete_keeps_a_live_sub_items_pin(session_client, workspace, project, create_user):
+    """The regression this test exists for: the bulk endpoint uses the QUERYSET delete, which is a
+    bare `update(deleted_at=…)` and never queues `soft_delete_related_objects`. So sub-items of a
+    bulk-deleted parent stay alive and listable, and their pins must stay too — otherwise a pin
+    disappears from a work item the user can still open."""
+    parent = _issue(project, "bulk parent")
+    child = _child(project, parent)
+    parent_pin = _pin(create_user, parent, project)
+    child_pin = _pin(create_user, child, project)
+
+    response = session_client.delete(
+        BULK_URL.format(slug=workspace.slug, project_id=project.id),
+        data={"issue_ids": [str(parent.id)]},
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert not _alive(parent_pin)
+    assert Issue.objects.filter(pk=child.pk).exists(), (
+        "sanity: the queryset delete does not cascade, so the sub-item must still be alive — "
+        "if this fails the premise of the test is gone"
+    )
+    assert _alive(child_pin), "the sub-item is still there, so it must keep its pin"
+
+
+def test_api_intake_destroy_drops_the_pin(api_key_client, workspace, project, create_user):
+    """The v1 intake destroy — the one call site with no coverage until now."""
+    intake = Intake.objects.create(name="Intake", project=project, workspace=workspace, is_default=True)
+    issue = _issue(project, "v1 intake item")
+    issue.created_by = create_user  # the endpoint allows the creator or an admin
+    issue.save()
+    IntakeIssue.objects.create(
+        intake=intake, issue=issue, project=project, workspace=workspace, status=-2, created_by=create_user
+    )
+    pin = _pin(create_user, issue, project)
+
+    response = api_key_client.delete(API_INTAKE_URL.format(slug=workspace.slug, project_id=project.id, pk=issue.id))
 
     assert response.status_code == status.HTTP_204_NO_CONTENT
     assert not Issue.objects.filter(pk=issue.pk).exists(), "sanity: status -2 means the item is deleted too"

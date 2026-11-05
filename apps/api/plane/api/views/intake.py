@@ -520,7 +520,7 @@ class IntakeIssueDetailAPIEndpoint(BaseAPIView):
             # Delete the issue also
             issue.delete()
             # Its sidebar pins, and its sub-items' (APLANE-29)
-            drop_work_item_favorites([issue.id], project_id)
+            drop_work_item_favorites([issue_id], project_id)
 
         intake_issue.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
