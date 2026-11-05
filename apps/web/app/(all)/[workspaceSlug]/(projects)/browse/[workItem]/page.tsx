@@ -91,7 +91,11 @@ export const IssueDetailsPage = observer(function IssueDetailsPage({ params }: R
     }
   }, [workspaceSlug, data, router]);
 
-  if (error && !isLoading) {
+  // Settled with no data is a failure even when SWR has no error object to show for it. Belt and
+  // braces with the service fix for APLANE-35: a service that throws a falsy value leaves `error`
+  // undefined, and without this the page would stay on the skeleton for ever. The UI must never
+  // stick, whatever shape the failure arrives in.
+  if (!isLoading && (error || !data)) {
     return (
       <EmptyState
         image={resolvedTheme === "dark" ? emptyIssueDark : emptyIssueLight}

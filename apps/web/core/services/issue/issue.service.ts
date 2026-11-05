@@ -453,7 +453,15 @@ export class IssueService extends APIService {
         return response?.data;
       })
       .catch((error) => {
-        throw error?.response?.data;
+        // `throw error?.response?.data` loses everything when there is no response. An aborted or
+        // network-level failure has no `error.response`, so this threw `undefined`: SWR stored a
+        // FALSY error, the browse page's `if (error && !isLoading)` never fired, and
+        // `issueLoader = !issue || isLoading` stayed true — the user sat on the skeleton loader
+        // for ever, with no error, no retry and nothing to click, until a manual reload
+        // (APLANE-35). Keep the server's payload when there is one so every existing caller sees
+        // what it saw before; otherwise throw something truthy that says what happened.
+        if (error?.response?.data) throw error.response.data;
+        throw new Error(error?.message || "The work item could not be loaded");
       });
   }
 }
