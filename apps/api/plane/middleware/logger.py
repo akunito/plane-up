@@ -116,9 +116,14 @@ class APITokenLogMiddleware:
     # Headers whose values must never be persisted in plaintext logs
     SENSITIVE_HEADERS = frozenset({"x-api-key", "authorization", "cookie"})
 
-    # Cap on a stored failure body. A validation error can enumerate a large payload, and the
-    # point of keeping these is the error, not the volume.
-    RESPONSE_BODY_MAX_CHARS = 8192
+    # Cap on a stored failure body, in BYTES — the column is TEXT and the cost is bytes, not code
+    # points. 8192 *characters* was the first version of this and it bounded almost nothing: 8192
+    # multi-byte characters is up to 32 KB, so if plane-bot ever starts getting a persistent 4xx
+    # (expired token, renamed project, a 429 storm) its ~4,500 requests/day would rebuild the very
+    # problem this change exists to fix, in the same column. 2000 bytes keeps the worst case around
+    # 126 MB/14 days instead of ~2 GB, and the external API's real error bodies are tens of bytes
+    # (`{"error": "The payload is not valid"}`), so nothing diagnostic is lost.
+    RESPONSE_BODY_MAX_BYTES = 2000
 
     def _response_body_to_log(self, response):
         """The response body to persist: failures only, capped (APLANE-18).
@@ -140,9 +145,17 @@ class APITokenLogMiddleware:
         if not content:
             return None
         body = self._safe_decode_body(content)
-        if body and len(body) > self.RESPONSE_BODY_MAX_CHARS:
-            return f"{body[: self.RESPONSE_BODY_MAX_CHARS]}… [truncated]"
-        return body
+        if body is None:
+            return None
+        encoded = body.encode("utf-8")
+        if len(encoded) <= self.RESPONSE_BODY_MAX_BYTES:
+            return body
+        # errors="ignore" drops a code point the byte cut landed inside, so the stored value is
+        # always valid UTF-8. It is not valid JSON any more, which nothing cares about: no code in
+        # the fork and nothing in the test suite reads this column, and the marker makes the
+        # truncation self-evident to a human reading the row.
+        head = encoded[: self.RESPONSE_BODY_MAX_BYTES].decode("utf-8", errors="ignore")
+        return f"{head}… [truncated]"
 
     def _redacted_headers(self, request):
         """

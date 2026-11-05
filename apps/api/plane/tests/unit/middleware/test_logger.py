@@ -124,18 +124,45 @@ class TestResponseBodyIsOnlyKeptForFailures:
         assert log_data["response_body"] == "moved"
 
     def test_a_large_failure_body_is_truncated(self, request_factory):
-        oversized = b"x" * (APITokenLogMiddleware.RESPONSE_BODY_MAX_CHARS + 5000)
-        log_data = self._log_data(request_factory, HttpResponse(oversized, status=400))
+        cap = APITokenLogMiddleware.RESPONSE_BODY_MAX_BYTES
+        log_data = self._log_data(request_factory, HttpResponse(b"x" * (cap + 5000), status=400))
 
         body = log_data["response_body"]
         assert body.endswith("… [truncated]")
-        assert len(body) == APITokenLogMiddleware.RESPONSE_BODY_MAX_CHARS + len("… [truncated]")
+        assert len(body.encode()) == cap + len("… [truncated]".encode())
 
     def test_a_failure_body_at_the_cap_is_not_truncated(self, request_factory):
-        exact = b"x" * APITokenLogMiddleware.RESPONSE_BODY_MAX_CHARS
+        exact = b"x" * APITokenLogMiddleware.RESPONSE_BODY_MAX_BYTES
         log_data = self._log_data(request_factory, HttpResponse(exact, status=400))
 
         assert log_data["response_body"] == exact.decode()
+
+    def test_the_cap_is_bytes_not_characters(self, request_factory):
+        """The whole point of the cap: 2000 multi-byte characters would be up to 8000 bytes.
+
+        The first version of this counted code points, which bounded almost nothing — a persistent
+        4xx against plane-bot's ~4,500 requests/day would have rebuilt the problem in the same
+        column.
+        """
+        cap = APITokenLogMiddleware.RESPONSE_BODY_MAX_BYTES
+        # "é" is 2 bytes, so `cap` of them is twice the budget
+        log_data = self._log_data(request_factory, HttpResponse("é".encode() * cap, status=400))
+
+        stored = log_data["response_body"]
+        assert stored.endswith("… [truncated]")
+        assert len(stored.encode()) <= cap + len("… [truncated]".encode())
+        assert len(stored) < cap, "a character count would have let twice the bytes through"
+
+    def test_truncation_never_leaves_invalid_utf8(self, request_factory):
+        """A byte cut can land inside a code point; the stored value must still be valid UTF-8."""
+        cap = APITokenLogMiddleware.RESPONSE_BODY_MAX_BYTES
+        # 3-byte characters, so the cut at `cap` bytes falls mid-character for most caps
+        payload = ("€" * ((cap // 3) + 50)).encode()
+        log_data = self._log_data(request_factory, HttpResponse(payload, status=500))
+
+        stored = log_data["response_body"]
+        stored.encode("utf-8").decode("utf-8")  # raises if the cut corrupted it
+        assert "\ufffd" not in stored, "no replacement characters — the split tail is dropped, not mangled"
 
     def test_an_empty_failure_body_is_none(self, request_factory):
         log_data = self._log_data(request_factory, HttpResponse(b"", status=404))
