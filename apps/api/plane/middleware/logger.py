@@ -364,9 +364,13 @@ class APITokenLogMiddleware:
         today because nginx overwrites that header with $remote_addr rather than appending it
         (APLANE-28); this is the other half of the warning that sits next to that directive.
         """
+        raw = get_client_ip(request=request)
         try:
-            return str(ipaddress.ip_address(get_client_ip(request=request)))
-        except (ValueError, TypeError):
+            # .strip() because X-Forwarded-For allows whitespace around its commas (RFC 7239), and
+            # get_client_ip takes split(",")[0] verbatim — without it this guard would turn a
+            # perfectly good "1.2.3.4 , 5.6.7.8" into None and lose data that used to store fine.
+            return str(ipaddress.ip_address(raw.strip()))
+        except (ValueError, TypeError, AttributeError):
             return None
 
     @staticmethod
