@@ -318,35 +318,36 @@ class TestTheRedactorCannotSuppressTheAuditRow:
     API_KEY = "plane_api_supersecretvalue"
 
     def _log_data(self, request_factory, body=None, path="/api/v1/workspaces/"):
+        """Returns the log_data, and asserts the row was written at all — which is the whole point
+        of this class, and which the first version of this helper left to a later TypeError."""
         middleware = APITokenLogMiddleware(Mock(return_value=HttpResponse(b"{}")))
         request = request_factory.get(path, HTTP_X_API_KEY=self.API_KEY)
         request.user = AnonymousUser()
         with patch("plane.middleware.logger.process_logs") as process_logs:
             middleware.process_request(request, HttpResponse(b"{}"), request_body=body)
-            return process_logs
+            assert process_logs.delay.called, "no audit row was written at all"
+            return process_logs.delay.call_args.kwargs["log_data"]
 
     def test_a_deeply_nested_body_still_writes_a_row(self, request_factory):
         body = (b"[" * 1000) + (b"]" * 1000)
 
-        process_logs = self._log_data(request_factory, body=body)
+        log_data = self._log_data(request_factory, body=body)
 
-        assert process_logs.delay.called, "the audit row was suppressed by the body"
-        assert "TOO DEEP" in process_logs.delay.call_args.kwargs["log_data"]["body"]
+        assert "TOO DEEP" in log_data["body"]
 
     def test_a_body_too_deep_for_json_itself_still_writes_a_row(self, request_factory):
         """Past ~20k levels json.loads raises RecursionError before the walk even starts."""
         body = (b"[" * 60000) + (b"]" * 60000)
 
-        process_logs = self._log_data(request_factory, body=body)
+        log_data = self._log_data(request_factory, body=body)
 
-        assert process_logs.delay.called
-        assert "DROPPED" in process_logs.delay.call_args.kwargs["log_data"]["body"]
+        assert "DROPPED" in log_data["body"]
 
     def test_a_secret_just_inside_the_depth_bound_is_still_redacted(self, request_factory):
         depth = APITokenLogMiddleware.MAX_DEPTH - 1
         body = (b"[" * depth) + b'{"token":"leak"}' + (b"]" * depth)
 
-        stored = self._log_data(request_factory, body=body).delay.call_args.kwargs["log_data"]["body"]
+        stored = self._log_data(request_factory, body=body)["body"]
 
         assert "leak" not in stored
 
@@ -354,7 +355,7 @@ class TestTheRedactorCannotSuppressTheAuditRow:
         cap = APITokenLogMiddleware.BODY_MAX_BYTES
         body = json.dumps({"description_html": "x" * (cap * 3)}).encode()
 
-        stored = self._log_data(request_factory, body=body).delay.call_args.kwargs["log_data"]["body"]
+        stored = self._log_data(request_factory, body=body)["body"]
 
         assert stored.endswith("… [truncated]")
         assert len(stored.encode()) == cap + len("… [truncated]".encode())
@@ -365,7 +366,7 @@ class TestTheRedactorCannotSuppressTheAuditRow:
         text = "Zażółć gęślą jaźń" * 20
         body = json.dumps({"description_html": text}, ensure_ascii=False).encode()
 
-        stored = self._log_data(request_factory, body=body).delay.call_args.kwargs["log_data"]["body"]
+        stored = self._log_data(request_factory, body=body)["body"]
 
         assert "ż" in stored, "stored as real characters, not as escapes"
         assert "\\u017c" not in stored
@@ -378,14 +379,12 @@ class TestTheRedactorCannotSuppressTheAuditRow:
         cannot reach."""
         body = json.dumps({name: "leak"}).encode()
 
-        stored = self._log_data(request_factory, body=body).delay.call_args.kwargs["log_data"]["body"]
+        stored = self._log_data(request_factory, body=body)["body"]
 
         assert "leak" not in stored
 
     def test_an_oauth_code_in_the_query_string_is_redacted(self, request_factory):
-        log_data = self._log_data(request_factory, path="/api/v1/x/?code=leak&state=keep").delay.call_args.kwargs[
-            "log_data"
-        ]
+        log_data = self._log_data(request_factory, path="/api/v1/x/?code=leak&state=keep")
 
         assert "leak" not in log_data["query_params"]
         assert "state=keep" in log_data["query_params"]
@@ -409,3 +408,48 @@ class TestTheRedactorCannotSuppressTheAuditRow:
 
         assert "leak1" not in headers and "leak2" not in headers
         assert "keep-me" in headers, "and ordinary headers are still logged"
+
+    def test_a_lone_surrogate_in_the_body_does_not_suppress_the_row(self, request_factory):
+        """The hole the ensure_ascii=False fix opened, and the easier one of the two.
+
+        json.loads accepts a lone surrogate escape, ensure_ascii=False emits the raw surrogate, and
+        str.encode("utf-8") raises UnicodeEncodeError on it — so these 14 pure-ASCII bytes, with no
+        nesting at all, escaped the try and suppressed the audit row. With the default escaping it
+        would not have raised, so the fix for one suppression bug created another.
+        """
+        for body in (b'{"a":"\\ud800"}', b'{"\\ud800":"x"}'):
+            log_data = self._log_data(request_factory, body=body)
+
+            assert "DROPPED" in log_data["body"], f"{body!r} should degrade, not vanish"
+
+    def test_a_valid_astral_character_still_round_trips(self, request_factory):
+        """The control for the test above: a real emoji is a valid pair and must NOT be dropped,
+        or the surrogate guard would just be discarding legitimate bodies."""
+        body = json.dumps({"name": "ok \U0001F600"}, ensure_ascii=False).encode()
+
+        assert "\U0001F600" in self._log_data(request_factory, body=body)["body"]
+
+    def test_a_non_ip_forwarded_for_does_not_suppress_the_row(self, request_factory):
+        """ip_address is an inet column written from X-Forwarded-For unvalidated, so a non-IP value
+        used to fail the INSERT in the worker and lose the row one step later — same class."""
+        middleware = APITokenLogMiddleware(Mock(return_value=HttpResponse(b"{}")))
+        request = request_factory.get("/api/v1/x/", HTTP_X_API_KEY=self.API_KEY, HTTP_X_FORWARDED_FOR="not-an-ip")
+        request.user = AnonymousUser()
+        with patch("plane.middleware.logger.process_logs") as process_logs:
+            middleware.process_request(request, HttpResponse(b"{}"), request_body=None)
+            assert process_logs.delay.called
+            assert process_logs.delay.call_args.kwargs["log_data"]["ip_address"] is None
+
+    def test_over_long_values_are_truncated_to_their_column_widths(self, request_factory):
+        middleware = APITokenLogMiddleware(Mock(return_value=HttpResponse(b"{}")))
+        request = request_factory.get(
+            "/api/v1/" + ("x" * 400), HTTP_X_API_KEY=self.API_KEY, HTTP_USER_AGENT="u" * 900
+        )
+        request.user = AnonymousUser()
+        with patch("plane.middleware.logger.process_logs") as process_logs:
+            middleware.process_request(request, HttpResponse(b"{}"), request_body=None)
+            log_data = process_logs.delay.call_args.kwargs["log_data"]
+
+        assert len(log_data["path"]) == 255, "path is varchar(255)"
+        assert len(log_data["user_agent"]) == 512, "user_agent is varchar(512)"
+        assert len(log_data["method"]) <= 10

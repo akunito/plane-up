@@ -5,6 +5,7 @@
 # Python imports
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import re
@@ -117,7 +118,9 @@ class APITokenLogMiddleware:
             return "[Could not decode content]"
 
     # Headers whose values must never be persisted in plaintext logs
-    SENSITIVE_HEADERS = frozenset({"x-api-key", "authorization", "cookie"})
+    SENSITIVE_HEADERS = frozenset(
+        {"x-api-key", "authorization", "cookie", "authentication", "x-csrftoken", "x-csrf-token"}
+    )
 
     # Name fragments that mark a value as a credential, matched per word rather than as a
     # substring (APLANE-34). A substring test on "key" would redact `keywords`; splitting on
@@ -141,8 +144,12 @@ class APITokenLogMiddleware:
             "signature",
             "otp",
             # Plane's own one-time credential: read from a JSON body in the email-change flow
-            # (app/views/user/base.py:199, "Verify the magic code") and returned as `?code=` by all
-            # six OAuth callbacks. No serializer in plane/api has a `code` field, so this is free.
+            # (app/views/user/base.py:199, "Verify the magic code") and sent BY the provider as
+            # `?code=` to all EIGHT OAuth callbacks (app and space x google/github/gitlab/gitea).
+            # Defence in depth rather than a live leak: none of those requests carries an
+            # X-Api-Key, so this middleware never logs them today. Free to add — no serializer in
+            # plane/api has a `code` field, and the only `*code*` model field in the fork is
+            # APIActivityLog.response_code, which no serializer exposes.
             "code",
             "codes",
             # Concatenated and acronym spellings the word split alone cannot reach.
@@ -167,9 +174,12 @@ class APITokenLogMiddleware:
     # the 14-day retention, the daily dump and the offsite copy — the HOURLY dumps already exclude
     # this table (VPS_PROD-config.nix), so "every backup" overstated it. Safe direction chosen.
     REDACTED = "[REDACTED]"
-    # Mirrors RESPONSE_BODY_MAX_BYTES below. Django accepts a 5 MB body
-    # (DATA_UPLOAD_MAX_MEMORY_SIZE), and a row is written for any request merely BEARING an
-    # X-Api-Key, valid or not — so uncapped, an unauthenticated caller could write 5 MB rows.
+    # Deliberately DOUBLE RESPONSE_BODY_MAX_BYTES, not a mirror of it: a request body is the half
+    # of an audit trail you actually want to read later, while a response body is mostly something
+    # the caller already had. The cost is the tail of any description_html write over 4 KB, which
+    # is common. Capped at all because Django accepts a 5 MB body (DATA_UPLOAD_MAX_MEMORY_SIZE) and
+    # a row is written for any request merely BEARING an X-Api-Key, valid or not — so uncapped, an
+    # unauthenticated caller could write 5 MB rows.
     BODY_MAX_BYTES = 4000
     # Deeper than anything this API accepts; see _redact_tree for why the bound exists at all.
     MAX_DEPTH = 32
@@ -202,9 +212,14 @@ class APITokenLogMiddleware:
         plaintext. Harmless in practice — Django's own parsing does not split on `;` either, so a
         client doing that would be leaking its secret for nothing rather than authenticating.
 
-        The except branch is belt-and-braces, not a behaviour: with `strict_parsing=False` and
-        str-to-str re-encoding, neither call raises on any input I could construct (an invalid
-        percent escape comes back mangled to U+FFFD rather than raising).
+        The except branch is unreachable through a real request, but it is NOT unreachable: a lone
+        surrogate in QUERY_STRING makes `urlencode` raise UnicodeEncodeError. WSGI decodes the
+        request line as latin-1 and Django's ASGI path decodes strictly, so no client can put one
+        there — the branch stays. This correction is here because an earlier version of this
+        docstring claimed "neither call raises on any input I could construct", and the identical
+        blind spot about `encode` raising is what let a 14-byte body suppress the audit row in
+        _redacted_body below. An invalid percent escape, by contrast, really does come back
+        mangled to U+FFFD rather than raising.
         """
         raw = request.META.get("QUERY_STRING", "")
         if not raw:
@@ -225,8 +240,12 @@ class APITokenLogMiddleware:
         the retention window. JSON that is not an object or array is dropped for the same reason.
 
         `ensure_ascii=False` and compact separators are deliberate. The default re-encodes every
-        non-ASCII code point as a six-character backslash-u escape — measured at 1.68x on a realistic Polish
-        payload — in the exact column whose 901 MB is why this file is being touched at all.
+        non-ASCII code point as a six-character backslash-u escape, in the exact column whose
+        901 MB is why this file is being touched at all. A measured RANGE rather than one number,
+        because it depends entirely on how much of the payload is non-ASCII: ~1.5x for a mixed
+        work-item payload, up to ~2.4x for prose that is mostly Polish, 3x being the bound. (The
+        earlier "1.68x" was real but came from a payload nobody can find again, which makes it
+        unverifiable and therefore worse than a range.)
         """
         if not request_body:
             return None
@@ -239,14 +258,22 @@ class APITokenLogMiddleware:
             return "[NOT JSON — DROPPED, MAY CONTAIN SECRETS]"
         if not isinstance(parsed, (dict, list)):
             return "[NON-OBJECT JSON — DROPPED, MAY CONTAIN SECRETS]"
+        # The encode is INSIDE the try, and that is the whole point of this block. `json.loads`
+        # accepts a lone surrogate escape, `ensure_ascii=False` then emits the raw surrogate, and
+        # `str.encode("utf-8")` raises UnicodeEncodeError on it — so a 14-byte, pure-ASCII,
+        # unnested body escaped into process_request's `except Exception` and suppressed the audit
+        # row. Easier to trigger than the nesting bomb the depth bound fixed, and created BY the
+        # ensure_ascii=False change: with the default escaping the surrogate becomes ASCII and
+        # encodes fine. UnicodeEncodeError subclasses ValueError, so the existing except covers it
+        # once the call is in scope. Measured 2026-11-05.
         try:
             redacted = json.dumps(self._redact_tree(parsed), ensure_ascii=False, separators=(",", ":"))
+            encoded = redacted.encode("utf-8")
+            if len(encoded) <= self.BODY_MAX_BYTES:
+                return redacted
+            return f"{encoded[: self.BODY_MAX_BYTES].decode('utf-8', errors='ignore')}… [truncated]"
         except (RecursionError, ValueError, TypeError):
             return "[UNREDACTABLE JSON — DROPPED, MAY CONTAIN SECRETS]"
-        encoded = redacted.encode("utf-8")
-        if len(encoded) <= self.BODY_MAX_BYTES:
-            return redacted
-        return f"{encoded[: self.BODY_MAX_BYTES].decode('utf-8', errors='ignore')}… [truncated]"
 
     def _redact_tree(self, value, depth: int = 0):
         """Walk a parsed JSON value, redacting by key name.
@@ -316,13 +343,38 @@ class APITokenLogMiddleware:
         so that credentials such as the API key are never stored in plaintext.
         """
         redacted = {
-            # The exact list first, then the same word matcher the body and query string use, so a
-            # credential-bearing header this code has never enumerated — proxy-authorization,
-            # x-auth-token, x-amz-security-token, cf-access-client-secret — is covered anyway.
+            # The exact list first, then the same word matcher the body and query string use. It
+            # covers proxy-authorization, x-auth-token, x-amz-security-token,
+            # cf-access-client-secret and the x-*-signature family without enumerating them — but
+            # NOT everything: "authentication" and "x-csrftoken" do not match the word set, so
+            # they are in the exact list. It also over-redacts idempotency-key and
+            # sec-websocket-key; accepted.
             key: (self.REDACTED if key.lower() in self.SENSITIVE_HEADERS or self._is_sensitive_name(key) else value)
             for key, value in request.headers.items()
         }
         return str(redacted)
+
+    @staticmethod
+    def _storable_ip(request):
+        """A value the `ip_address` (`inet`) column will accept, or None.
+
+        `get_client_ip` returns the first comma-separated token of X-Forwarded-For unvalidated, so
+        a non-IP value reaches the worker, the INSERT raises, `log_to_postgres` catches it and the
+        row is lost — the same outcome as the redactor bugs above, one step later. Not reachable
+        today because nginx overwrites that header with $remote_addr rather than appending it
+        (APLANE-28); this is the other half of the warning that sits next to that directive.
+        """
+        try:
+            return str(ipaddress.ip_address(get_client_ip(request=request)))
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _fits(value, limit: int):
+        """Truncate to a column width. `method` is varchar(10), `path` 255 and `user_agent` 512,
+        all three written unvalidated — an over-long value raises in the worker and loses the row
+        exactly like everything else in this class."""
+        return None if value is None else value[:limit]
 
     def process_request(self, request, response, request_body):
         api_key_header = "X-Api-Key"
@@ -341,15 +393,15 @@ class APITokenLogMiddleware:
                 "token_identifier": hmac.new(
                     settings.SECRET_KEY.encode(), api_key.encode(), hashlib.sha256
                 ).hexdigest(),
-                "path": request.path,
-                "method": request.method,
+                "path": self._fits(request.path, 255),
+                "method": self._fits(request.method, 10),
                 "query_params": self._redacted_query_string(request),
                 "headers": self._redacted_headers(request),
                 "body": self._redacted_body(request_body),
                 "response_body": self._response_body_to_log(response),
                 "response_code": response.status_code,
-                "ip_address": get_client_ip(request=request),
-                "user_agent": request.META.get("HTTP_USER_AGENT", None),
+                "ip_address": self._storable_ip(request),
+                "user_agent": self._fits(request.META.get("HTTP_USER_AGENT", None), 512),
             }
 
             process_logs.delay(log_data=log_data)
