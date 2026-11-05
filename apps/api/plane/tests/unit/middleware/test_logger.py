@@ -440,6 +440,25 @@ class TestTheRedactorCannotSuppressTheAuditRow:
             assert process_logs.delay.called
             assert process_logs.delay.call_args.kwargs["log_data"]["ip_address"] is None
 
+    @pytest.mark.parametrize("forwarded", ["1.2.3.4", "1.2.3.4 , 5.6.7.8", " 1.2.3.4", "2001:db8::1"])
+    def test_a_padded_forwarded_for_still_stores_the_ip(self, request_factory, forwarded):
+        """The guard added for data integrity must not cost data.
+
+        X-Forwarded-For allows whitespace around its commas (RFC 7239) and get_client_ip returns
+        split(",")[0] verbatim, so "1.2.3.4 , 5.6.7.8" arrives as "1.2.3.4 ". Without a strip, the
+        validator would turn a perfectly good address into None and lose an IP that used to store
+        fine — a defensive change making the audit trail worse.
+        """
+        middleware = APITokenLogMiddleware(Mock(return_value=HttpResponse(b"{}")))
+        request = request_factory.get("/api/v1/x/", HTTP_X_API_KEY=self.API_KEY, HTTP_X_FORWARDED_FOR=forwarded)
+        request.user = AnonymousUser()
+        with patch("plane.middleware.logger.process_logs") as process_logs:
+            middleware.process_request(request, HttpResponse(b"{}"), request_body=None)
+            stored = process_logs.delay.call_args.kwargs["log_data"]["ip_address"]
+
+        assert stored is not None, f"{forwarded!r} is a valid address and must be kept"
+        assert " " not in stored
+
     def test_over_long_values_are_truncated_to_their_column_widths(self, request_factory):
         middleware = APITokenLogMiddleware(Mock(return_value=HttpResponse(b"{}")))
         request = request_factory.get(
