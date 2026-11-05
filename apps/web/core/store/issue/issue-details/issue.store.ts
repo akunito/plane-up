@@ -289,9 +289,11 @@ export class IssueStore implements IIssueStore {
 
     // handle parent issue if exists
     if (issue?.parent && issue?.parent?.id && issue?.parent?.project_id) {
-      this.issueService.retrieve(workspaceSlug, issue.parent.project_id, issue.parent.id).then((res) => {
-        this.rootIssueDetailStore.rootIssueStore.issues.addIssue([res]);
-      });
+      background(
+        this.issueService.retrieve(workspaceSlug, issue.parent.project_id, issue.parent.id).then((res) => {
+          this.rootIssueDetailStore.rootIssueStore.issues.addIssue([res]);
+        })
+      );
     }
 
     // add identifiers to map
@@ -316,20 +318,20 @@ export class IssueStore implements IIssueStore {
     rootWorkItemDetailStore.addSubscription(issueId, issue.is_subscribed);
 
     // fetch issue activity
-    rootWorkItemDetailStore.activity.fetchActivities(workspaceSlug, projectId, issueId);
+    background(rootWorkItemDetailStore.activity.fetchActivities(workspaceSlug, projectId, issueId));
 
     // fetch issue comments
-    rootWorkItemDetailStore.comment.fetchComments(workspaceSlug, projectId, issueId);
+    background(rootWorkItemDetailStore.comment.fetchComments(workspaceSlug, projectId, issueId));
 
     // fetch sub issues
-    rootWorkItemDetailStore.subIssues.fetchSubIssues(workspaceSlug, projectId, issueId);
+    background(rootWorkItemDetailStore.subIssues.fetchSubIssues(workspaceSlug, projectId, issueId));
 
     // fetch issue relations
-    rootWorkItemDetailStore.relation.fetchRelations(workspaceSlug, projectId, issueId);
+    background(rootWorkItemDetailStore.relation.fetchRelations(workspaceSlug, projectId, issueId));
 
     // fetching states
     // TODO: check if this function is required
-    rootWorkItemDetailStore.rootIssueStore.rootStore.state.fetchProjectStates(workspaceSlug, projectId);
+    background(rootWorkItemDetailStore.rootIssueStore.rootStore.state.fetchProjectStates(workspaceSlug, projectId));
 
     return issue;
   };
