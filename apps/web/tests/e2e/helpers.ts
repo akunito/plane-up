@@ -214,13 +214,22 @@ export const test = base.extend<{ guard: void }>({
       page.on("framenavigated", (frame) => {
         if (frame === page.mainFrame()) lastNavigation = Date.now();
       });
-      // A 401 on an authenticated run means the session was lost, and no test in this suite
-      // expects one. Asserted directly because the burst of page errors that used to reveal it
-      // (the 401 interceptor's window.location.replace abandons every in-flight XHR at once) is
-      // now classified as noise above — so without this, a mid-run session loss would surface as
-      // some unrelated assertion failing later.
+      // A 401 means the session was lost, and that has to fail loudly: the burst of page errors
+      // that used to reveal it (the 401 interceptor's window.location.replace abandons every
+      // in-flight XHR at once) is now classified as noise above, so without this a mid-run session
+      // loss would surface as some unrelated assertion failing much later.
+      //
+      // Except on the session probe. `GET /api/users/me/` IS the "is anyone signed in?" question,
+      // so a 401 from it is an answer, not a failure — the unauthenticated login-page test
+      // (shell.spec.ts:7) produces three of them by design. I first shipped this without the
+      // exception because I grepped the specs for "401" and found nothing; that only proved no
+      // test *mentions* one, not that none produces one, and the gate caught it on all three
+      // projects. A lost session still fails here, because it 401s the data endpoints the page
+      // was fetching, not just this probe.
+      const SESSION_PROBE = /\/api\/users\/me\b/;
       page.on("response", (response) => {
-        if (response.status() === 401) unauthorized.push(`${response.request().method()} ${response.url()}`);
+        if (response.status() === 401 && !SESSION_PROBE.test(response.url()))
+          unauthorized.push(`${response.request().method()} ${response.url()}`);
       });
       page.on("pageerror", (e) => {
         const msg = `${e.name}: ${e.message}`;
