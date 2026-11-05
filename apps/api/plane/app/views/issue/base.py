@@ -797,9 +797,15 @@ class BulkDeleteIssuesEndpoint(BaseAPIView):
         # Then, delete all related module issues
         ModuleIssue.objects.filter(issue__in=issues).delete()
 
-        # Same pin cleanup as the single destroy above (APLANE-29)
+        # Same pin cleanup as the single destroy above (APLANE-29), but keyed off the queryset
+        # rather than the request body: issue_objects excludes archived, draft, triage and
+        # archived-project items, so an id in issue_ids is not necessarily an id we delete — and an
+        # archived work item must KEEP its pin (L4-03b). Materialised before the delete, while the
+        # rows are still visible to issue_objects.
         UserFavorite.objects.filter(
-            entity_type="issue", entity_identifier__in=issue_ids, project_id=project_id
+            entity_type="issue",
+            entity_identifier__in=list(issues.values_list("id", flat=True)),
+            project_id=project_id,
         ).delete()
 
         # Finally, delete the issues themselves

@@ -9,7 +9,9 @@ Work items did not: the only cleanup was client-side, in usePinnedEntities' SWR 
 fires a DELETE once it resolves the pin and gets a 404. So the row survived the delete until some
 browser happened to render that sidebar — and the E2E assertion ("the favourites were removed
 server-side") was racing that fetch, which is what made sidebar.spec.ts:236 flaky on every project
-rather than only on WebKit.
+rather than only on WebKit. (The leftover row's `entity_data: null` is NOT evidence of the pin being
+hidden: get_entity_data maps "issue" to (Issue, None), so it is null for every issue favourite,
+alive or dead.)
 
 Pins are shared across users for the same entity, so the cleanup is deliberately NOT scoped to the
 caller: the work item is gone for everybody. Archiving is the documented exception and is pinned
@@ -22,7 +24,9 @@ from uuid import uuid4
 import pytest
 from rest_framework import status
 
-from plane.db.models import Issue, Project, ProjectMember, User, UserFavorite, WorkspaceMember
+from django.utils import timezone
+
+from plane.db.models import Issue, Project, ProjectMember, State, User, UserFavorite, WorkspaceMember
 
 APP_URL = "/api/workspaces/{slug}/projects/{project_id}/issues/{pk}/"
 APP_ARCHIVE_URL = "/api/workspaces/{slug}/projects/{project_id}/issues/{pk}/archive/"
@@ -46,11 +50,25 @@ def _no_broker(db):
 def project(workspace, create_user):
     created = Project.objects.create(name="Pinned", identifier="PIN", workspace=workspace)
     ProjectMember.objects.create(workspace=workspace, project=created, member=create_user, role=20)
+    # Only the project CREATE VIEW seeds DEFAULT_STATES; Project.save() does not and there is no
+    # signal. Without a state, Issue._ensure_default_state leaves state_id NULL and anything that
+    # reads issue.state.group raises AttributeError before the request is even made.
+    State.objects.create(
+        name="Done", group="completed", color="#60646C", sequence=45000, default=True,
+        project=created, workspace=workspace,
+    )
     return created
 
 
 def _issue(project, name="pinned item"):
     return Issue.objects.create(name=name, project=project, workspace=project.workspace)
+
+
+def _archived_issue(project, name="archived item"):
+    """Archived via a direct UPDATE: it is what issue_objects excludes, with no save() side effects."""
+    issue = _issue(project, name)
+    Issue.all_objects.filter(pk=issue.pk).update(archived_at=timezone.now())
+    return issue
 
 
 def _pin(user, issue, project):
@@ -111,9 +129,7 @@ def test_destroy_leaves_other_work_items_pins_alone(session_client, workspace, p
 
 def test_archiving_keeps_the_pin(session_client, workspace, project, create_user):
     """The documented deviation from pages (pinned by L4-03b): an archived work item keeps its pin."""
-    issue = _issue(project)
-    issue.state.group = "completed"  # only a completed / cancelled item can be archived
-    issue.state.save()
+    issue = _issue(project)  # the fixture's default state is already "completed", so it can archive
     pin = _pin(create_user, issue, project)
 
     response = session_client.post(APP_ARCHIVE_URL.format(slug=workspace.slug, project_id=project.id, pk=issue.id))
@@ -136,7 +152,28 @@ def test_bulk_delete_drops_the_pins_of_every_deleted_item(session_client, worksp
 
     assert response.status_code == status.HTTP_200_OK
     assert not any(_alive(pin) for pin in pins)
-    assert _alive(survivor_pin)
+    assert _alive(survivor_pin), "the cleanup must be keyed on the deleted ids, not the project"
+
+
+def test_bulk_delete_keeps_the_pin_of_an_archived_id_it_does_not_delete(
+    session_client, workspace, project, create_user
+):
+    """Issue.issue_objects excludes archived items, so an archived id in the body is NOT deleted —
+    and its pin must survive (L4-03b). Keying the cleanup on the raw request body got this wrong."""
+    archived = _archived_issue(project)
+    pin = _pin(create_user, archived, project)
+
+    response = session_client.delete(
+        BULK_URL.format(slug=workspace.slug, project_id=project.id),
+        data={"issue_ids": [str(archived.id)]},
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert Issue.all_objects.filter(pk=archived.pk, deleted_at__isnull=True).exists(), (
+        "sanity: issue_objects must have excluded the archived item, or this test proves nothing"
+    )
+    assert _alive(pin), "an archived work item survives the bulk delete, so its pin must too"
 
 
 def test_external_api_delete_drops_the_pin(api_key_client, workspace, project, create_user):
