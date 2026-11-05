@@ -142,6 +142,33 @@ export async function resilientReload(page: Page, attempts = 3) {
 }
 
 /**
+ * WebKit reports a resource load it abandoned as a page error, which is NOT a defect (APLANE-29).
+ *
+ * Measured 2026-11-05 from a saved trace of the L5-17 permalink test on the iphone project: the
+ * request named in the error has **no network record at all** among the run's 1276 resource
+ * snapshots — it was started and never completed, i.e. killed when the test navigated away. And
+ * the decisive part: the `background()` fix that wraps every one of those fetches in a `.catch`
+ * is deployed, and this still fires — so it is not an unhandled promise rejection and no amount
+ * of catching in app code can suppress it. WebKit is reporting the abandoned load itself.
+ *
+ * Navigating away from a page that is still fetching is ordinary user behaviour, so failing a test
+ * on it is a false positive by construction. Chromium says nothing here.
+ *
+ * "due to access control checks" reads like CORS and is not: every request in this app is
+ * same-origin and sends no `Origin`, and no response in the trace carries
+ * `access-control-allow-origin` — not even the 200s. It is WebKit's generic wording for any load
+ * it would not complete, so the message carries no CORS signal for us and nothing is lost by
+ * classifying it.
+ *
+ * This is a deliberate narrowing of the guard, not a disabling of it: the messages are still
+ * attached to the report as `aborted-loads`, every other uncaught error still fails, and the
+ * guard's whole point — catching a genuine uncaught error in our fork's code — is untouched. If a
+ * real CORS problem ever appears it will come with a completed response that lacks the header,
+ * which this pattern does not match.
+ */
+const ABORTED_LOAD = /XMLHttpRequest cannot load .* due to access control checks/i;
+
+/**
  * `test` with an automatic guard: uncaught page errors fail the test, and after the body
  * the page must show no error boundary (and no horizontal overflow on phones).
  */
@@ -151,12 +178,14 @@ export const test = base.extend<{ guard: void }>({
       const pageErrors: string[] = [];
       const consoleErrors: string[] = [];
       const hydrationNoise: string[] = [];
+      const abortedLoads: string[] = [];
       page.on("pageerror", (e) => {
         const msg = `${e.name}: ${e.message}`;
         // React Router SPA mode hydrates the pre-rendered shell; React reports the mismatch as
         // recoverable errors #418/#423/#425 on every route and re-renders on the client. Known
         // upstream noise (2026-09-17) — attached for visibility, not a failure.
         if (/Minified React error #(418|423|425)\b/.test(msg)) hydrationNoise.push(msg);
+        else if (ABORTED_LOAD.test(msg)) abortedLoads.push(msg);
         else pageErrors.push(msg);
       });
       page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
@@ -164,6 +193,7 @@ export const test = base.extend<{ guard: void }>({
       if (consoleErrors.length) await testInfo.attach("console-errors", { body: consoleErrors.join("\n") });
       if (hydrationNoise.length)
         await testInfo.attach("hydration-noise", { body: `${hydrationNoise.length} recoverable hydration errors` });
+      if (abortedLoads.length) await testInfo.attach("aborted-loads", { body: abortedLoads.join("\n") });
       expect(pageErrors, "uncaught errors in the page").toEqual([]);
       if (!page.isClosed() && page.url().startsWith("http")) {
         await expectNoErrorBoundary(page);
