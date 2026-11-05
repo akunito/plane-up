@@ -33,6 +33,9 @@ export type Manifest = {
 };
 export const manifest: Manifest = JSON.parse(fs.readFileSync(process.env.PT_MANIFEST ?? "qa-manifest.json", "utf8"));
 
+export const BASE_URL = process.env.PT_BASE_URL ?? "https://plane-dev.local.akunito.com";
+const APP_ORIGIN = new URL(BASE_URL).origin;
+
 /** Something the global or the per-layout error boundary renders. */
 export async function expectNoErrorBoundary(page: Page) {
   await expect(page.getByText("Looks like something went wrong")).toHaveCount(0);
@@ -75,7 +78,7 @@ async function apiCall(page: Page, method: "patch" | "post" | "delete", url: str
   const csrf = (await page.context().cookies()).find((c) => c.name === "csrftoken")?.value ?? "";
   const res = await page.request[method](url, {
     ...(data === undefined ? {} : { data }),
-    headers: { "X-CSRFToken": csrf, Referer: `${process.env.PT_BASE_URL ?? "https://plane-dev.local.akunito.com"}/` },
+    headers: { "X-CSRFToken": csrf, Referer: `${BASE_URL}/` },
   });
   expect(res.ok(), `${method.toUpperCase()} ${url} → ${res.status()}`).toBeTruthy();
   return res;
@@ -144,29 +147,56 @@ export async function resilientReload(page: Page, attempts = 3) {
 /**
  * WebKit reports a resource load it abandoned as a page error, which is NOT a defect (APLANE-29).
  *
- * Measured 2026-11-05 from a saved trace of the L5-17 permalink test on the iphone project: the
- * request named in the error has **no network record at all** among the run's 1276 resource
- * snapshots — it was started and never completed, i.e. killed when the test navigated away. And
- * the decisive part: the `background()` fix that wraps every one of those fetches in a `.catch`
- * is deployed, and this still fires — so it is not an unhandled promise rejection and no amount
- * of catching in app code can suppress it. WebKit is reporting the abandoned load itself.
+ * **Verified mechanism**, read from the playwright-core that actually runs the suite (1.64.1,
+ * `node_modules/.pnpm/playwright-core@1.64.1/.../lib/coreBundle.js:48591`): the WebKit backend
+ * turns EVERY console message with `level === "error" && source === "javascript"` into a page
+ * error. So a `pageerror` on WebKit is not "an uncaught exception" as the docs say — a plain
+ * console error qualifies, and `XMLHttpRequest::didFail` logs one for any load it abandons.
+ * Chromium's page errors come only from `Runtime.exceptionThrown`, which is why this is
+ * iphone-only: structural, not timing.
+ *
+ * That also explains the mangled text. `splitErrorMessage` (`coreBundle.js:9359`) splits on the
+ * FIRST colon — here the one in `https:` — and takes `substring(idx + 2)`, eating a slash. So the
+ * guard sees `XMLHttpRequest cannot load https: /host/path …`, which matches the string in the
+ * failing report exactly. `abortedLoadOrigin` below undoes that before parsing.
  *
  * Navigating away from a page that is still fetching is ordinary user behaviour, so failing a test
- * on it is a false positive by construction. Chromium says nothing here.
+ * on it is a false positive by construction, and `waitForLoadState("networkidle")` does not help
+ * because the detail page starts more fetches after it resolves and SWR retries them.
  *
- * "due to access control checks" reads like CORS and is not: every request in this app is
- * same-origin and sends no `Origin`, and no response in the trace carries
- * `access-control-allow-origin` — not even the 200s. It is WebKit's generic wording for any load
- * it would not complete, so the message carries no CORS signal for us and nothing is lost by
- * classifying it.
+ * **This is gated on evidence, not on wording**, because the wording alone proves nothing: WebKit
+ * emits this same sentence for a genuine CORS fault, a failed preflight and a blocked
+ * cross-origin redirect. A message is only treated as noise when BOTH hold:
+ *   - the request's origin is our own app origin — every request in this deployment is same-origin
+ *     (the Caddyfile proxies even presigned MinIO uploads through the app host, APLANE-15), so a
+ *     cross-origin failure here is real and must fail. That turns a deployment fact into an
+ *     enforced invariant: point assets at a real S3 host and its CORS faults fail the suite again.
+ *   - it arrived within NAVIGATION_GRACE_MS of a main-frame navigation, which is what makes it an
+ *     *abandoned* load rather than a *failed* one.
  *
- * This is a deliberate narrowing of the guard, not a disabling of it: the messages are still
- * attached to the report as `aborted-loads`, every other uncaught error still fails, and the
- * guard's whole point — catching a genuine uncaught error in our fork's code — is untouched. If a
- * real CORS problem ever appears it will come with a completed response that lacks the header,
- * which this pattern does not match.
+ * No count threshold on purpose: a page genuinely fetching on every navigation can legitimately
+ * abandon dozens of requests, so a number would just invent a new flake.
+ *
+ * What this does NOT rest on, because I got it wrong first: "background() is deployed and this
+ * still fires, so it is not a rejection". The URL in the error is `retrieveWithIdentifier`, the
+ * PRIMARY awaited fetch at issue.store.ts:277, which background() never wrapped — so that proved
+ * nothing about it. The conclusion holds for two better reasons: that fetch's only caller is a
+ * useSWR fetcher, which captures rejections, and WebKit words an actual unhandled rejection
+ * "Unhandled Promise Rejection: …", not this.
  */
 const ABORTED_LOAD = /XMLHttpRequest cannot load .* due to access control checks/i;
+const NAVIGATION_GRACE_MS = 3_000;
+
+/** The origin of the request named in a WebKit load error, undoing splitErrorMessage's damage. */
+const abortedLoadOrigin = (msg: string): string | null => {
+  const match = /cannot load (https?):\s*\/*([^\s]+)/i.exec(msg);
+  if (!match) return null;
+  try {
+    return new URL(`${match[1]}://${match[2]}`).origin;
+  } catch {
+    return null;
+  }
+};
 
 /**
  * `test` with an automatic guard: uncaught page errors fail the test, and after the body
@@ -179,13 +209,31 @@ export const test = base.extend<{ guard: void }>({
       const consoleErrors: string[] = [];
       const hydrationNoise: string[] = [];
       const abortedLoads: string[] = [];
+      const unauthorized: string[] = [];
+      let lastNavigation = 0;
+      page.on("framenavigated", (frame) => {
+        if (frame === page.mainFrame()) lastNavigation = Date.now();
+      });
+      // A 401 on an authenticated run means the session was lost, and no test in this suite
+      // expects one. Asserted directly because the burst of page errors that used to reveal it
+      // (the 401 interceptor's window.location.replace abandons every in-flight XHR at once) is
+      // now classified as noise above — so without this, a mid-run session loss would surface as
+      // some unrelated assertion failing later.
+      page.on("response", (response) => {
+        if (response.status() === 401) unauthorized.push(`${response.request().method()} ${response.url()}`);
+      });
       page.on("pageerror", (e) => {
         const msg = `${e.name}: ${e.message}`;
         // React Router SPA mode hydrates the pre-rendered shell; React reports the mismatch as
         // recoverable errors #418/#423/#425 on every route and re-renders on the client. Known
         // upstream noise (2026-09-17) — attached for visibility, not a failure.
         if (/Minified React error #(418|423|425)\b/.test(msg)) hydrationNoise.push(msg);
-        else if (ABORTED_LOAD.test(msg)) abortedLoads.push(msg);
+        else if (
+          ABORTED_LOAD.test(msg) &&
+          abortedLoadOrigin(msg) === APP_ORIGIN &&
+          Date.now() - lastNavigation < NAVIGATION_GRACE_MS
+        )
+          abortedLoads.push(msg);
         else pageErrors.push(msg);
       });
       page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
@@ -194,6 +242,7 @@ export const test = base.extend<{ guard: void }>({
       if (hydrationNoise.length)
         await testInfo.attach("hydration-noise", { body: `${hydrationNoise.length} recoverable hydration errors` });
       if (abortedLoads.length) await testInfo.attach("aborted-loads", { body: abortedLoads.join("\n") });
+      expect(unauthorized, "the session was lost mid-test (401)").toEqual([]);
       expect(pageErrors, "uncaught errors in the page").toEqual([]);
       if (!page.isClosed() && page.url().startsWith("http")) {
         await expectNoErrorBoundary(page);

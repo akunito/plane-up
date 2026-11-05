@@ -3,8 +3,12 @@
  * (APLANE-29).
  *
  * `fetchIssue` and `fetchIssueWithIdentifier` are near-duplicates, and the first fix wrapped only
- * one of them. The flake survived the deploy and pointed at the other one itself, through the
- * identifier endpoint in its error message (`/work-items/QAB-2/?expand=…`).
+ * one of them, which is reason enough to pin the shape of both.
+ *
+ * CORRECTED 2026-11-05: the reasoning that led here was wrong. `/work-items/QAB-2/?expand=…` in the
+ * WebKit error names `retrieveWithIdentifier`, the PRIMARY awaited fetch at issue.store.ts:277 —
+ * never one of the calls this test is about — so it was never evidence that the sibling's secondary
+ * fetches were unguarded. Wrapping them fixed a real latent defect and did not touch that flake.
  *
  * This reads the source on purpose, because that is where the mistake lives. A behavioural test of
  * either function needs the whole root store mocked, and it still would not notice a third copy of

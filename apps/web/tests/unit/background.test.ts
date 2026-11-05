@@ -4,9 +4,12 @@
  *
  * `fetchIssue` fires activities, comments, sub-issues, relations, project states and the parent
  * item without awaiting them. With no catch, each one becomes an unhandled rejection, and when the
- * work item has just been deleted they all 404 together. WebKit reports a rejected XHR to the page,
- * which is what the E2E page-error guard trips on; Chromium says nothing, so it only ever showed up
- * on the iPhone project.
+ * work item has just been deleted they all 404 together — an unhandled rejection either way.
+ *
+ * CORRECTED 2026-11-05: this is NOT what made the iPhone E2E project fail. WebKit reports the abandoned load itself as a page error (verified: playwright-core turns any
+ * javascript-source console error into one), which NO `.catch` can suppress — that symptom is
+ * handled in the E2E guard, not here. These rejections are a separate, real latent defect:
+ * worth fixing on their own merits, but they were never the cause of the L5 flake.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
