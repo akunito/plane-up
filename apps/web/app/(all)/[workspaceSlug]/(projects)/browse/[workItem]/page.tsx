@@ -50,7 +50,8 @@ export const IssueDetailsPage = observer(function IssueDetailsPage({ params }: R
   const [projectIdentifier, sequence_id] = workItem.split("-");
 
   // fetching issue details
-  const { data, isLoading, error } = useSWR<TIssue, Error>(
+  // `error` is deliberately not destructured — see the empty-state condition below.
+  const { data, isLoading } = useSWR<TIssue, Error>(
     `ISSUE_DETAIL_${workspaceSlug}_${projectIdentifier}_${sequence_id}`,
     () => fetchIssueWithIdentifier(workspaceSlug.toString(), projectIdentifier, sequence_id)
   );
@@ -91,11 +92,25 @@ export const IssueDetailsPage = observer(function IssueDetailsPage({ params }: R
     }
   }, [workspaceSlug, data, router]);
 
-  // Settled with no data is a failure even when SWR has no error object to show for it. Belt and
-  // braces with the service fix for APLANE-35: a service that throws a falsy value leaves `error`
-  // undefined, and without this the page would stay on the skeleton for ever. The UI must never
-  // stick, whatever shape the failure arrives in.
-  if (!isLoading && (error || !data)) {
+  // Keyed on "settled with no data", and deliberately NOT on SWR's `error` (APLANE-35).
+  //
+  // SWR's failure path sets `error` and leaves `data` in place — verified in the installed swr
+  // 2.2.4: the catch assigns `finalState.error` and never touches data, with `isLoading` false.
+  // WEB_SWR_CONFIG turns `revalidateOnFocus` on for every page, so a phone returning from the
+  // background during a radio reconnect fails ONE revalidation, and an `error ||` here would
+  // replace the work item the user was reading with a dead-end "does not exist" — unmounting the
+  // detail root, losing their scroll position and any open editor — while the item sat right there
+  // in `data`. In the common case that is worse than the bug this commit fixes, which is why
+  // `error` is not in this condition.
+  //
+  // `!data` alone still catches everything that matters: a first load that failed, whatever shape
+  // the failure took, including the falsy throw the service change above fixes.
+  //
+  // The cost, stated plainly: a work item DELETED while someone is viewing it now keeps showing
+  // stale content until they navigate away. Telling that apart from a network blip needs the HTTP
+  // status, which Plane's services destroy by convention (`throw error.response.data`) — the same
+  // reason pinned-entity.service.ts bypasses that convention to keep the status for the sidebar.
+  if (!isLoading && !data) {
     return (
       <EmptyState
         image={resolvedTheme === "dark" ? emptyIssueDark : emptyIssueLight}

@@ -458,8 +458,11 @@ export class IssueService extends APIService {
         // FALSY error, the browse page's `if (error && !isLoading)` never fired, and
         // `issueLoader = !issue || isLoading` stayed true — the user sat on the skeleton loader
         // for ever, with no error, no retry and nothing to click, until a manual reload
-        // (APLANE-35). Keep the server's payload when there is one so every existing caller sees
-        // what it saw before; otherwise throw something truthy that says what happened.
+        // (APLANE-35). Keep the server's payload when it sent a USABLE one, so every caller that
+        // reads it sees what it saw before; a falsy body ('', null, 0) falls through, which is the
+        // point — an empty error body reproduced the same bug. Otherwise throw something truthy
+        // that names the reason. Note getIssueMetaFromURL in this file has the identical throw and
+        // is deliberately untouched: its only caller try/catches and returns {error: true}.
         if (error?.response?.data) throw error.response.data;
         throw new Error(error?.message || "The work item could not be loaded");
       });
