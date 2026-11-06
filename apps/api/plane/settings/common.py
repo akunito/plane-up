@@ -45,7 +45,7 @@ if SECRET_KEY in _INSECURE_SECRET_KEYS:
         "This makes your installation vulnerable to session forgery, CSRF bypass, and "
         "password-reset token forging. Set a unique SECRET_KEY before deploying to production. "
         "Generate one with: "
-        "python3 -c \"from django.utils.crypto import get_random_secret_key; print(get_random_secret_key())\""
+        'python3 -c "from django.utils.crypto import get_random_secret_key; print(get_random_secret_key())"'
     )
 
 # SECURITY WARNING: don't run with debug turned on in production!
@@ -75,9 +75,7 @@ for _cidr in _webhook_allowed_ips_raw.split(","):
 # Example: "silo,silo.namespace.svc.cluster.local,internal-api.lan"
 _webhook_allowed_hosts_raw = os.environ.get("WEBHOOK_ALLOWED_HOSTS", "")
 WEBHOOK_ALLOWED_HOSTS = [
-    _host.strip().rstrip(".").lower()
-    for _host in _webhook_allowed_hosts_raw.split(",")
-    if _host.strip()
+    _host.strip().rstrip(".").lower() for _host in _webhook_allowed_hosts_raw.split(",") if _host.strip()
 ]
 
 # Webhook disallowed domains — comma-separated hostnames. Webhooks targeting
@@ -86,9 +84,7 @@ WEBHOOK_ALLOWED_HOSTS = [
 # for self-hosted deployments; set to e.g. "plane.so" to block specific domains.
 _webhook_disallowed_domains_raw = os.environ.get("WEBHOOK_DISALLOWED_DOMAINS", "")
 WEBHOOK_DISALLOWED_DOMAINS = [
-    _d.strip().rstrip(".").lower()
-    for _d in _webhook_disallowed_domains_raw.split(",")
-    if _d.strip()
+    _d.strip().rstrip(".").lower() for _d in _webhook_disallowed_domains_raw.split(",") if _d.strip()
 ]
 
 # Allowed Hosts
@@ -473,8 +469,6 @@ LIVE_URL = urljoin(LIVE_BASE_URL, LIVE_BASE_PATH) if LIVE_BASE_URL else None
 # WEB URL
 WEB_URL = os.environ.get("WEB_URL")
 
-HARD_DELETE_AFTER_DAYS = int(os.environ.get("HARD_DELETE_AFTER_DAYS", 60))
-
 
 def _retention_days(env_var, default):
     """
@@ -490,6 +484,22 @@ def _retention_days(env_var, default):
     except ValueError:
         return default
     return days if days >= 0 else default
+
+
+# The window before a soft-deleted row is physically purged. Read through `_retention_days` and
+# then floored at 1: that helper accepts 0, and this is the one retention setting that DESTROYS
+# data, where a cutoff of `now` would purge the whole recycle bin — live cascades included — on the
+# next run. Clamped rather than asserted on purpose: a bad value here must not take the API down.
+HARD_DELETE_AFTER_DAYS = max(1, _retention_days("HARD_DELETE_AFTER_DAYS", 60))
+
+# Off by default (APLANE-40). The nightly purge had never once completed — two DO_NOTHING foreign
+# keys on issue_activities keep their database constraints and every run died on the issue step —
+# so arming it is the FIRST time anything is really deleted in this instance, and there is no
+# restore path (`restore_related_objects` is a stub and `deleted_at` is only ever cleared for
+# assets). While this is off, the task logs the full cascade inventory of what it would remove,
+# including how many of those rows are still LIVE. Read that, with a dump in hand, before setting
+# this to 1.
+HARD_DELETE_ENABLED = os.environ.get("HARD_DELETE_ENABLED", "0") == "1"
 
 
 # API activity logs hold request/response payloads, so they are retained for a

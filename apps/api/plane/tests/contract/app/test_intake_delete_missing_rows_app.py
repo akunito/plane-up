@@ -18,8 +18,9 @@ Three `.first()` results were dereferenced unguarded:
    `get_queryset` guards in the same file use `or`, which is what the author meant.
 
 None of these is permanent: `hard_delete` reaps work items `HARD_DELETE_AFTER_DAYS` (60) after the
-soft delete and the FK cascade takes the intake row with it (`bgtasks/deletion_task.py:150`,
-daily at 00:00 UTC, `celery.py:61-64`). So the bug is "undeletable for up to ~60 days", not for ever.
+soft delete and the FK cascade takes the intake row with it (`bgtasks/deletion_task.py`
+`hard_delete`, daily at 00:00 UTC, `celery.py:61-64`) — and APLANE-40 then measured that it had never
+once completed, so in practice the orphan was permanent. So the bug is "undeletable for up to ~60 days", not for ever.
 
 The happy paths are covered too, because each fix is a branch and a branch can be wrong on either
 side. The pins half is deliberate: the orphan branch drops the stale pin with `cascade=False`, so a
