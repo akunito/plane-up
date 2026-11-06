@@ -46,6 +46,8 @@ from plane.db.models import (
     WorkspaceMember,
 )
 
+pytestmark = pytest.mark.contract
+
 APP_URL = "/api/workspaces/{slug}/projects/{project_id}/intake-issues/{pk}/"
 APP_CREATE_URL = "/api/workspaces/{slug}/projects/{project_id}/intake-issues/"
 API_URL = "/api/v1/workspaces/{slug}/projects/{project_id}/intake-issues/{pk}/"

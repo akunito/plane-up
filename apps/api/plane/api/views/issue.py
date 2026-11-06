@@ -80,6 +80,7 @@ from plane.db.models import (
     WorkspaceMember,
 )
 from plane.utils.favorites import drop_work_item_favorites
+from plane.utils.recent_visits import drop_work_item_recent_visits
 from plane.settings.storage import S3Storage
 from plane.utils.path_validator import sanitize_filename
 from plane.utils.order_queryset import (
@@ -930,6 +931,8 @@ class IssueDetailAPIEndpoint(BaseAPIView):
         issue.delete()
         # Drop the sidebar pins pointing at it, as the app viewset does (APLANE-29)
         drop_work_item_favorites([pk], project_id)
+        # And its recently-visited rows, which this path never cleared (APLANE-37)
+        drop_work_item_recent_visits([pk], project_id, slug)
         issue_activity.delay(
             type="issue.activity.deleted",
             requested_data=json.dumps({"issue_id": str(pk)}),

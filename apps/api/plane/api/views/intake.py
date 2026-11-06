@@ -29,6 +29,7 @@ from plane.app.permissions import ProjectLitePermission
 from plane.bgtasks.issue_activities_task import issue_activity
 from plane.db.models import Intake, IntakeIssue, Issue, Project, ProjectMember, State, StateGroup, WorkspaceMember
 from plane.utils.favorites import drop_work_item_favorites
+from plane.utils.recent_visits import drop_work_item_recent_visits
 from plane.utils.host import base_host
 from plane.utils.serializers import writable_data
 from plane.utils.content_validator import validate_html_content
@@ -547,6 +548,23 @@ class IntakeIssueDetailAPIEndpoint(BaseAPIView):
                 issue.delete()
                 # Its sidebar pins, and its sub-items' (APLANE-29)
                 drop_work_item_favorites([issue_id], project_id)
+                # Its recently-visited rows (APLANE-37)
+                drop_work_item_recent_visits([issue_id], project_id, slug)
+                # And the activity row, as the app's intake destroy and both work-item deletes do.
+                # notification=False: the notification task resolves the issue through
+                # `Issue.objects`, which is already None by now.
+                issue_activity.delay(
+                    type="issue.activity.deleted",
+                    requested_data=json.dumps({"issue_id": str(issue_id)}),
+                    actor_id=str(request.user.id),
+                    issue_id=str(issue_id),
+                    project_id=str(project_id),
+                    current_instance={},
+                    epoch=int(timezone.now().timestamp()),
+                    notification=False,
+                    origin=base_host(request=request, is_app=True),
+                    subscriber=False,
+                )
             else:
                 # cascade=False deliberately: nothing is being deleted here, so nothing licenses
                 # dropping a sub-item's pin -- the children may well still be alive, that cascade

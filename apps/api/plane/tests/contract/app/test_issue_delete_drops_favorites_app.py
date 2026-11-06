@@ -38,6 +38,8 @@ from plane.db.models import (
     WorkspaceMember,
 )
 
+pytestmark = pytest.mark.contract
+
 APP_URL = "/api/workspaces/{slug}/projects/{project_id}/issues/{pk}/"
 INTAKE_URL = "/api/workspaces/{slug}/projects/{project_id}/intake-issues/{pk}/"
 API_INTAKE_URL = "/api/v1/workspaces/{slug}/projects/{project_id}/intake-issues/{pk}/"
@@ -74,8 +76,13 @@ def project(workspace, create_user):
     # signal. Without a state, Issue._ensure_default_state leaves state_id NULL and anything that
     # reads issue.state.group raises AttributeError before the request is even made.
     State.objects.create(
-        name="Done", group="completed", color="#60646C", sequence=45000, default=True,
-        project=created, workspace=workspace,
+        name="Done",
+        group="completed",
+        color="#60646C",
+        sequence=45000,
+        default=True,
+        project=created,
+        workspace=workspace,
     )
     return created
 

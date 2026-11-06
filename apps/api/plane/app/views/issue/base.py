@@ -59,9 +59,9 @@ from plane.db.models import (
     ModuleIssue,
     Project,
     ProjectMember,
-    UserRecentVisit,
 )
 from plane.utils.favorites import drop_work_item_favorites
+from plane.utils.recent_visits import drop_work_item_recent_visits
 from plane.utils.filters import ComplexFilterBackend, IssueFilterSet
 from plane.utils.global_paginator import paginate
 from plane.utils.grouper import (
@@ -723,13 +723,9 @@ class IssueViewSet(BaseViewSet):
         issue.delete()
         # Drop the sidebar pins pointing at it, and at its sub-items, for every user (APLANE-29).
         drop_work_item_favorites([pk], project_id)
-        # delete the issue from recent visits
-        UserRecentVisit.objects.filter(
-            project_id=project_id,
-            workspace__slug=slug,
-            entity_identifier=pk,
-            entity_name="issue",
-        ).delete(soft=False)
+        # delete the issue from recent visits (APLANE-37 moved this into a helper; the other four
+        # delete paths never did it at all)
+        drop_work_item_recent_visits([pk], project_id, slug)
         issue_activity.delay(
             type="issue.activity.deleted",
             requested_data=json.dumps({"issue_id": str(pk)}),
@@ -738,7 +734,14 @@ class IssueViewSet(BaseViewSet):
             project_id=str(project_id),
             current_instance={},
             epoch=int(timezone.now().timestamp()),
-            notification=True,
+            # notification=False, as on the other four delete paths (APLANE-37). True informed
+            # nobody and never could: notifications() resolves the issue with
+            # `Issue.objects.filter(pk=issue_id).first()`, which is None once this delete has soft-
+            # deleted it, and the first iteration of its subscriber loop then reads
+            # `issue.created_by_id` -> AttributeError -> a bare `except Exception: print(e)`. So the
+            # only effect of True was an unlogged error per deleted item that still had a live
+            # subscriber or assignee row (the cascade that clears those is async).
+            notification=False,
             origin=base_host(request=request, is_app=True),
             subscriber=False,
         )
@@ -808,6 +811,30 @@ class BulkDeleteIssuesEndpoint(BaseAPIView):
         # listable. Dropping their pins here would make a pin vanish from a work item the user can
         # still open. (That bulk delete orphans sub-items at all is upstream's bug, not ours.)
         drop_work_item_favorites(deleted_ids, project_id, cascade=False)
+
+        # The recently-visited rows of the same ids (APLANE-37).
+        drop_work_item_recent_visits(deleted_ids, project_id, slug)
+
+        # And the activity row the single-item deletes have always written and this one never did.
+        # It is what puts a delete in the actor's activity feed: IssueActivity.issue is DO_NOTHING
+        # and the soft-delete cascade skips DO_NOTHING, so the row outlives the work item and stays
+        # readable by the feeds that do not join the issue. One task per id because issue_activity
+        # takes a single issue_id; a bulk delete here is a handful of items. notification=False
+        # throughout: the notification task resolves the issue through `Issue.objects`, which is
+        # already None by now, and nobody should be mailed about an item that no longer exists.
+        for deleted_id in deleted_ids:
+            issue_activity.delay(
+                type="issue.activity.deleted",
+                requested_data=json.dumps({"issue_id": str(deleted_id)}),
+                actor_id=str(request.user.id),
+                issue_id=str(deleted_id),
+                project_id=str(project_id),
+                current_instance={},
+                epoch=int(timezone.now().timestamp()),
+                notification=False,
+                origin=base_host(request=request, is_app=True),
+                subscriber=False,
+            )
 
         return Response(
             {"message": f"{total_issues} issues were deleted"},

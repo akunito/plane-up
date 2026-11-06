@@ -54,6 +54,7 @@ from plane.utils.host import base_host
 from plane.utils.serializers import writable_data
 from plane.db.models.intake import SourceType
 from plane.utils.favorites import drop_work_item_favorites
+from plane.utils.recent_visits import drop_work_item_recent_visits
 
 
 class IntakeViewSet(BaseViewSet):
@@ -575,6 +576,25 @@ class IntakeIssueViewSet(BaseViewSet):
                 issue.delete()
                 # Its sidebar pins, and its sub-items' (APLANE-29)
                 drop_work_item_favorites([pk], project_id)
+                # Its recently-visited rows: reachable here because the intake UI links to the
+                # work item's full page, whose retrieve records the visit (APLANE-37).
+                drop_work_item_recent_visits([pk], project_id, slug)
+                # And the activity row, which only the work-item delete paths wrote. Without it a
+                # delete through intake leaves no trace in anyone's activity feed, while the same
+                # delete from the work-item view does. notification=False: the notification task
+                # resolves the issue through `Issue.objects`, which is already None by now.
+                issue_activity.delay(
+                    type="issue.activity.deleted",
+                    requested_data=json.dumps({"issue_id": str(pk)}),
+                    actor_id=str(request.user.id),
+                    issue_id=str(pk),
+                    project_id=str(project_id),
+                    current_instance={},
+                    epoch=int(timezone.now().timestamp()),
+                    notification=False,
+                    origin=base_host(request=request, is_app=True),
+                    subscriber=False,
+                )
             else:
                 # The work item is already soft-deleted and only this intake row outlived it. What
                 # should have taken it is celery's soft_delete_related_objects: no retry, its
