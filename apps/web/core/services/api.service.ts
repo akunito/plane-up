@@ -82,6 +82,27 @@ export const ensureErrorPayload = (error: any): any => {
   return { response: { status: 0, statusText: "", headers: {}, data: payload } };
 };
 
+/**
+ * Read the failure payload back out of whatever a service threw (APLANE-36).
+ *
+ * Three conventions in this repo put it in three different places, and a consumer that reaches
+ * into the wrong one gets `undefined` and silently keeps the old do-nothing behaviour — which is
+ * the very bug this ticket is about, one level up. Verified call site by call site:
+ *   - `throw error?.response?.data` (376 sites; auth.service.emailCheck) -> the payload itself
+ *   - `throw error?.response`       (79 sites; user.service.currentUser)  -> `.data`
+ *   - `throw error`                 (instance.service.getInstanceInfo)    -> `.response.data`
+ * Returns undefined for a real API error body, for a cancellation and for anything else. Strictly
+ * it tests a field name, so what makes it safe is that no Plane endpoint returns `isRequestFailure`:
+ * DRF bodies are snake_case (`detail`, `error`, `error_code`, field-error dicts), and a cancellation
+ * is returned untouched by ensureErrorPayload above and carries the flag nowhere.
+ */
+export const asRequestFailure = (error: any): TRequestFailurePayload | undefined => {
+  for (const candidate of [error, error?.data, error?.response?.data]) {
+    if (candidate?.isRequestFailure === true) return candidate as TRequestFailurePayload;
+  }
+  return undefined;
+};
+
 export abstract class APIService {
   protected baseURL: string;
   private axiosInstance: AxiosInstance;

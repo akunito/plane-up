@@ -8,6 +8,8 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 // plane imports
 import { SUPPORT_EMAIL } from "@plane/constants";
+// services
+import { asRequestFailure } from "@/services/api.service";
 
 export enum EPageTypes {
   PUBLIC = "PUBLIC",
@@ -100,6 +102,17 @@ export enum EAuthenticationErrorCodes {
   ADMIN_USER_DEACTIVATED = "5190",
   // Rate limit
   RATE_LIMIT_EXCEEDED = "5900",
+  // Fork-local, client-side only (APLANE-36). It exists so that a request which produced no
+  // response at all can travel through authErrorHandler like every other failure, instead of
+  // needing a parallel code path in the form.
+  //
+  // NOT a number, deliberately. The whole 5xxx space belongs to the server's
+  // AUTHENTICATION_ERROR_CODES (apps/api/plane/authentication/adapter/error.py), and the first
+  // draft of this used 5999 — which is already taken there by "AUTHENTICATION_FAILED", the generic
+  // Unknown catch-all. Since auth-root.tsx reads `error_code` out of the URL and feeds it to this
+  // same handler, that would have printed "Could not reach the server" for a real authentication
+  // failure the day anything raised it. A non-numeric value cannot collide with that space at all.
+  REQUEST_FAILED = "CLIENT_REQUEST_FAILED",
 }
 
 export type TAuthErrorInfo = {
@@ -113,6 +126,11 @@ export type TAuthErrorInfo = {
 const errorCodeMessages: {
   [key in EAuthenticationErrorCodes]: { title: string; message: (email?: string) => ReactNode };
 } = {
+  // fork-local (APLANE-36)
+  [EAuthenticationErrorCodes.REQUEST_FAILED]: {
+    title: `Could not reach the server`,
+    message: () => `We could not reach the server. Check your connection and try again.`,
+  },
   // global
   [EAuthenticationErrorCodes.INSTANCE_NOT_CONFIGURED]: {
     title: `Instance not configured`,
@@ -431,6 +449,7 @@ export const authErrorHandler = (errorCode: EAuthenticationErrorCodes, email?: s
     EAuthenticationErrorCodes.ADMIN_USER_DEACTIVATED,
     EAuthenticationErrorCodes.RATE_LIMIT_EXCEEDED,
     EAuthenticationErrorCodes.PASSWORD_TOO_WEAK,
+    EAuthenticationErrorCodes.REQUEST_FAILED,
   ];
 
   if (bannerAlertErrorCodes.includes(errorCode))
@@ -443,6 +462,33 @@ export const authErrorHandler = (errorCode: EAuthenticationErrorCodes, email?: s
 
   return undefined;
 };
+
+/** Whatever an auth service rejected with: its error body, or the APLANE-36 synthetic payload. */
+type TAuthFailure = { error_code?: string | number; isRequestFailure?: boolean };
+
+/**
+ * Pick the banner for a failed auth call (APLANE-36).
+ *
+ * `authErrorHandler` above maps a SERVER error code, and a request that never reached the server
+ * has none: `error_code` is undefined, the handler returns undefined, and the
+ * `if (errorhandler?.type)` guard at the call sites then skips `setErrorInfo` entirely. The result
+ * was the worst of the three screens in this ticket — Continue did nothing at all, no banner, no
+ * inline message, no console error, for a user who cannot sign in and has no idea why.
+ *
+ * It lives here rather than in form-root so that the decision is next to the mapping it extends,
+ * and so a test can reach it without mounting the form (which would drag in the instance store,
+ * react-hook-form and the email step to pin one line).
+ *
+ * NOTE the form that calls this only renders when email or magic-link login is enabled, and both
+ * are OFF in our prod instance (asserted every deploy by L3-02-served-auth-flags:
+ * `is_email_password_enabled` is False there, True on dev). So in prod this path is unreachable
+ * today; it is for dev, and for the day prod turns password login back on. The reachable half of
+ * APLANE-36 is the shell and the archived work item.
+ */
+export const authBannerFor = (error: TAuthFailure | undefined, userEmail?: string): TAuthErrorInfo | undefined =>
+  asRequestFailure(error)
+    ? authErrorHandler(EAuthenticationErrorCodes.REQUEST_FAILED)
+    : authErrorHandler(error?.error_code?.toString() as EAuthenticationErrorCodes, userEmail);
 
 export const passwordErrors = [
   EAuthenticationErrorCodes.PASSWORD_TOO_WEAK,

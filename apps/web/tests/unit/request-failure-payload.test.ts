@@ -7,7 +7,7 @@
  * item rendered blank, and the work-item page sat on its skeleton for ever (APLANE-35).
  *
  * The fix is one interceptor per APIService, so the ~380 service methods are untouched. The tests
- * that matter here are the two negative ones: the payload must carry NO prose (181 call sites do
+ * that matter here are the two negative ones: the payload must carry NO prose (30 call sites do
  * `error?.error ?? t("translated")`, and filling `error` would replace every one of those with an
  * English string from the service layer), and a CANCELLED request must stay exactly as it was.
  */
@@ -50,7 +50,9 @@ describe("ensureErrorPayload (L1-22)", () => {
   it("carries no error/message/detail, so every translated fallback still wins", () => {
     const thrown = whatTheServiceThrows(axiosNetworkError());
 
-    // The one assertion that protects 181 `error?.error ?? t("…")` call sites.
+    // The one assertion that protects the 30 `error?.error ?? t("…")` call sites. (An earlier
+    // version of this comment said 181: that came from a regex whose `e` alternative matched the
+    // last letter of any identifier. Counted properly on 2026-11-06.)
     expect(thrown.error).toBeUndefined();
     expect(thrown.message).toBeUndefined();
     expect(thrown.detail).toBeUndefined();

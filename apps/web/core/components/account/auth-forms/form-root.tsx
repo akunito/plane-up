@@ -11,7 +11,7 @@ import { EAuthModes, EAuthSteps } from "@plane/constants";
 import type { IEmailCheckData } from "@plane/types";
 // helpers
 import type { TAuthErrorInfo } from "@/helpers/authentication.helper";
-import { authErrorHandler } from "@/helpers/authentication.helper";
+import { authBannerFor } from "@/helpers/authentication.helper";
 // hooks
 import { useInstance } from "@/hooks/store/use-instance";
 import { useAppRouter } from "@/hooks/use-app-router";
@@ -76,7 +76,7 @@ export const AuthFormRoot = observer(function AuthFormRoot(props: TAuthFormRoot)
         setIsExistingEmail(response.existing);
       })
       .catch((error) => {
-        const errorhandler = authErrorHandler(error?.error_code?.toString(), data?.email || undefined);
+        const errorhandler = authBannerFor(error, data?.email || undefined);
         if (errorhandler?.type) setErrorInfo(errorhandler);
       });
   };
@@ -97,7 +97,7 @@ export const AuthFormRoot = observer(function AuthFormRoot(props: TAuthFormRoot)
       .generateUniqueCode(payload)
       .then(() => ({ code: "" }))
       .catch((error) => {
-        const errorhandler = authErrorHandler(error?.error_code?.toString());
+        const errorhandler = authBannerFor(error);
         if (errorhandler?.type) setErrorInfo(errorhandler);
         throw error;
       });

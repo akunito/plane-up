@@ -82,6 +82,32 @@ export const ensureErrorPayload = (error: any): any => {
 };
 
 /**
+ * Read the failure payload back out of whatever a service threw (APLANE-36).
+ *
+ * NOTHING IN THIS PACKAGE CALLS IT. It is here because the L1-22 drift test requires the two
+ * copies of these helpers to be byte-identical (upstream keeps two APIService classes and a fix to
+ * one is invisible in the other), and because a consumer added to this package would need it. The
+ * call-site counts below are the web app's.
+ *
+ * Three conventions in this repo put it in three different places, and a consumer that reaches
+ * into the wrong one gets `undefined` and silently keeps the old do-nothing behaviour — which is
+ * the very bug this ticket is about, one level up. Verified call site by call site:
+ *   - `throw error?.response?.data` (376 sites; auth.service.emailCheck) -> the payload itself
+ *   - `throw error?.response`       (79 sites; user.service.currentUser)  -> `.data`
+ *   - `throw error`                 (instance.service.getInstanceInfo)    -> `.response.data`
+ * Returns undefined for a real API error body, for a cancellation and for anything else. Strictly
+ * it tests a field name, so what makes it safe is that no Plane endpoint returns `isRequestFailure`:
+ * DRF bodies are snake_case (`detail`, `error`, `error_code`, field-error dicts), and a cancellation
+ * is returned untouched by ensureErrorPayload above and carries the flag nowhere.
+ */
+export const asRequestFailure = (error: any): TRequestFailurePayload | undefined => {
+  for (const candidate of [error, error?.data, error?.response?.data]) {
+    if (candidate?.isRequestFailure === true) return candidate as TRequestFailurePayload;
+  }
+  return undefined;
+};
+
+/**
  * Abstract base class for making HTTP requests using axios
  * @abstract
  */
