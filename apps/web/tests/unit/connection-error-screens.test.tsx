@@ -247,6 +247,14 @@ describe("InstanceWrapper tells an unreachable server from a broken one (L1-25)"
       </InstanceWrapper>
     );
 
+  // A failed FIRST load, which is the only state the error branch handles: it is guarded by
+  // `!instance`, so a failure over an already-loaded instance deliberately falls through to the
+  // app. The first draft of these three tests left the loaded instance in place from beforeEach
+  // and failed on the VPS runner for exactly that reason.
+  beforeEach(() => {
+    instanceStore.instance = undefined;
+  });
+
   it("nothing reached the server → retry view, not the container-logs page", () => {
     swr.byKey.INSTANCE_INFORMATION = { error: asThrownBy.whole(networkError()) };
 
@@ -275,7 +283,22 @@ describe("InstanceWrapper tells an unreachable server from a broken one (L1-25)"
     expect(screen.getByTestId("maintenance-view")).toBeTruthy();
   });
 
+  it("an error over an ALREADY LOADED instance leaves the app alone", () => {
+    // revalidateOnReconnect is on by SWR's default, so this happens in normal use: coming back
+    // online, a revalidation of INSTANCE_INFORMATION can fail while the app is perfectly usable.
+    // Without the `&& !instance` guard this replaced the whole app with an error screen — the
+    // APLANE-35 defect, in the branch this commit rewrote.
+    instanceStore.instance = { is_setup_done: true };
+    swr.byKey.INSTANCE_INFORMATION = { error: asThrownBy.whole(networkError()) };
+
+    renderGate();
+
+    expect(screen.getByTestId("app")).toBeTruthy();
+    expect(screen.queryByText(CONNECTION_MESSAGE)).toBeNull();
+  });
+
   it("no error → the app, and an unconfigured instance still gets its own screen", () => {
+    instanceStore.instance = { is_setup_done: true };
     renderGate();
     expect(screen.getByTestId("app")).toBeTruthy();
 
