@@ -54,7 +54,9 @@ describe("ensureErrorPayload (L1-22)", () => {
     expect(thrown.error).toBeUndefined();
     expect(thrown.message).toBeUndefined();
     expect(thrown.detail).toBeUndefined();
-    expect(Object.keys(thrown).toSorted()).toEqual(["axiosCode", "isRequestFailure", "isTimeout", "status"]);
+    // A Set, so this needs neither `.sort()` (unicorn/no-array-sort) nor `.toSorted()` (ES2023,
+    // outside this app's configured lib — the gate's typecheck caught that one).
+    expect(new Set(Object.keys(thrown))).toEqual(new Set(["axiosCode", "isRequestFailure", "isTimeout", "status"]));
   });
 
   it("marks a timeout", () => {
