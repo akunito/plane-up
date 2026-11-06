@@ -24,7 +24,7 @@ const whatTheServiceThrows = (error: unknown) => (ensureErrorPayload(error) as a
 
 const axiosNetworkError = () => ({ message: "Network Error", code: "ERR_NETWORK", config: { url: "/api/x" } });
 const axiosTimeout = () => ({ message: "timeout of 0ms exceeded", code: "ECONNABORTED", config: {} });
-const axiosCancel = () => ({ message: "canceled", code: "ERR_CANCELED", name: "CanceledError" });
+const axiosCancel = () => new CanceledError("canceled");
 const axiosResponse = (status: number, data: unknown) => ({
   message: `Request failed`,
   code: "ERR_BAD_REQUEST",
@@ -85,6 +85,14 @@ describe("ensureErrorPayload (L1-22)", () => {
 
     expect(thrown.isRequestFailure).toBe(true);
     expect(thrown.status).toBe(502);
+  });
+
+  it("treats an object that merely LOOKS like a cancellation as a real failure", () => {
+    // axios marks real cancellations with `__CANCEL__`, and that is what `isCancel` reads — a
+    // literal carrying only `code`/`name` is not one. Pinned because the first version of this
+    // guard matched those strings by hand, and moving to axios' own isCancel silently changed
+    // this case. The gate caught it; nothing local could.
+    expect(whatTheServiceThrows({ code: "ERR_CANCELED", name: "CanceledError" }).isRequestFailure).toBe(true);
   });
 
   it("does NOT touch a cancelled request", () => {
@@ -148,7 +156,10 @@ describe("both APIService copies normalise their rejections (L1-22)", () => {
     const source = read(relative, fromRoot);
 
     expect(source).toMatch(/interceptors\.response\.use/);
-    expect(source).toMatch(/Promise\.reject\(ensureErrorPayload\(error\)\)/);
+    // Either form: the web copy rejects inside the existing 401 interceptor, the packages copy
+    // throws from an async handler (identical rejection, and it keeps that package inside its
+    // 6-warning lint budget).
+    expect(source).toMatch(/(?:Promise\.reject\(|throw )ensureErrorPayload\(error\)/);
   });
 
   it("and the two helpers have not drifted apart", () => {
