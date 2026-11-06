@@ -160,8 +160,12 @@ class IntakeIssueListCreateAPIEndpoint(BaseAPIView):
 
         project = Project.objects.get(workspace__slug=slug, pk=project_id)
 
-        # Intake view
-        if intake is None and not project.intake_view:
+        # Intake view. The condition was `intake is None and not project.intake_view`, which never
+        # fired with the feature on, so the next line's `intake.id` raised -> 500 (APLANE-31).
+        # Deliberately NOT `or`, which is what get_queryset uses: a project whose intake_view was
+        # switched off while its intake row survived must keep working through this endpoint exactly
+        # as it did -- test_api_intake_destroy_drops_the_pin covers precisely that project.
+        if intake is None:
             return Response(
                 {"error": "Intake is not enabled for this project enable it through the project's api"},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -324,10 +328,17 @@ class IntakeIssueDetailAPIEndpoint(BaseAPIView):
         """
         intake = Intake.objects.filter(workspace__slug=slug, project_id=project_id).first()
 
-        project = Project.objects.get(workspace__slug=slug, pk=project_id)
+        # Kept as a lookup rather than an assignment: `intake_view` is no longer read here
+        # (see the guard below), but a project id that does not belong to this workspace must
+        # still raise DoesNotExist -> 404 instead of falling through to the intake query.
+        Project.objects.get(workspace__slug=slug, pk=project_id)
 
-        # Intake view
-        if intake is None and not project.intake_view:
+        # Intake view. The condition was `intake is None and not project.intake_view`, which never
+        # fired with the feature on, so the next line's `intake.id` raised -> 500 (APLANE-31).
+        # Deliberately NOT `or`, which is what get_queryset uses: a project whose intake_view was
+        # switched off while its intake row survived must keep working through this endpoint exactly
+        # as it did -- test_api_intake_destroy_drops_the_pin covers precisely that project.
+        if intake is None:
             return Response(
                 {"error": "Intake is not enabled for this project enable it through the project's api"},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -475,10 +486,17 @@ class IntakeIssueDetailAPIEndpoint(BaseAPIView):
         """
         intake = Intake.objects.filter(workspace__slug=slug, project_id=project_id).first()
 
-        project = Project.objects.get(workspace__slug=slug, pk=project_id)
+        # Kept as a lookup rather than an assignment: `intake_view` is no longer read here
+        # (see the guard below), but a project id that does not belong to this workspace must
+        # still raise DoesNotExist -> 404 instead of falling through to the intake query.
+        Project.objects.get(workspace__slug=slug, pk=project_id)
 
-        # Intake view
-        if intake is None and not project.intake_view:
+        # Intake view. The condition was `intake is None and not project.intake_view`, which never
+        # fired with the feature on, so the next line's `intake.id` raised -> 500 (APLANE-31).
+        # Deliberately NOT `or`, which is what get_queryset uses: a project whose intake_view was
+        # switched off while its intake row survived must keep working through this endpoint exactly
+        # as it did -- test_api_intake_destroy_drops_the_pin covers precisely that project.
+        if intake is None:
             return Response(
                 {"error": "Intake is not enabled for this project enable it through the project's api"},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -518,9 +536,22 @@ class IntakeIssueDetailAPIEndpoint(BaseAPIView):
         # Check the issue status
         if intake_issue.status in [-2, -1, 0, 2]:
             # Delete the issue also
-            issue.delete()
-            # Its sidebar pins, and its sub-items' (APLANE-29)
-            drop_work_item_favorites([issue_id], project_id)
+            # `issue` comes from a .first() above and can be None: the work item is already
+            # soft-deleted and only this intake row outlived it (celery's
+            # soft_delete_related_objects has no retry and only print()s a failed relation, so
+            # there is no logged error either). This used to fall through to None.delete() ->
+            # AttributeError -> 500, leaving the orphan row undeletable until hard_delete reaped
+            # the work item HARD_DELETE_AFTER_DAYS (60) later (APLANE-31); the permission check
+            # above already treats None as possible.
+            if issue is not None:
+                issue.delete()
+                # Its sidebar pins, and its sub-items' (APLANE-29)
+                drop_work_item_favorites([issue_id], project_id)
+            else:
+                # cascade=False deliberately: nothing is being deleted here, so nothing licenses
+                # dropping a sub-item's pin -- the children may well still be alive, that cascade
+                # being exactly what failed.
+                drop_work_item_favorites([issue_id], project_id, cascade=False)
 
         intake_issue.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

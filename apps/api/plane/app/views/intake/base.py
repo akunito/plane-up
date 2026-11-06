@@ -84,6 +84,11 @@ class IntakeViewSet(BaseViewSet):
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER])
     def destroy(self, request, slug, project_id, pk):
         intake = Intake.objects.filter(workspace__slug=slug, project_id=project_id, pk=pk).first()
+        if intake is None:
+            # Same class as the orphan case in IntakeIssueViewSet.destroy below, and far easier to
+            # reach: any project member passing a stale, foreign or already-deleted intake id used
+            # to land on None.is_default -> AttributeError -> 500 instead of 404 (APLANE-31).
+            return Response({"error": "Intake not found"}, status=status.HTTP_404_NOT_FOUND)
         # Handle default intake delete
         if intake.is_default:
             return Response(
@@ -566,9 +571,22 @@ class IntakeIssueViewSet(BaseViewSet):
         if intake_issue.status in [-2, -1, 0, 2]:
             # Delete the issue also
             issue = Issue.objects.filter(workspace__slug=slug, project_id=project_id, pk=pk).first()
-            issue.delete()
-            # Its sidebar pins, and its sub-items' (APLANE-29)
-            drop_work_item_favorites([pk], project_id)
+            if issue is not None:
+                issue.delete()
+                # Its sidebar pins, and its sub-items' (APLANE-29)
+                drop_work_item_favorites([pk], project_id)
+            else:
+                # The work item is already soft-deleted and only this intake row outlived it. What
+                # should have taken it is celery's soft_delete_related_objects: no retry, its
+                # CASCADE branch only print()s a failed relation (so there is no logged error to
+                # find afterwards), and a failure in its SET_NULL branch kills the task before the
+                # intake relation is reached at all. This used to fall through to None.delete() ->
+                # AttributeError -> 500, so the orphan row stayed undeletable until hard_delete
+                # reaped the work item HARD_DELETE_AFTER_DAYS (60) later (APLANE-31).
+                # cascade=False deliberately: nothing is being deleted here, so nothing licenses
+                # dropping a sub-item's pin -- the children may well still be alive, that cascade
+                # being exactly what failed.
+                drop_work_item_favorites([pk], project_id, cascade=False)
 
         intake_issue.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
