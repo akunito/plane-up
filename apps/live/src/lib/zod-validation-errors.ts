@@ -15,9 +15,14 @@ export type TValidationError = {
  * Flatten a `ZodError` into the `{path, message}` list the 400 responses return (APLANE-30).
  *
  * Its own module, rather than three lines inline in the controller, for one reason: the controller
- * imports `@plane/decorators`, `@plane/logger` and express, so a test of it only runs once those
- * workspace packages have been built. This has no dependency but zod, so the contract below is
- * pinned by a test that runs anywhere — and that contract is exactly what broke.
+ * imports `@plane/decorators`, `@plane/logger` and express, so a test of it needs those workspace
+ * packages built first. This has no dependency but zod, so the contract below is pinned by a far
+ * cheaper test — and that contract is exactly what broke.
+ *
+ * That test only guards anything because the lockfile resolves zod 4: on zod 3 `.errors` is a
+ * getter alias for `.issues` (`ZodError.ts`), so a version of this that read `.errors` would pass
+ * every one of those assertions. The real guard against regressing it is L0-05, the zero-baseline
+ * `apps/live` typecheck — under zod 4, `.errors` is a TS2339.
  *
  * **Read `.issues`, never `.errors`.** Both exist on zod 3's `ZodError` (`.errors` is an alias),
  * and zod 4 removed `.errors` entirely: `error.errors.map(...)` throws a TypeError INSIDE the catch

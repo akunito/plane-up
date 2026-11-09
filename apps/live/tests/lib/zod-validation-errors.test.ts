@@ -34,8 +34,10 @@ describe("zodIssuesToValidationErrors", () => {
   it("flattens every issue to a dotted path and a message", () => {
     const errors = zodIssuesToValidationErrors(errorFrom({}));
 
-    // A Set, not `.sort()`: order is irrelevant here, `.sort()` mutates (oxlint says so), and
-    // `.toSorted()` is ES2023 — outside this app's lib, which has caught a change out before.
+    // A Set, not `.sort()`: order is irrelevant and `.sort()` mutates, which oxlint flags. NOT
+    // because `.toSorted()` is unavailable — `packages/typescript-config/base.json` sets
+    // `lib: ["es2023"]`, so it would have compiled. A Set also survives zod changing how many
+    // issues it reports, which `.sort()` on a fixed array would not.
     expect(new Set(errors.map((e) => e.path))).toEqual(new Set(["description_html", "variant"]));
     for (const e of errors) expect(e.message).toBeTruthy();
   });
