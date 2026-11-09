@@ -88,7 +88,7 @@ catalog:
   "@types/react-dom": "18.3.1"
   "@types/sanitize-html": "2.16.0"
   "@types/ws": "^8.18.1"
-  "@vitest/coverage-v8": "^4.1.8"
+  "@vitest/coverage-v8": "4.1.12"
   "ast-types": "0.14.2"
   "autoprefixer": "^10.4.19"
   "axios": "1.20.0"
@@ -181,7 +181,7 @@ catalog:
   "uuid": "14.0.0"
   "vite": "8.1.6"
   "vite-tsconfig-paths": "^5.1.4"
-  "vitest": "^4.1.8"
+  "vitest": "4.1.12"
   "jsdom": "29.1.1"
   # pinned to nixpkgs playwright-driver (browsers come from nix, versions must match exactly)
   "@playwright/test": "1.64.1"
@@ -223,6 +223,17 @@ overrides:
   serialize-javascript: 7.0.5
   "ajv@6": 6.14.0
   "ajv@8": 8.18.0
+  # APLANE-44: unpinned transitives that resolved below their advisory fix. All patch or minor
+  # within the line they were already on, and each is the FLOOR of the fix rather than the latest,
+  # so the change is the smallest one that clears the advisory. browserslist and
+  # baseline-browser-mapping are browser-data packages pulled by every app (97 paths each);
+  # source-map-js comes in through postcss; postcss-selector-parser has two major lines live at
+  # once, so both need pinning, the same shape as the ajv and minimatch pairs above.
+  browserslist: 4.28.7
+  baseline-browser-mapping: 2.11.0
+  source-map-js: 1.2.2
+  "postcss-selector-parser@6": 6.1.5
+  "postcss-selector-parser@7": 7.1.6
   "undici@7": 7.30.1
   flatted: 3.4.2
   picomatch: 2.3.2
