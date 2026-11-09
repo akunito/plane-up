@@ -31,6 +31,9 @@ leaving it as a property nobody checks.
 import pytest
 from rest_framework import status
 
+from django.db import IntegrityError, transaction
+from django.utils import timezone
+
 from plane.db.models import Intake, Project, ProjectMember, State
 
 pytestmark = pytest.mark.contract
@@ -165,3 +168,68 @@ def test_posting_an_intake_is_not_routed(session_client, workspace, project, url
         f"POST must not be routed — repairing it reopens three worse bugs: {response.status_code}"
     )
     assert not Intake.objects.filter(project_id=project.id, name="Created through the API").exists()
+
+
+# --- the database now enforces one live default per project (APLANE-38 step 3) ----------------
+
+
+def test_a_second_live_default_is_rejected_by_the_database(project):
+    """The invariant everything else assumed. The ordering makes the default win every lookup;
+    this makes "there is exactly one" true rather than merely usual.
+
+    Without it, two rows could both carry `is_default=True`, the `-is_default` ordering would tie,
+    the NAME would decide, and an alphabetically-earlier second default would shadow the real one —
+    while `destroy` refuses to delete any default, so it could not be removed through the API.
+
+    **This is a SCHEMA-level assertion, and `pytest.ini` sets `--reuse-db`.** So it can pass against
+    a database created before the constraint existed, and it can keep passing after the constraint
+    is removed. Verifying it means forcing a fresh schema: `pytest … --create-db`. Measured
+    2026-11-09 — with the constraint dropped from the model, a reused database still passed all
+    twelve tests, and only `--create-db` produced the honest "DID NOT RAISE".
+    """
+    _intake(project, "Default", is_default=True)
+
+    with pytest.raises(IntegrityError) as caught:
+        with transaction.atomic():
+            _intake(project, "AAA second default", is_default=True)
+
+    assert "intake_one_default_per_project" in str(caught.value), (
+        f"the partial unique constraint must be what rejects it: {caught.value}"
+    )
+
+
+def test_a_second_NON_default_is_still_allowed(project):
+    """The constraint is scoped to `is_default=True`, so it must not become "one intake per
+    project" by accident — upstream allows several, and the create route being unrouted is a
+    separate decision."""
+    _intake(project, "Default", is_default=True)
+    second = _intake(project, "AAA ordinary")
+
+    assert Intake.objects.filter(project_id=project.id).count() == 2
+    assert Intake.objects.filter(project_id=project.id).first().is_default is True
+    assert second.is_default is False
+
+
+def test_a_soft_deleted_default_does_not_block_a_new_one(project):
+    """Scoped to `deleted_at IS NULL`, like its sibling constraint on (name, project). Otherwise a
+    project whose default was soft-deleted could never get another, and `ProjectViewSet`'s
+    intake_view toggle — which creates one when no `is_default=True` row exists — would 400 for
+    ever."""
+    first = _intake(project, "Old default", is_default=True)
+    Intake.all_objects.filter(pk=first.pk).update(deleted_at=timezone.now())
+
+    replacement = _intake(project, "New default", is_default=True)
+
+    assert replacement.pk != first.pk
+    assert Intake.objects.filter(project_id=project.id, is_default=True).count() == 1
+
+
+def test_two_projects_may_each_have_their_own_default(workspace, create_user, project):
+    """Per PROJECT, not per workspace — the obvious way to get this wrong."""
+    other = Project.objects.create(name="Second", identifier="SEC", workspace=workspace)
+    ProjectMember.objects.create(workspace=workspace, project=other, member=create_user, role=20)
+
+    _intake(project, "Default", is_default=True)
+    _intake(other, "Default", is_default=True)
+
+    assert Intake.objects.filter(is_default=True).count() == 2

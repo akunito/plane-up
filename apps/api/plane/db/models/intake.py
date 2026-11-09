@@ -31,7 +31,28 @@ class Intake(ProjectBaseModel):
                 fields=["name", "project"],
                 condition=models.Q(deleted_at__isnull=True),
                 name="intake_unique_name_project_when_deleted_at_null",
-            )
+            ),
+            # One live DEFAULT intake per project, enforced by the database (APLANE-38 step 3).
+            #
+            # The ordering below makes the default win every lookup; this makes "there is exactly
+            # one" true rather than merely usual. Without it the guarantee rests on nothing: the
+            # only other uniqueness is (name, project), so two rows could both carry
+            # is_default=True, and then `-is_default` ties and the NAME decides — an
+            # alphabetically-earlier second default would shadow the real one and `destroy`
+            # refuses to delete either, so it could not be removed through the API at all.
+            #
+            # Safe to add only because it was measured first: a partial unique constraint FAILS TO
+            # APPLY if a duplicate already exists, and prod was checked on 2026-11-09 —
+            # `select project_id, count(*) from intakes where deleted_at is null group by 1 having
+            # count(*) > 1` returned no rows.
+            #
+            # Scoped to `deleted_at IS NULL` like its sibling, so a soft-deleted default does not
+            # block creating the next one.
+            models.UniqueConstraint(
+                fields=["project"],
+                condition=models.Q(is_default=True, deleted_at__isnull=True),
+                name="intake_one_default_per_project",
+            ),
         ]
         verbose_name = "Intake"
         verbose_name_plural = "Intakes"
