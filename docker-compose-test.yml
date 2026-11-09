@@ -72,7 +72,16 @@ services:
       retries: 10
 
   test-minio:
-    image: minio/minio
+    # minio/minio is GONE from Docker Hub — the hub API answers 404 and the registry answers
+    # "denied" (checked 2026-11-09 from a host that had never cached it). It was declared UNTAGGED
+    # here, so L2 kept passing only because the VPS still held a 14-month-old :latest locally; and
+    # L2 is a gate stage, so the first docker prune would have stopped plane-deploy reaching prod
+    # at all, as what looks like unrelated infrastructure trouble (APLANE-42).
+    # quay.io/minio/minio is not an alternative: no manifest for :latest or for that release.
+    # pgsty/silo is PGSTY's maintained MinIO fork, and the SAME image dev and prod have run since
+    # 2026-10-23 (AINF-475) — matching them rather than picking a third thing. Pinned to
+    # tag@digest, because this ticket exists because an untagged image was assumed permanent.
+    image: pgsty/silo:RELEASE.2026-10-18T00-00-00Z@sha256:2636fc4155d9a7e41ff58cdb65ddd13ba9304e67184e13c25bc5cb34016269d7
     networks:
       - test_env
     env_file:
@@ -80,19 +89,27 @@ services:
     environment:
       MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-access-key}
       MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-secret-key}
+    # The binary is `silo`, NOT `minio` — AINF-475's "same `server /data` argv" meant the
+    # arguments, not the name, and `exec minio server` dies with "exec: minio: not found" while
+    # the container still reports itself up for a moment. Verified by running it, 2026-11-09.
+    #
+    # The `mc alias` + `mc mb` steps are gone, and NOT because mc is missing: it is at
+    # /usr/bin/mc in this image. They were always redundant — the backend is filesystem-backed, so
+    # the `mkdir` below IS what creates the bucket, and `mc mb` only repeated it. Dropping them
+    # also drops the `server &` + `tail -f /dev/null` shape, so the server is PID 1: if it dies
+    # the container stops, instead of staying up with nothing listening.
     entrypoint: >
       /bin/sh -c "
       mkdir -p /export/${AWS_S3_BUCKET_NAME:-uploads} &&
-      minio server /export --console-address ':9090' &
-      sleep 3 &&
-      mc alias set local http://localhost:9000 ${AWS_ACCESS_KEY_ID:-access-key} ${AWS_SECRET_ACCESS_KEY:-secret-key} &&
-      mc mb local/${AWS_S3_BUCKET_NAME:-uploads} -p || true &&
-      tail -f /dev/null
+      exec silo server /export --console-address ':9090'
       "
     tmpfs:
       - /export
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      # `mc ready local` needed an `mc alias` the entrypoint no longer sets. The server's own
+      # liveness endpoint needs no alias; curl is at /usr/bin/curl. No shell pipeline and no grep
+      # in a healthcheck here — this image has curl and mc but NO grep.
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
       retries: 10
