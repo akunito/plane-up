@@ -219,7 +219,12 @@ overrides:
   markdown-it: 14.3.3
   rollup: 4.59.0
   "minimatch@3": 3.1.4
-  "minimatch@10": 10.2.3
+  # 10.2.6, the newest 10.x. This clears NO advisory — minimatch's fix is >=11.0.1 — but it repairs
+  # a range violation the override itself created: `eslint@10.4.1` declares `minimatch: "^10.2.4"`
+  # and this was pinning 10.2.3, one patch BELOW its minimum. 10.2.6 satisfies that and also
+  # `glob@11.1.0`'s `^10.1.1`, so it is the best version that breaks nothing. Going to 11.0.1 for
+  # the advisory would violate glob 11's range instead (APLANE-44).
+  "minimatch@10": 10.2.6
   serialize-javascript: 7.0.5
   "ajv@6": 6.14.0
   "ajv@8": 8.18.0
@@ -229,6 +234,11 @@ overrides:
   # baseline-browser-mapping are browser-data packages pulled by every app (97 paths each);
   # source-map-js comes in through postcss; postcss-selector-parser has two major lines live at
   # once, so both need pinning, the same shape as the ajv and minimatch pairs above.
+  # toml 4.2.0, NOT the advisory floor of 5.0.1: `effect@4.0.0-beta.70` — which apps/live uses for
+  # PDF export — declares `toml: "^4.1.1"`, so forcing 5 would knowingly run a library outside its
+  # declared range at runtime. 4.2.0 is inside it and clears 2 of toml's 5 advisories (the `<4.1.2`
+  # and `<4.2.0` ones). The remaining 3 need `>=5.0.1`, which is upstream effect's call, not ours.
+  toml: 4.2.0
   browserslist: 4.28.7
   baseline-browser-mapping: 2.11.0
   source-map-js: 1.2.2
