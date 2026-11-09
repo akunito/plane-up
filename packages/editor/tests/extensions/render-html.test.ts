@@ -37,10 +37,13 @@ import { StarterKit } from "@tiptap/starter-kit";
 import { describe, expect, it } from "vitest";
 
 import { CustomCalloutExtensionConfig } from "@/extensions/callout/extension-config";
+import { CustomLinkExtension } from "@/extensions/custom-link";
 import { CustomHorizontalRule } from "@/extensions/horizontal-rule";
 
 /** StarterKit supplies doc/paragraph/text; without them a node with `content: "block+"` cannot be built. */
 const baseExtensions = [StarterKit];
+
+const hrefOf = (html: string) => html.match(/href="([^"]*)"/)?.[1];
 
 const paragraph = (text: string) => ({
   type: "paragraph",
@@ -138,5 +141,53 @@ describe("what this harness cannot see", () => {
     expect(html).toContain('data-styled="yes"');
     expect(html).toContain('title="kept"');
     expect(html).not.toContain("style=");
+  });
+});
+
+describe("custom link href sanitising (GHSA-v2vv-7wq3-8w2j)", () => {
+  // The highest-value guard in this package and it had NO tests: `isDangerousHref` is module-private,
+  // so renderHTML through generateHTML is the only way to reach it. It blocks javascript:, data: and
+  // vbscript:, and — the part worth pinning — it first replicates the WHATWG URL parser's
+  // normalisation, because browsers strip Tab/LF/CR from ANYWHERE in a URL and strip leading C0
+  // controls before the scheme. A naive startsWith("javascript:") is bypassable with "\tjavascript:".
+  // When it fires it empties the href rather than dropping the anchor.
+  const render = (href: string) =>
+    generateHTML(
+      {
+        type: "doc",
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "click", marks: [{ type: "link", attrs: { href } }] }] },
+        ],
+      },
+      [StarterKit, CustomLinkExtension]
+    );
+
+  it("leaves an ordinary https link alone", () => {
+    // The control that keeps the rest honest: a guard that emptied everything would pass every
+    // assertion below and break every real link.
+    expect(hrefOf(render("https://plane.example.com/x"))).toBe("https://plane.example.com/x");
+  });
+
+  it.each([
+    ["a plain javascript: url", "javascript:alert(1)"],
+    ["a TAB before the scheme — the bypass the guard names", "\tjavascript:alert(1)"],
+    ["a TAB inside the scheme, which browsers strip too", "java\tscript:alert(1)"],
+    ["a NEWLINE inside the scheme", "java\nscript:alert(1)"],
+    ["mixed case", "JaVaScRiPt:alert(1)"],
+    ["a data: url", "data:text/html;base64,PHNjcmlwdD4="],
+    ["vbscript:", "vbscript:msgbox(1)"],
+    ["a non-breaking space before the scheme", "\u00A0javascript:alert(1)"],
+    ["a NUL before the scheme", "\u0000javascript:alert(1)"],
+  ])("empties the href for %s", (_label, href) => {
+    // Measured 2026-11-09: all nine are neutralised today. Without the guard the href comes
+    // through verbatim, so each of these fails loudly if it is ever removed or narrowed.
+    expect(hrefOf(render(href))).toBe("");
+  });
+
+  it("keeps the anchor's rel and target, which are the other half of the protection", () => {
+    const html = render("https://plane.example.com/x");
+
+    expect(html).toContain('rel="noopener noreferrer nofollow"');
+    expect(html).toContain('target="_blank"');
   });
 });
