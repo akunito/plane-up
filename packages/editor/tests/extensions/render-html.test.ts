@@ -37,7 +37,9 @@ import { StarterKit } from "@tiptap/starter-kit";
 import { describe, expect, it } from "vitest";
 
 import { CustomCalloutExtensionConfig } from "@/extensions/callout/extension-config";
+import { CustomImageExtensionConfig } from "@/extensions/custom-image/extension-config";
 import { CustomLinkExtension } from "@/extensions/custom-link";
+import { UniqueID } from "@/extensions/unique-id/extension";
 import { CustomHorizontalRule } from "@/extensions/horizontal-rule";
 
 /** StarterKit supplies doc/paragraph/text; without them a node with `content: "block+"` cannot be built. */
@@ -189,5 +191,77 @@ describe("custom link href sanitising (GHSA-v2vv-7wq3-8w2j)", () => {
 
     expect(html).toContain('rel="noopener noreferrer nofollow"');
     expect(html).toContain('target="_blank"');
+  });
+});
+
+describe("custom image", () => {
+  const render = (attrs: Record<string, unknown>) =>
+    generateHTML({ type: "doc", content: [{ type: "imageComponent", attrs }] }, [
+      StarterKit,
+      CustomImageExtensionConfig,
+    ]);
+
+  it("serialises to an inert <image-component>, never an <img>", () => {
+    // The property worth pinning above all others here. Stored `description_html` holds a CUSTOM
+    // ELEMENT, so the browser does nothing with its `src` on its own — the React node view is what
+    // later turns it into a real <img>. If a tiptap upgrade ever made this emit `<img>` instead,
+    // every stored document would start fetching its src directly on render, and nothing else in
+    // the repo would notice.
+    const html = render({ src: "https://cdn.example/x.png" });
+
+    expect(html).toContain("<image-component");
+    expect(html).not.toContain("<img");
+    expect(html).toContain('src="https://cdn.example/x.png"');
+  });
+
+  it("fills in its declared defaults", () => {
+    const html = render({ src: "https://cdn.example/x.png" });
+
+    expect(html).toContain('width="35%"');
+    expect(html).toContain('height="auto"');
+    expect(html).toContain('alignment="left"');
+    expect(html).toContain('status="pending"');
+  });
+
+  it("does NOT sanitise the src — documented, not desired", () => {
+    // Measured 2026-11-09 and asserted so it is a known property rather than an assumption. Unlike
+    // the link mark, this extension has no guard: a `javascript:` src rides through verbatim. It is
+    // not XSS — the attribute sits on an unknown element in the stored HTML, and even the <img> the
+    // node view builds would not execute a javascript: url. What it DOES mean is that an arbitrary
+    // http url is fetched by every viewer's browser when the node view renders, which is a tracking
+    // and IP-leak surface rather than code execution.
+    //
+    // If a guard is ever added, this test has to change — which is the point of writing it down.
+    const html = render({ src: "javascript:alert(1)" });
+
+    // The contrast with the link mark is the assertion: there, a javascript: href is emptied.
+    expect(html).toContain('src="javascript:alert(1)"');
+    expect(html).not.toContain('src=""');
+  });
+});
+
+describe("unique id", () => {
+  // Document identity: this extension stamps every block node with a `data-id`, read back by
+  // `parseHTML` from the same attribute. Stored `description_html` carries those ids, so a 2 -> 3
+  // change to the attribute name or to the null handling would silently restamp or strip every
+  // block in every existing document.
+  const render = (attrs?: Record<string, unknown>) =>
+    generateHTML(
+      {
+        type: "doc",
+        content: [{ type: "paragraph", ...(attrs ? { attrs } : {}), content: [{ type: "text", text: "x" }] }],
+      },
+      [StarterKit, UniqueID]
+    );
+
+  it("writes the id as data-id, not id", () => {
+    expect(render({ id: "blk-1" })).toContain('<p data-id="blk-1">');
+  });
+
+  it("writes no attribute at all when there is no id", () => {
+    // The null arm is explicit in the extension (`if (!attributes[attributeName]) return {}`), and
+    // this is what stops every id-less block picking up `data-id="null"`.
+    expect(render()).toContain("<p>x</p>");
+    expect(render()).not.toContain("data-id");
   });
 });
