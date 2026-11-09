@@ -21,8 +21,17 @@
  *
  * This is a first slice, not coverage: the extensions below are the ones whose `renderHTML` puts
  * user-controlled attributes into the DOM. Extending it to the rest is mechanical.
+ *
+ * **KNOWN BLIND SPOT, measured 2026-11-09 and pinned by the last test in this file: zeed-dom drops
+ * the `style` attribute entirely.** Everything else survives. So nothing here can test a `style`,
+ * and — the dangerous half — a negative assertion about one passes VACUOUSLY. `TableCell`
+ * interpolates user-controlled attrs straight into `style` (table-cell.ts:116,
+ * `background-color: ${node.attrs.background}`), and a test asserting that a hostile value does not
+ * inject a second CSS declaration there would go green while proving nothing. That surface needs a
+ * browser, or a different renderer, to test at all.
  */
 
+import { Node } from "@tiptap/core";
 import { generateHTML } from "@tiptap/html";
 import { StarterKit } from "@tiptap/starter-kit";
 import { describe, expect, it } from "vitest";
@@ -104,5 +113,30 @@ describe("custom horizontal rule", () => {
     // `this.options.HTMLAttributes` lands here too — the styling is part of the render contract,
     // and a 2 -> 3 change to how mergeAttributes folds options in would drop it silently.
     expect(html).toContain('class="py-4 border-strong-1"');
+  });
+});
+
+describe("what this harness cannot see", () => {
+  it("drops the style attribute, so no style assertion here can be trusted", () => {
+    // Pinned as a TEST rather than a comment because the failure mode is a green one: a negative
+    // assertion about a style — "the hostile value did not inject another declaration" — passes
+    // whatever the code does. If a future zeed-dom starts serialising style, this test fails, and
+    // that failure is the signal that the style-based extensions became testable here.
+    const Styled = Node.create({
+      name: "styledProbe",
+      group: "block",
+      content: "inline*",
+      parseHTML: () => [{ tag: "div[data-styled]" }],
+      renderHTML: () => ["div", { "data-styled": "yes", style: "color: red;", title: "kept" }, 0],
+    });
+
+    const html = generateHTML(
+      { type: "doc", content: [{ type: "styledProbe", content: [{ type: "text", text: "x" }] }] },
+      [StarterKit, Styled]
+    );
+
+    expect(html).toContain('data-styled="yes"');
+    expect(html).toContain('title="kept"');
+    expect(html).not.toContain("style=");
   });
 });
