@@ -11,6 +11,7 @@ import { Controller, Post } from "@plane/decorators";
 import { convertHTMLDocumentToAllFormats } from "@plane/editor";
 // logger
 import { logger } from "@plane/logger";
+import { zodIssuesToValidationErrors } from "@/lib/zod-validation-errors";
 import type { TConvertDocumentRequestBody } from "@/types";
 
 // Define the schema with more robust validation
@@ -45,10 +46,9 @@ export class DocumentController {
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        const validationErrors = error.errors.map((err) => ({
-          path: err.path.join("."),
-          message: err.message,
-        }));
+        // Extracted so it can be tested without this file's import graph, and because what it
+        // does is the thing that broke: see lib/zod-validation-errors.ts (APLANE-30).
+        const validationErrors = zodIssuesToValidationErrors(error);
         logger.error("DOCUMENT_CONTROLLER: Validation error", {
           validationErrors,
         });
