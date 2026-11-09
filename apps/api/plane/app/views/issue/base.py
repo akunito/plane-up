@@ -46,6 +46,7 @@ from plane.bgtasks.recent_visited_task import recent_visited_task
 from plane.bgtasks.webhook_task import model_activity
 from plane.db.models import (
     CycleIssue,
+    DraftIssue,
     FileAsset,
     IntakeIssue,
     Issue,
@@ -809,11 +810,87 @@ class BulkDeleteIssuesEndpoint(BaseAPIView):
         # SoftDeletionQuerySet.delete() is a bare update(deleted_at=…): it never calls the instance
         # delete(), so soft_delete_related_objects is never queued and the sub-items stay alive and
         # listable. Dropping their pins here would make a pin vanish from a work item the user can
-        # still open. (That bulk delete orphans sub-items at all is upstream's bug, not ours.)
+        # still open. (That bulk delete does not take the sub-items with it is upstream's behaviour;
+        # APLANE-32 kept it and clears the dangling pointers below instead.)
         drop_work_item_favorites(deleted_ids, project_id, cascade=False)
 
         # The recently-visited rows of the same ids (APLANE-37).
         drop_work_item_recent_visits(deleted_ids, project_id, slug)
+
+        # The sub-items this delete just orphaned (APLANE-32). Nothing cascades here, so a child of
+        # a deleted parent stays alive and listable while its `parent_id` points at a row that is
+        # gone. Clearing the pointer is the chosen half of that ticket: the children keep existing,
+        # because a bulk delete that removed work items the user never ticked would be a change of
+        # delete semantics rather than a bug fix. They just stop pointing at nothing.
+        #
+        # **This has to stay BELOW `drop_work_item_favorites`.** With `cascade=False` that helper
+        # never reads `parent_id`, so the order is irrelevant today — but if this call site is ever
+        # flipped to `cascade=True`, its sub-tree walk (`utils/favorites.py`, `parent_id__in`) would
+        # run against links this block had already severed, find no children, and silently drop no
+        # sub-item pins: the inverted stale-pin bug APLANE-29 exists to prevent, reintroduced by an
+        # edit that looks obviously safe. `test_bulk_delete_keeps_a_live_sub_items_pin` would NOT
+        # catch it, because it asserts the child's pin survives, which is also what a broken cascade
+        # produces.
+        #
+        # `all_objects` plus `deleted_at__isnull=True`, not `issue_objects`: an archived, draft or
+        # triage sub-item is still openable and still holds a dangling pointer, while a sub-item
+        # that is itself in the recycle bin must KEEP its `parent_id` — through the API that field
+        # is the only record of where it came from. (Only through the API: once the parent leaves
+        # the recycle bin, `hard_delete`'s real delete cascades down `Issue.parent` and takes that
+        # child with it, so the record it preserves does not outlive the purge either.)
+        #
+        # Keyed on `deleted_ids`, never on `issue_ids`: an archived id in the request body is not
+        # deleted at all (issue_objects excludes it), so its children must keep their parent.
+        #
+        # One level is the whole job FOR `Issue.parent`. Only the rows named here disappear, so only
+        # their direct children are orphaned; a grandchild still points at a parent that survived.
+        #
+        # `project_id` in the filter means a cross-project sub-item keeps its dangling pointer —
+        # the same limitation `drop_work_item_favorites` documents and measured on prod 2026-11-05
+        # (133 sub-items, 0 with a parent in another project; this fork's API cannot create the
+        # case). If cross-project sub-issues ever land, both places widen to the workspace together.
+        #
+        # Unchunked `parent_id__in` on purpose: the list is bounded by one request body, and the
+        # `pk__in=issue_ids` above it is already unchunked, so a body big enough to reach Postgres'
+        # 65535 bind-parameter cap dies before this line. `_ID_CHUNK` in `deletion_task` exists
+        # because the nightly purge's lists are unbounded; these are not.
+        #
+        # `updated_at` is bumped because `update()` skips `auto_now` and a silent mutation is worse
+        # than a visible one. It buys less than it looks: no in-tree client polls `?updated_at__gt=`
+        # (`getDeletedIssues` has no caller, and neither does the `/v2/issues/` sync endpoint), and
+        # for a draft or triage child neither sync endpoint would return the row anyway. Archived
+        # children do surface, through `DeletedIssuesListViewSet`.
+        #
+        # Deliberately no activity rows: fabricating an `issue.activity.updated` per orphan would
+        # invent a user action nobody took, with a payload nothing here can validate against what
+        # the feed renders. Two costs, both real. A live work item loses its parent with nothing in
+        # its feed to say why; and because `IssueActivity.issue` is DO_NOTHING, the `track_parent`
+        # row written when the user nested it OUTLIVES this change, so replaying the feed
+        # reconstructs the old hierarchy with no event ending it. That replay is now the only
+        # remaining record of the hierarchy, which is also the recovery route if a bulk delete was
+        # a mistake: there is no undelete endpoint, and a SQL `deleted_at = NULL` on the parent no
+        # longer brings the tree back. Recorded on APLANE-32 rather than hidden here.
+        Issue.all_objects.filter(
+            workspace__slug=slug,
+            project_id=project_id,
+            parent_id__in=deleted_ids,
+            deleted_at__isnull=True,
+        ).update(parent=None, updated_at=timezone.now())
+
+        # The same dangling pointer in the other model that has one: `DraftIssue.parent` is a
+        # CASCADE FK to `Issue` (db/models/draft.py) and is writable through the issue modal's
+        # parent picker. The single-item delete soft-deletes the draft, because
+        # `soft_delete_related_objects` walks every reverse CASCADE relation including
+        # `draft_parent_issue`; this endpoint does not, so without this the user's draft keeps
+        # pointing at a work item that is gone — and when the parent leaves the recycle bin, the
+        # database CASCADE deletes the draft outright. Cleared rather than deleted, for the same
+        # reason as above: the draft is the user's unsaved work and nobody asked to remove it.
+        DraftIssue.all_objects.filter(
+            workspace__slug=slug,
+            project_id=project_id,
+            parent_id__in=deleted_ids,
+            deleted_at__isnull=True,
+        ).update(parent=None, updated_at=timezone.now())
 
         # And the activity row the single-item deletes have always written and this one never did.
         # It is what puts a delete in the actor's activity feed: IssueActivity.issue is DO_NOTHING
