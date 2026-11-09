@@ -71,6 +71,14 @@ class IntakeViewSet(BaseViewSet):
             )
             .annotate(pending_issue_count=Count("issue_intake", filter=Q(issue_intake__status=-2)))
             .select_related("workspace", "project")
+            # Explicit, and NOT redundant with `Intake.Meta.ordering` (APLANE-38): the `Count`
+            # above adds a GROUP BY, and Django drops a model's default ordering for aggregate
+            # queries — measured, the SQL came out with no ORDER BY whatsoever. So `list`, which is
+            # `get_queryset().first()`, was returning whichever row the database felt like rather
+            # than the default intake. Worse than the name-ordering trap the ticket describes,
+            # because it is not even deterministic. `list` is the only route that reaches here:
+            # this viewset implements no `retrieve`, so that URL answers 405.
+            .order_by("-is_default", "name")
         )
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER])
@@ -78,9 +86,36 @@ class IntakeViewSet(BaseViewSet):
         intake = self.get_queryset().first()
         return Response(IntakeSerializer(intake).data, status=status.HTTP_200_OK)
 
+    # UNROUTED as of APLANE-38 — see `app/urls/intake.py` for the three reasons and for what has
+    # to be solved before POST is routed again. Kept, decorated and guarded rather than deleted, so
+    # that re-adding the route cannot accidentally ship an unauthorized create with a writable
+    # `is_default`. Reaching it today gives 405 from `as_view({"get": "list"})`.
+    #
+    # The decorator belongs on `create`, not on `perform_create` (APLANE-38). DRF calls
+    # `self.perform_create(serializer)`, so the wrapper in `permissions/base.py` — whose signature
+    # is `(instance, request, *args, **kwargs)` — received the SERIALIZER as its `request` and an
+    # empty `kwargs`. Its first evaluation is `member=request.user`, which raised AttributeError
+    # into the base view's catch-all: every POST to `intakes/` and `inboxes/` answered 500
+    # "Something went wrong" with a logged traceback, for admins and members alike, before anything
+    # was saved. Nothing in the web app calls it, which is why nobody noticed.
+    #
+    # Left in place rather than deleted, which was the other option on the ticket: a route that
+    # answers 201/403 instead of 500 keeps upstream's surface without adding anything we have to
+    # own. Safe only because the shadowing trap is closed first — see `Intake.Meta.ordering`.
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER])
+    def create(self, request, slug, project_id):
+        return super().create(request)
+
     def perform_create(self, serializer):
-        serializer.save(project_id=self.kwargs.get("project_id"))
+        # `is_default=False`, forced, whatever the caller sent. `IntakeSerializer` is
+        # `fields = "__all__"` with only project and workspace read-only, so `is_default` is
+        # writable — and repairing the route above without this would have been worse than the 500
+        # it replaced: a second row with `is_default=True` defeats the `-is_default` ordering (the
+        # tie falls through to name, so an alphabetically-earlier second default shadows the real
+        # one) and `destroy` refuses to delete ANY default, so it could not be removed through the
+        # API at all. The project-creation paths set the default directly on the model, not through
+        # this serializer, so they are unaffected.
+        serializer.save(project_id=self.kwargs.get("project_id"), is_default=False)
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER])
     def destroy(self, request, slug, project_id, pk):

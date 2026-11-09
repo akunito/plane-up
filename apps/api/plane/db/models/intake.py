@@ -36,7 +36,30 @@ class Intake(ProjectBaseModel):
         verbose_name = "Intake"
         verbose_name_plural = "Intakes"
         db_table = "intakes"
-        ordering = ("name",)
+        # The DEFAULT first, then by name (APLANE-38). Upstream ordered by name alone, and the only
+        # uniqueness here is (name, project) — nothing enforces one intake per project. Every
+        # project-scoped lookup in both API layers is a bare
+        # `Intake.objects.filter(workspace__slug=…, project_id=…).first()` — TEN of them, five in
+        # `app/views/intake/base.py` and five in `api/views/intake.py` — so a second intake sorting
+        # earlier by name would silently become "the" intake for all of them: submissions would land
+        # in the shadow and items in the real default would 404 on update and destroy.
+        #
+        # Fixed here rather than at the nine call sites, which is what the ticket proposed, because
+        # one line covers every bare `.first()` including any added later — the failure mode is
+        # silent, so the invariant belongs where it cannot be forgotten. The cost is that an upstream
+        # merge reverting this line reintroduces the bug quietly, which is what
+        # `test_a_second_intake_never_shadows_the_default` and its Meta assertion are for.
+        #
+        # It does NOT cover `IntakeViewSet.get_queryset`, and measuring that is how a worse bug
+        # turned up: that queryset annotates a `Count`, Django drops the default ordering once an
+        # aggregate adds a GROUP BY, and the SQL comes out with **no ORDER BY at all** — so `list`
+        # was not picking the alphabetically-first intake, it was picking whatever the database
+        # returned. That path needs its own explicit `order_by`, and has one. (`list` only:
+        # `IntakeViewSet` implements no `retrieve`, so that route is a 405 and never gets here.)
+        #
+        # The same mechanism is why this line is not a complete defence: any `.annotate()` added to
+        # one of those ten lookups would drop the ordering again, just as silently.
+        ordering = ("-is_default", "name")
 
 
 class SourceType(models.TextChoices):
