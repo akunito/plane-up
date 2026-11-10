@@ -235,6 +235,32 @@ def test_a_LIVE_sub_item_of_a_purged_parent_is_deleted_too(armed, project):
     _assert_no_dangling_activity_rows()
 
 
+def test_the_summary_counts_per_label_and_not_the_whole_cascade(armed, project, create_user, caplog):
+    """The armed summary is the evidence an operator uses to decide whether arming this on prod was
+    safe, so its numbers have to mean what their labels say.
+
+    `QuerySet.delete()` returns `(rows_deleted_across_every_model, {label: n})`. The purge loop used
+    to take that grand TOTAL and file it under the root model's label, discarding the breakdown — so
+    one doomed work item with one activity row reported `db.Issue: 2`, and on dev six doomed projects
+    reported `db.Project: 309` while exactly 6 project rows existed to delete. The disarmed report
+    above it counts per label, from the collector, so the two halves of the same task disagreed by a
+    factor nobody could reconstruct.
+
+    Asserted on the log line rather than a return value because the log line IS the output.
+    """
+    issue = _issue(project)
+    _activity(issue, project)
+    _age(Issue, issue.pk, OLD)
+
+    with caplog.at_level("INFO", logger="plane.worker"):
+        hard_delete()
+
+    assert "hard_delete purged" in caplog.text
+    # One issue, and its activity row under its OWN label. The pre-fix code said `db.Issue: 2`.
+    assert "'db.Issue': 1" in caplog.text, f"db.Issue must count issues, not the cascade: {caplog.text}"
+    assert "db.IssueActivity" in caplog.text, "the activity row still has to be reported, as itself"
+
+
 def test_disarmed_it_deletes_nothing_and_says_what_it_would(settings, project, caplog):
     settings.HARD_DELETE_ENABLED = False
     settings.HARD_DELETE_AFTER_DAYS = 60

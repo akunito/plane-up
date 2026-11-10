@@ -619,10 +619,18 @@ def hard_delete():
             purged["db.IssueActivity (removed with their work item)"] = dropped
 
             for model in _models_this_task_deletes():
-                count, _ = model.all_objects.filter(deleted_at__lt=cutoff).delete()
-                if count:
-                    label = model._meta.label
-                    purged[label] = purged.get(label, 0) + count
+                # Use the PER-LABEL dict, not the total. `QuerySet.delete()` returns
+                # `(rows_deleted_across_every_model, {label: n})`, and this loop used to file that
+                # grand total under the ROOT model's label and throw the breakdown away. Measured on
+                # dev 2026-11-10: six doomed projects reported `db.Project: 309` — the whole cascade
+                # attributed to the root — while exactly 6 project rows existed to delete (28 -> 22).
+                # That is the line an operator reads to decide whether arming this on prod was safe,
+                # and it could not be compared against the disarmed report above, whose counts ARE
+                # per label because they come from the collector. Same number, two meanings.
+                _, per_label = model.all_objects.filter(deleted_at__lt=cutoff).delete()
+                for label, count in per_label.items():
+                    if count:
+                        purged[label] = purged.get(label, 0) + count
 
             # AFTER the loop, never before it: the one-to-one is on the comment, so removing a
             # `Description` whose comment still exists would cascade into the comment.
