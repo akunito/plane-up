@@ -89,7 +89,17 @@ vi.mock("@/hooks/store/use-project", () => ({
 vi.mock("@/components/issues/issue-detail", () => ({ IssueDetailRoot: () => <div data-testid="issue-detail" /> }));
 vi.mock("@/components/core/page-title", () => ({ PageHead: () => null }));
 
+/** The project view page: its own store, and its layout tree stubbed like IssueDetailRoot above. */
+const projectView = vi.hoisted(() => ({ view: undefined as { id: string; name: string } | undefined }));
+vi.mock("@/hooks/store/use-project-view", () => ({
+  useProjectView: () => ({ fetchViewDetails: vi.fn(), getViewById: () => projectView.view }),
+}));
+vi.mock("@/components/issues/issue-layouts/roots/project-view-layout-root", () => ({
+  ProjectViewLayoutRoot: () => <div data-testid="project-view-layout" />,
+}));
+
 import ArchivedWorkItemPage from "@/app/(all)/[workspaceSlug]/(projects)/projects/(detail)/[projectId]/archives/issues/(detail)/[archivedIssueId]/page";
+import ProjectViewIssuesPage from "@/app/(all)/[workspaceSlug]/(projects)/projects/(detail)/[projectId]/views/(detail)/[viewId]/page";
 import {
   EAuthenticationErrorCodes,
   EErrorAlertType,
@@ -135,6 +145,7 @@ beforeEach(() => {
   instanceStore.instance = { is_setup_done: true };
   instanceStore.error = undefined;
   archived.issue = undefined;
+  projectView.view = undefined;
 });
 
 // ---------------------------------------------------------------- asRequestFailure
@@ -445,5 +456,51 @@ describe("the sign-in form reports a request failure instead of nothing (L1-25)"
 
     expect(banner?.code).toBe(EAuthenticationErrorCodes.INVALID_EMAIL);
     expect(banner?.type).toBe(EErrorAlertType.BANNER_ALERT);
+  });
+});
+
+// ---------------------------------------------------------------- the project view page
+describe("a project view that is loaded survives a failed refetch (L1-25)", () => {
+  // The regression APLANE-36's own interceptor created, on the one page that fix skipped. Before
+  // it, a request that never reached the server threw `undefined` and this page's `if (error)` gate
+  // never fired; after it, every such failure is truthy. WEB_SWR_CONFIG sets
+  // `revalidateOnFocus: true` for the whole app, so coming back to a loaded view after a blip
+  // refetched, failed, and swapped the view for "View does not exist" — the exact shape APLANE-35
+  // was about. These three cases are the before, the after and the one that must keep working.
+  const SWR_KEY = "VIEW_DETAILS_v1";
+  type TPageProps = Parameters<typeof ProjectViewIssuesPage>[0];
+  const renderPage = () =>
+    render(
+      <ProjectViewIssuesPage
+        {...({ params: { workspaceSlug: "qa", projectId: "p1", viewId: "v1" }, matches: [] } as unknown as TPageProps)}
+      />
+    );
+
+  it("the refetch failed but the view is in the store -> the view, NOT \"does not exist\"", () => {
+    projectView.view = { id: "v1", name: "QA Board" };
+    swr.byKey[SWR_KEY] = { error: { status: 0, isRequestFailure: true } };
+
+    renderPage();
+
+    expect(screen.getByTestId("project-view-layout")).toBeTruthy();
+    expect(screen.queryByText("View does not exist")).toBeNull();
+  });
+
+  it("the fetch failed and there is no view -> the empty state, which is what it is for", () => {
+    swr.byKey[SWR_KEY] = { error: { status: 404 } };
+
+    renderPage();
+
+    expect(screen.getByText("View does not exist")).toBeTruthy();
+    expect(screen.queryByTestId("project-view-layout")).toBeNull();
+  });
+
+  it("no error at all -> the view", () => {
+    projectView.view = { id: "v1", name: "QA Board" };
+    swr.byKey[SWR_KEY] = {};
+
+    renderPage();
+
+    expect(screen.getByTestId("project-view-layout")).toBeTruthy();
   });
 });

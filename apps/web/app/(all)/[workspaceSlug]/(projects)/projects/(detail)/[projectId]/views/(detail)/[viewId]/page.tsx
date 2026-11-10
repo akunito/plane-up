@@ -32,7 +32,15 @@ function ProjectViewIssuesPage({ params }: Route.ComponentProps) {
 
   const { error } = useSWR(`VIEW_DETAILS_${viewId}`, () => fetchViewDetails(workspaceSlug, projectId, viewId));
 
-  if (error) {
+  // `&& !projectView` is the whole fix, and APLANE-36 is why it is needed. Before that interceptor,
+  // a request that never reached the server threw `undefined`, so `error` stayed falsy here and this
+  // gate did not fire. Now every such failure is a truthy payload — and WEB_SWR_CONFIG sets
+  // `revalidateOnFocus: true` globally (provider.tsx), so returning to an already-loaded view after
+  // a blip refetched, failed, and replaced the view with "does not exist". That is the APLANE-35
+  // regression shape, reintroduced by the fix for it, on the one page the fix skipped.
+  // The store is the source of truth for "does this view exist": only say it does not when the
+  // fetch failed AND we have nothing.
+  if (error && !projectView) {
     return (
       <EmptyState
         image={emptyView}
