@@ -40,12 +40,22 @@ const APP_ORIGIN = new URL(BASE_URL).origin;
 
 /** Something the global or the per-layout error boundary renders. */
 export async function expectNoErrorBoundary(page: Page) {
+  // apps/web's boundary and layout fallback.
   await expect(page.getByText("Looks like something went wrong")).toHaveCount(0);
   const layoutFallback = page
     .getByText("Something went wrong", { exact: true })
     .locator("xpath=..")
     .getByRole("button", { name: "Retry" });
   await expect(layoutFallback).toHaveCount(0);
+  // apps/admin and apps/space have their OWN boundaries, with different copy, and until 2026-11-10
+  // this function matched neither — so it ran on the first /god-mode and /spaces tests (L5-80/81)
+  // and could never fire. Measured: apps/admin/app/root.tsx:94 renders `<p>Something went wrong.</p>`
+  // (trailing period, so the `exact` matcher above misses it) with no Retry button, and
+  // apps/space/app/error.tsx:19 renders "Yikes! That doesn't look good." with a Refresh button.
+  // `exact` is what keeps these safe for apps/web: its not-found page says "Oops! Something went
+  // wrong." and must not be read as a crash.
+  await expect(page.getByText("Something went wrong.", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Yikes! That doesn't look good.", { exact: true })).toHaveCount(0);
 }
 
 export async function expectNoHorizontalOverflow(page: Page) {
@@ -264,6 +274,12 @@ export const test = base.extend<{ guard: void; unauthenticated: boolean }>({
         // React Router SPA mode hydrates the pre-rendered shell; React reports the mismatch as
         // recoverable errors #418/#423/#425 on every route and re-renders on the client. Known
         // upstream noise (2026-09-17) — attached for visibility, not a failure.
+        //
+        // That reasoning covers apps/web and apps/admin, which are both `ssr: false`
+        // (react-router.config.ts). It does NOT cover apps/space, the only app with real SSR
+        // (`ssr: true`, served by react-router-serve): a #418 there is a genuine server/client
+        // divergence, and this blanket exemption is why L5-81 passes while one is live. Tracked as
+        // APLANE-48 rather than left as an unexplained green.
         if (/Minified React error #(418|423|425)\b/.test(msg)) hydrationNoise.push(msg);
         else if (ABORTED_LOAD.test(msg) && abortedLoadOrigin(msg) === APP_ORIGIN)
           maybeAbandoned.push({ msg, at: Date.now() });
