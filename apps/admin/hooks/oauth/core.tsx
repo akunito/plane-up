@@ -4,7 +4,7 @@
  * See the LICENSE file for details.
  */
 
-import { KeyRound, Mails } from "lucide-react";
+import { Fingerprint, KeyRound, Mails } from "lucide-react";
 // types
 import type {
   TCoreInstanceAuthenticationModeKeys,
@@ -12,7 +12,6 @@ import type {
   TInstanceAuthenticationModes,
 } from "@plane/types";
 // assets
-import giteaLogo from "@/app/assets/logos/gitea-logo.svg?url";
 import githubLightModeImage from "@/app/assets/logos/github-black.png?url";
 import githubDarkModeImage from "@/app/assets/logos/github-white.png?url";
 import gitlabLogo from "@/app/assets/logos/gitlab-logo.svg?url";
@@ -82,10 +81,18 @@ export const getCoreAuthenticationModesMap: (
     enabledConfigKey: "IS_GITLAB_ENABLED",
   },
   gitea: {
+    // Repurposed "gitea" OAuth slot: the adapter talks to Pocket ID OIDC
+    // (apps/api/plane/authentication/provider/oauth/gitea.py). The key, the route and the
+    // IS_GITEA_ENABLED row stay as they are; everything an admin READS here is Pocket ID.
+    // The icon is replaced, not just its alt text: relabelling the name while still rendering
+    // gitea-logo.svg would leave the admin looking at the Gitea logo, which is the half of this
+    // bug a text-only assertion misses (measured on the APLANE-45 e2e test, where getByText
+    // passed over an `alt="Gitea Logo"`). lucide's Fingerprint is the same glyph apps/web and
+    // apps/space inline for this slot.
     key: "gitea",
-    name: "Gitea",
-    description: "Allow members to log in or sign up to plane with their Gitea accounts.",
-    icon: <img src={giteaLogo} height={20} width={20} alt="Gitea Logo" />,
+    name: "Pocket ID",
+    description: "Allow members to log in or sign up to plane with their Pocket ID accounts.",
+    icon: <Fingerprint size={20} role="img" aria-label="Pocket ID" />,
     config: <GiteaConfiguration disabled={disabled} updateConfig={updateConfig} />,
     enabledConfigKey: "IS_GITEA_ENABLED",
   },

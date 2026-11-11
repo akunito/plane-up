@@ -13,7 +13,8 @@ export const CORE_HEADER_SEGMENT_LABELS: Record<string, string> = {
   google: "Google",
   github: "GitHub",
   gitlab: "GitLab",
-  gitea: "Gitea",
+  // the route segment stays `gitea`; the breadcrumb it renders is Pocket ID (APLANE-49)
+  gitea: "Pocket ID",
   workspace: "Workspace",
   create: "Create",
 };

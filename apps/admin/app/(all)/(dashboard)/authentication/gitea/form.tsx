@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { isEmpty } from "lodash-es";
 import Link from "next/link";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 // plane internal packages
 import { API_BASE_URL } from "@plane/constants";
 import { Button, getButtonStyling } from "@plane/propel/button";
@@ -31,9 +31,15 @@ type Props = {
 
 type GiteaConfigFormValues = Record<TInstanceGiteaAuthenticationConfigurationKeys, string>;
 
+// Every GITEA_* key here is load-bearing and stays: the instance configuration rows, the
+// /auth/gitea/ routes and every existing user's provider_id key off that name, so renaming the slot
+// would log the whole instance out (apps/api/plane/authentication/provider/oauth/gitea.py). What an
+// admin READS is another matter — this form configures Pocket ID OIDC, and until APLANE-49 it
+// described Gitea, defaulted the host to https://gitea.com and sent admins to gitea.com for
+// credentials that do not exist there.
 const GITEA_FORM_SWITCH_FIELD: TControllerSwitchFormField<GiteaConfigFormValues> = {
   name: "ENABLE_GITEA_SYNC",
-  label: "Gitea",
+  label: "Pocket ID",
 };
 
 export function InstanceGiteaConfigForm(props: Props) {
@@ -50,7 +56,14 @@ export function InstanceGiteaConfigForm(props: Props) {
     formState: { errors, isDirty, isSubmitting },
   } = useForm<GiteaConfigFormValues>({
     defaultValues: {
-      GITEA_HOST: config["GITEA_HOST"] || "https://gitea.com",
+      // No fallback. Upstream prefilled "https://gitea.com", so an admin who saved this form
+      // without touching the field pointed the OIDC flow at the wrong provider. The field is
+      // `required` (a real rule — controller-input.tsx:49), so an empty default makes the form ask
+      // instead of guessing. It does NOT make the field safe: nothing here checks the scheme, so a
+      // saved "auth.example.com" still fails at login as GITEA_NOT_CONFIGURED with nothing in the
+      // UI to explain it. Narrower than it looks, and left that way on purpose — a pattern rule
+      // means changing the shared ControllerInput every auth form uses.
+      GITEA_HOST: config["GITEA_HOST"] || "",
       GITEA_CLIENT_ID: config["GITEA_CLIENT_ID"],
       GITEA_CLIENT_SECRET: config["GITEA_CLIENT_SECRET"],
       ENABLE_GITEA_SYNC: config["ENABLE_GITEA_SYNC"] || "0",
@@ -59,15 +72,50 @@ export function InstanceGiteaConfigForm(props: Props) {
 
   const originURL = !isEmpty(API_BASE_URL) ? API_BASE_URL : typeof window !== "undefined" ? window.location.origin : "";
 
+  // Three descriptions point at the same place, so it is built once. Deliberately NOT a deep link:
+  // Pocket ID's OIDC-client page has moved between versions and an unverified path would be a dead
+  // link in an admin panel, so this links the configured host and names the nav path in prose.
+  //
+  // `useWatch`, NOT the `control._formValues` read upstream used for its single link. That read has
+  // no subscription: this component subscribes to errors/isDirty/isSubmitting only and the
+  // validation mode is the default onSubmit, so typing a host re-renders exactly ONCE — the first
+  // keystroke, when isDirty flips false -> true. The links would have frozen at that one character.
+  // Upstream never noticed because its fallback was a literal gitea.com; with the fallback gone it
+  // would have rendered href="h", a RELATIVE url resolving against the admin app, which is the dead
+  // link this whole block exists to avoid.
+  const host = (useWatch({ control, name: "GITEA_HOST" }) || "").trim().replace(/\/+$/, "");
+  // Only an absolute http(s) url becomes a link, for the same reason: "auth.example.com" with no
+  // scheme is a relative href. The adapter rejects a scheme-less host too
+  // (gitea.py:59-64, GITEA_NOT_CONFIGURED), and the form cannot enforce it — the shared
+  // ControllerInput hardcodes `rules={{ required }}` and accepts no pattern
+  // (controller-input.tsx:49), so the link going plain is the only hint the field is unusable.
+  const pocketIdHost = /^https?:\/\/\S+$/.test(host) ? host : "";
+  const oidcClientsLink = pocketIdHost ? (
+    <a
+      href={pocketIdHost}
+      target="_blank"
+      className="text-accent-primary hover:underline"
+      rel="noreferrer"
+      aria-label="Pocket ID OIDC client settings"
+    >
+      Administration &rarr; OIDC Clients
+    </a>
+  ) : (
+    <>Administration &rarr; OIDC Clients</>
+  );
+
   const GITEA_FORM_FIELDS: TControllerInputFormField[] = [
     {
       key: "GITEA_HOST",
       type: "text",
-      label: "Gitea Host",
+      label: "Pocket ID Host",
       description: (
-        <>Use the URL of your Gitea instance. For the official Gitea instance, use &quot;https://gitea.com&quot;.</>
+        <>
+          The base URL of your Pocket ID instance, with no trailing path — the adapter appends{" "}
+          <CodeBlock darkerShade>/authorize</CodeBlock> and <CodeBlock darkerShade>/api/oidc/*</CodeBlock> itself.
+        </>
       ),
-      placeholder: "https://gitea.com",
+      placeholder: "https://auth.example.com",
       error: Boolean(errors.GITEA_HOST),
       required: true,
     },
@@ -77,15 +125,9 @@ export function InstanceGiteaConfigForm(props: Props) {
       label: "Client ID",
       description: (
         <>
-          You will get this from your{" "}
-          <a
-            href="https://gitea.com/user/settings/applications"
-            target="_blank"
-            className="text-accent-primary hover:underline"
-            rel="noreferrer"
-          >
-            Gitea OAuth application settings.
-          </a>
+          Pocket ID generates this when you save the OIDC client: {oidcClientsLink}. This adapter exchanges the code
+          with a client secret and sends no PKCE challenge, so create a confidential client — in Pocket ID, leave{" "}
+          <CodeBlock darkerShade>Public Client</CodeBlock> off.
         </>
       ),
       placeholder: "70a44354520df8bd9bcd",
@@ -98,15 +140,8 @@ export function InstanceGiteaConfigForm(props: Props) {
       label: "Client secret",
       description: (
         <>
-          Your client secret is also found in your{" "}
-          <a
-            href="https://gitea.com/user/settings/applications"
-            target="_blank"
-            className="text-accent-primary hover:underline"
-            rel="noreferrer"
-          >
-            Gitea OAuth application settings.
-          </a>
+          Shown once, right after you save the OIDC client in {oidcClientsLink} — copy it then. If you lost it, generate
+          a new secret there and paste it here.
         </>
       ),
       placeholder: "9b0050f94ec1b744e32ce79ea4ffacd40d4119cb",
@@ -122,17 +157,9 @@ export function InstanceGiteaConfigForm(props: Props) {
       url: `${originURL}/auth/gitea/callback/`,
       description: (
         <>
-          We will auto-generate this. Paste this into your <CodeBlock darkerShade>Authorized Callback URI</CodeBlock>{" "}
-          field{" "}
-          <a
-            href={`${control._formValues.GITEA_HOST || "https://gitea.com"}/user/settings/applications`}
-            target="_blank"
-            className="text-accent-primary hover:underline"
-            rel="noreferrer"
-            aria-label="Gitea OAuth application settings"
-          >
-            here.
-          </a>
+          We will auto-generate this. Paste it into the <CodeBlock darkerShade>Callback URL</CodeBlock> field of
+          Plane&apos;s OIDC client in {oidcClientsLink}. The path stays{" "}
+          <CodeBlock darkerShade>/auth/gitea/callback/</CodeBlock> — that is the route name, not the provider.
         </>
       ),
     },
@@ -146,7 +173,7 @@ export function InstanceGiteaConfigForm(props: Props) {
       setToast({
         type: TOAST_TYPE.SUCCESS,
         title: "Done!",
-        message: "Your Gitea authentication is configured. You should test it now.",
+        message: "Your Pocket ID authentication is configured. You should test it now.",
       });
       reset({
         GITEA_HOST: response.find((item) => item.key === "GITEA_HOST")?.value,
@@ -176,7 +203,7 @@ export function InstanceGiteaConfigForm(props: Props) {
       <div className="flex flex-col gap-8">
         <div className="grid w-full grid-cols-2 gap-x-12 gap-y-8">
           <div className="col-span-2 flex flex-col gap-y-4 pt-1 md:col-span-1">
-            <div className="pt-2.5 text-18 font-medium">Gitea-provided details for Plane</div>
+            <div className="pt-2.5 text-18 font-medium">Pocket-ID-provided details for Plane</div>
             {GITEA_FORM_FIELDS.map((field) => (
               <ControllerInput
                 key={field.key}
@@ -210,7 +237,7 @@ export function InstanceGiteaConfigForm(props: Props) {
           </div>
           <div className="col-span-2 md:col-span-1">
             <div className="flex flex-col gap-y-4 rounded-lg bg-layer-1 px-6 pt-1.5 pb-4">
-              <div className="pt-2 text-18 font-medium">Plane-provided details for Gitea</div>
+              <div className="pt-2 text-18 font-medium">Plane-provided details for Pocket ID</div>
               {GITEA_SERVICE_FIELD.map((field) => (
                 <CopyField key={field.key} label={field.label} url={field.url} description={field.description} />
               ))}

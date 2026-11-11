@@ -7,11 +7,11 @@
 import { useState } from "react";
 import { observer } from "mobx-react";
 import useSWR from "swr";
+// icons
+import { Fingerprint } from "lucide-react";
 // plane internal packages
 import { setPromiseToast } from "@plane/propel/toast";
 import { Loader, ToggleSwitch } from "@plane/ui";
-// assets
-import giteaLogo from "@/app/assets/logos/gitea-logo.svg?url";
 // components
 import { AuthenticationMethodCard } from "@/components/authentication/authentication-method-card";
 import { PageWrapper } from "@/components/common/page-wrapper";
@@ -44,7 +44,7 @@ const InstanceGiteaAuthenticationPage = observer(function InstanceGiteaAuthentic
       loading: "Saving Configuration",
       success: {
         title: "Configuration saved",
-        message: () => `Gitea authentication is now ${value === "1" ? "active" : "disabled"}.`,
+        message: () => `Pocket ID authentication is now ${value === "1" ? "active" : "disabled"}.`,
       },
       error: {
         title: "Error",
@@ -68,9 +68,9 @@ const InstanceGiteaAuthenticationPage = observer(function InstanceGiteaAuthentic
     <PageWrapper
       customHeader={
         <AuthenticationMethodCard
-          name="Gitea"
-          description="Allow members to login or sign up to plane with their Gitea accounts."
-          icon={<img src={giteaLogo} height={24} width={24} alt="Gitea Logo" />}
+          name="Pocket ID"
+          description="Allow members to login or sign up to plane with their Pocket ID accounts."
+          icon={<Fingerprint size={24} role="img" aria-label="Pocket ID" />}
           config={
             <ToggleSwitch
               value={isGiteaEnabled}
@@ -100,6 +100,6 @@ const InstanceGiteaAuthenticationPage = observer(function InstanceGiteaAuthentic
     </PageWrapper>
   );
 });
-export const meta: Route.MetaFunction = () => [{ title: "Gitea Authentication - God Mode" }];
+export const meta: Route.MetaFunction = () => [{ title: "Pocket ID Authentication - God Mode" }];
 
 export default InstanceGiteaAuthenticationPage;
