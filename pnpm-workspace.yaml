@@ -234,10 +234,27 @@ overrides:
   # baseline-browser-mapping are browser-data packages pulled by every app (97 paths each);
   # source-map-js comes in through postcss; postcss-selector-parser has two major lines live at
   # once, so both need pinning, the same shape as the ajv and minimatch pairs above.
-  # toml 4.2.0, NOT the advisory floor of 5.0.1: `effect@4.0.0-beta.70` — which apps/live uses for
-  # PDF export — declares `toml: "^4.1.1"`, so forcing 5 would knowingly run a library outside its
-  # declared range at runtime. 4.2.0 is inside it and clears 2 of toml's 5 advisories (the `<4.1.2`
-  # and `<4.2.0` ones). The remaining 3 need `>=5.0.1`, which is upstream effect's call, not ours.
+  # toml 4.2.0, NOT the advisory floor of 5.0.1. `effect@4.0.0-beta.70` declares `toml: "^4.1.1"`,
+  # so 4.2.0 is inside its range and clears 2 of toml's 5 advisories (the `<4.1.2` and `<4.2.0`
+  # ones); the remaining 3 need `>=5.0.1`.
+  #
+  # CORRECTED 2026-11-11 (APLANE-44). The previous version of this comment attributed this edge to
+  # "`effect@4.0.0-beta.70` — which apps/live uses for PDF export" and said forcing toml 5 would run
+  # a library outside its declared range "at runtime". apps/live does use `effect` for PDF export
+  # (five files under src/services/pdf-export, src/controllers, src/schema) — but it resolves
+  # `effect: catalog:` to 3.20.0 (line 105 above), verified on disk as
+  # apps/live/node_modules/effect -> effect@3.20.0, and effect 3.20.0 declares no `toml` dependency
+  # at all. The wrong word was the VERSION, and it changes the decision: `toml` has exactly ONE
+  # dependent in this lockfile, `effect@4.0.0-beta.70`, which itself has exactly one —
+  # `react-doctor@0.4.2`, a devDependency of the ROOT package.json used only by
+  # .github/workflows/react-doctor.yml. `pnpm audit` agrees: every path for the effect-4 advisory
+  # reads `.>react-doctor>effect`. So nothing on this edge ships in any image and there is no
+  # runtime to protect — toml's advisories are build-tooling advisories, and the cost of forcing 5
+  # is a CI lint job breaking, not production.
+  #
+  # Which also means removing react-doctor would drop effect 4 and toml from the tree entirely and
+  # clear all 5 advisories at once. That is not free — the workflow above goes with it — so it is
+  # recorded as a decision on APLANE-44 rather than taken here.
   toml: 4.2.0
   browserslist: 4.28.7
   baseline-browser-mapping: 2.11.0
