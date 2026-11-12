@@ -52,7 +52,13 @@ export const headers: Route.HeadersFunction = () => ({
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    // suppressHydrationWarning like apps/web and apps/admin, which both carry it and this app did
+    // not. <html> has the mechanism: next-themes' inline script sets data-theme and
+    // style.colorScheme on `document.documentElement` before React hydrates, and `hydrateRoot` is
+    // called on `document` here, so html is hydrated like any other element. <body> is parity only
+    // — the script never touches it. Neither of these fixes APLANE-48: suppressHydrationWarning
+    // covers the element it sits on, not a structural mismatch deeper in the tree.
+    <html lang="en" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -60,7 +66,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Meta />
         <Links />
       </head>
-      <body>
+      <body suppressHydrationWarning>
         <div id="editor-portal" />
         <AppProviders>{children}</AppProviders>
         <Scripts />
