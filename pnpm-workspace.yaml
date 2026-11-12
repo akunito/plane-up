@@ -13,8 +13,6 @@ catalog:
   "@blueprintjs/popover2": "^1.13.3"
   "@bprogress/core": "^1.3.4"
   "@chromatic-com/storybook": "5.2.1"
-  "@effect/platform": "^0.94.0"
-  "@effect/platform-node": "^0.104.0"
   "@floating-ui/dom": "^1.7.1"
   "@floating-ui/react": "^0.26.4"
   "@fontsource-variable/inter": "5.2.8"
@@ -245,9 +243,49 @@ overrides:
   #
   # Dropping the devDependency cleared five advisory IDs — toml's four highs plus 1245930 — with no
   # version bump anywhere: measured across all 445 importer→dep entries, 0 base versions changed.
-  # **1245930 is GHSA-chp3-j5qr-2vfr, and 1245931 is the SAME GHSA on `@effect/platform`, which
-  # STAYS** — reachable from apps/live, which ships. So the cookie-injection bug was not fixed here;
-  # one of the two package names carrying it left. Do not read "five cleared" as five fewer bugs.
+  # **1245930 and 1245931 share one GHSA, chp3-j5qr-2vfr** (cookie attribute injection) but are NOT
+  # one bug counted twice — that was the first reading here and it is wrong. They were two distinct
+  # INSTALLED packages on two different version lines: 1245930 was `effect@4.0.0-beta.70` (range
+  # >=4.0.0-beta.0 <4.0.0-beta.103, `dev: true`, every path under react-doctor) and 1245931 was
+  # `@effect/platform@0.94.1` (range <0.97.1, `dev: false`, every path starting at `apps__live`).
+  # apps/live's own `effect@3.20.0` is in neither range, which is why it was never flagged.
+  # **So the rule is not "count GHSAs" — read each finding's PATH and its `dev` flag.** Counting
+  # GHSAs would have merged a dev-only tool with a package in the shipped image and UNDERcounted.
+  # Dropping react-doctor cleared the dev-only half; the shipped half kept shipping until the two
+  # declarations left apps/live on 2026-11-12 (same ticket).
+  #
+  # **UPSTREAM declared those two** — b31c0195bc, "fix: pdf export" (#8564) — and never imported
+  # them: `git log -G "@effect" -- '*.ts' '*.tsx' '*.js' '*.mjs' '*.cjs'` is empty over ALL history.
+  # A `-S` pickaxe would not have settled that (an add and a remove in one commit net to zero and
+  # are invisible to it). apps/live uses `effect` core only, and the TYPE SYSTEM is what forecloses
+  # an implicitly-provided platform layer: `exportToPdf` declares `R = PdfExportService` and
+  # pdf-export.controller.ts runs it through `Effect.runPromise`, which requires `R = never`, so a
+  # FileSystem/Path/HttpClient/NodeContext requirement would land in `R` and fail L0-05/L0-08.
+  #
+  # Removing them took **36** packages out of the tree (1608 -> 1572, 0 added, lockfile
+  # 578539 -> 558553 bytes) with 0 base version changes and 0 peer re-resolutions across all 442
+  # importer→dep entries. The 36, which must add up: 8 `@effect/*`, `@parcel/watcher` + its 13
+  # prebuilt binaries, `msgpackr`, `msgpackr-extract` + its 6 binaries,
+  # `node-gyp-build-optional-packages`, `node-addon-api`, `mime@3`, `kubernetes-types`,
+  # `multipasta`, `find-my-way-ts`. An earlier version of this comment also listed `lmdb`: wrong, it
+  # was an OPTIONAL peer of `@effect/experimental` and never resolved into the tree at all — the
+  # name came from a parser that mistook a `peerDependenciesMeta` key for a package.
+  # `pnpm audit --audit-level=moderate`: 5 -> 4. At the DEFAULT level it is 6 -> 5, the extra being a
+  # `deepmerge` low that was never on this ticket's list; every count in this file is at moderate.
+  #
+  # `@parcel/watcher` and `msgpackr-extract` were dropped from `allowBuilds` below in the same
+  # commit, because nothing in the tree brings them any more.
+  #
+  # Expect an upstream merge to put the two declarations back, and know what that costs before
+  # keeping them. **Re-adding them does NOT bring back 0.94.1/0.104.0.** Measured 2026-11-12 by
+  # restoring the declarations over the post-change lockfile: the catalog ranges were `^0.94.0` and
+  # `^0.104.0`, so a fresh resolve takes the newest of those lines — 0.94.5 and 0.104.1, with newer
+  # @parcel/watcher and msgpackr behind them, 28 packages moved — and **0.94.5 is still inside the
+  # advisory range, which is `<0.97.1`**. For a 0.x package `^0.94.0` means `<0.95.0`, so that
+  # catalog entry could never reach the fix at all. Re-declaring these is not a way to clear
+  # chp3-j5qr-2vfr; not needing them is. If an upstream merge reinstates them, the catalog entries
+  # have to be written `^0.97.1`/the matching platform-node line, and the two `allowBuilds` entries
+  # come back with them.
   #
   # Two peer re-resolutions came with it, both harmless and neither a version change: `jiti`
   # 2.7.0 -> 2.6.1 for vite/vitest/postcss-cli/@react-router/dev, and `@opentelemetry/api` dropped
@@ -297,10 +335,8 @@ overrides:
   tinypool: 2.1.2
 
 allowBuilds:
-  "@parcel/watcher": true
   "@swc/core": true
   esbuild: true
-  msgpackr-extract: true
   turbo: true
   sharp: false
 
