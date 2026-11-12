@@ -25,7 +25,6 @@
     "lint-staged": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
-    "react-doctor": "^0.4.2",
     "turbo": "catalog:"
   },
   "lint-staged": {

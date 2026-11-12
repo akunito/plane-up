@@ -219,11 +219,12 @@ overrides:
   markdown-it: 14.3.3
   rollup: 4.59.0
   "minimatch@3": 3.1.4
-  # 10.2.6, the newest 10.x. This clears NO advisory — minimatch's fix is >=11.0.1 — but it repairs
-  # a range violation the override itself created: `eslint@10.4.1` declares `minimatch: "^10.2.4"`
-  # and this was pinning 10.2.3, one patch BELOW its minimum. 10.2.6 satisfies that and also
-  # `glob@11.1.0`'s `^10.1.1`, so it is the best version that breaks nothing. Going to 11.0.1 for
-  # the advisory would violate glob 11's range instead (APLANE-44).
+  # 10.2.6, the newest 10.x. This clears NO advisory — minimatch's fix is >=11.0.1 — and it is held
+  # here by `glob@11.1.0`, which declares `^10.1.1` and is minimatch's sole remaining dependent, so
+  # going to 11.0.1 for the advisory would violate glob 11's range instead. The original reason
+  # written here was a floor of `^10.2.4` from `eslint@10.4.1`; eslint left the tree with
+  # react-doctor on 2026-11-12, so that half is obsolete even though the conclusion is not
+  # (APLANE-44).
   "minimatch@10": 10.2.6
   serialize-javascript: 7.0.5
   "ajv@6": 6.14.0
@@ -234,28 +235,28 @@ overrides:
   # baseline-browser-mapping are browser-data packages pulled by every app (97 paths each);
   # source-map-js comes in through postcss; postcss-selector-parser has two major lines live at
   # once, so both need pinning, the same shape as the ajv and minimatch pairs above.
-  # toml 4.2.0, NOT the advisory floor of 5.0.1. `effect@4.0.0-beta.70` declares `toml: "^4.1.1"`,
-  # so 4.2.0 is inside its range and clears 2 of toml's 5 advisories (the `<4.1.2` and `<4.2.0`
-  # ones); the remaining 3 need `>=5.0.1`.
+  # NO toml override any more, and no toml in the tree at all (APLANE-44, 2026-11-12). Its only
+  # dependent was `effect@4.0.0-beta.70`, whose only ROOT was the `react-doctor` devDependency of
+  # the root package.json — it had two direct dependents, the other being
+  # `@effect/platform-node-shared`, whose own only dependent was react-doctor again. And nothing
+  # consumed that package: the `doctor` script is `npx react-doctor@latest` (which goes to the
+  # registry, not to node_modules) and .github/workflows/react-doctor.yml uses the
+  # `millionco/react-doctor@v2` GitHub Action, which brings its own tool.
   #
-  # CORRECTED 2026-11-11 (APLANE-44). The previous version of this comment attributed this edge to
-  # "`effect@4.0.0-beta.70` — which apps/live uses for PDF export" and said forcing toml 5 would run
-  # a library outside its declared range "at runtime". apps/live does use `effect` for PDF export
-  # (five files under src/services/pdf-export, src/controllers, src/schema) — but it resolves
-  # `effect: catalog:` to 3.20.0 (line 105 above), verified on disk as
-  # apps/live/node_modules/effect -> effect@3.20.0, and effect 3.20.0 declares no `toml` dependency
-  # at all. The wrong word was the VERSION, and it changes the decision: `toml` has exactly ONE
-  # dependent in this lockfile, `effect@4.0.0-beta.70`, which itself has exactly one —
-  # `react-doctor@0.4.2`, a devDependency of the ROOT package.json used only by
-  # .github/workflows/react-doctor.yml. `pnpm audit` agrees: every path for the effect-4 advisory
-  # reads `.>react-doctor>effect`. So nothing on this edge ships in any image and there is no
-  # runtime to protect — toml's advisories are build-tooling advisories, and the cost of forcing 5
-  # is a CI lint job breaking, not production.
+  # Dropping the devDependency cleared five advisory IDs — toml's four highs plus 1245930 — with no
+  # version bump anywhere: measured across all 445 importer→dep entries, 0 base versions changed.
+  # **1245930 is GHSA-chp3-j5qr-2vfr, and 1245931 is the SAME GHSA on `@effect/platform`, which
+  # STAYS** — reachable from apps/live, which ships. So the cookie-injection bug was not fixed here;
+  # one of the two package names carrying it left. Do not read "five cleared" as five fewer bugs.
   #
-  # Which also means removing react-doctor would drop effect 4 and toml from the tree entirely and
-  # clear all 5 advisories at once. That is not free — the workflow above goes with it — so it is
-  # recorded as a decision on APLANE-44 rather than taken here.
-  toml: 4.2.0
+  # Two peer re-resolutions came with it, both harmless and neither a version change: `jiti`
+  # 2.7.0 -> 2.6.1 for vite/vitest/postcss-cli/@react-router/dev, and `@opentelemetry/api` dropped
+  # out of vitest's resolution. jiti is an OPTIONAL peer declared `>=1.21.0` by both vite@8.1.6 and
+  # postcss-load-config@5.1.0, so no range is violated — and 2.7.0 was in the tree ONLY because a
+  # dev-only tool put it there, while 2.6.1 is anchored by real dependencies (@tailwindcss/node,
+  # unconfig). The toolchain's loader is more deterministic after this, not less.
+  #
+  # apps/live still uses `effect`, at the catalog's 3.20.0, which declares no toml.
   browserslist: 4.28.7
   baseline-browser-mapping: 2.11.0
   source-map-js: 1.2.2
@@ -281,9 +282,15 @@ overrides:
   form-data: 4.0.6
   "ws@8": 8.21.0
   "ws@7": 7.5.11
-  "@opentelemetry/core": 2.8.0
-  "@opentelemetry/resources": 2.8.0
-  "@opentelemetry/sdk-trace-base": 2.8.0
+  # The three "@opentelemetry/*" pins that sat here are gone (APLANE-44, 2026-11-12): every
+  # @sentry/* and @opentelemetry/* package left the tree with react-doctor, which reached them
+  # through @sentry/node@10.26.0, and nothing in this repo imports either. An override that names a
+  # package nobody depends on is dead config that reads like a decision. Measured: removing them
+  # leaves the package and snapshot sets bit-for-bit identical.
+  #
+  # Still dead and NOT removed here because they were already dead before this change, so they are
+  # not mine to bundle into it: `rollup: 4.59.0` and `serialize-javascript: 7.0.5` above are absent
+  # from the tree in HEAD too.
   morgan: 1.12.1
   compression: 1.8.2
   proxy-addr: 2.0.8
