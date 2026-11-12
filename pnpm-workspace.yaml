@@ -46,8 +46,6 @@ catalog:
   "@tailwindcss/postcss": "4.1.17"
   "@tailwindcss/typography": "0.5.19"
   "@tanstack/react-table": "^8.21.3"
-  "@tanstack/react-virtual": "^3.13.12"
-  "@tanstack/virtual-core": "^3.13.12"
   "@tiptap/core": "^2.22.3"
   "@tiptap/extension-blockquote": "^2.22.3"
   "@tiptap/extension-character-count": "^2.22.3"
@@ -215,7 +213,6 @@ overrides:
   lodash-es: "catalog:"
   lodash: 4.18.1
   markdown-it: 14.3.3
-  rollup: 4.59.0
   "minimatch@3": 3.1.4
   # 10.2.6, the newest 10.x. This clears NO advisory — minimatch's fix is >=11.0.1 — and it is held
   # here by `glob@11.1.0`, which declares `^10.1.1` and is minimatch's sole remaining dependent, so
@@ -224,7 +221,6 @@ overrides:
   # react-doctor on 2026-11-12, so that half is obsolete even though the conclusion is not
   # (APLANE-44).
   "minimatch@10": 10.2.6
-  serialize-javascript: 7.0.5
   "ajv@6": 6.14.0
   "ajv@8": 8.18.0
   # APLANE-44: unpinned transitives that resolved below their advisory fix. All patch or minor
@@ -323,12 +319,49 @@ overrides:
   # The three "@opentelemetry/*" pins that sat here are gone (APLANE-44, 2026-11-12): every
   # @sentry/* and @opentelemetry/* package left the tree with react-doctor, which reached them
   # through @sentry/node@10.26.0, and nothing in this repo imports either. An override that names a
-  # package nobody depends on is dead config that reads like a decision. Measured: removing them
-  # leaves the package and snapshot sets bit-for-bit identical.
+  # package nobody depends on is dead config that reads like a decision. For these three the
+  # "bit-for-bit identical" measurement holds in full: `@opentelemetry/core`, `/resources` and
+  # `/sdk-trace-base` appear **0 times** anywhere in the lockfile, so no manifest in the tree
+  # declares them as a dependency OR a peer and there was nothing for the override to touch.
   #
-  # Still dead and NOT removed here because they were already dead before this change, so they are
-  # not mine to bundle into it: `rollup: 4.59.0` and `serialize-javascript: 7.0.5` above are absent
-  # from the tree in HEAD too.
+  # **But do not generalise that to every dead override, and it is not cosmetic.** Measured
+  # 2026-11-12 on `rollup: 4.59.0` (removed below): pnpm had been rewriting the recorded peer range
+  # of `@rollup/pluginutils@5.2.0` from its declared `^1.20.0||^2.0.0||^3.0.0||^4.0.0` to the
+  # literal `4.59.0` — one `packages:` entry's contents, no `snapshots:` content, and no
+  # resolution, since rollup is in no `packages:` entry and that peer is `optional: true`.
+  #
+  # Read from the PINNED pnpm 11.3.0 bundle, because this is the mechanism and not a guess:
+  # `createVersionsOverrider` is a readPackage hook over EVERY manifest pnpm reads, and
+  # `overrideDeps` matches on `targetPkg.name === name && isIntersectingRange(...)` — so the name
+  # matching is necessary but **the ranges must also intersect**, which is why the @opentelemetry
+  # pins touched nothing and this one did. Two consequences worth knowing before writing an
+  # override: a value that is not a valid peer range is written into `dependencies` instead
+  # (`deps[name] = newBareSpecifier`), so an override can INJECT a dependency; and the value `"-"`
+  # **deletes** the entry. None of this is special to dead overrides — the live `vite: "catalog:"`
+  # is rewriting vitest's recorded `vite` peer right now. What is specific to a dead one is that
+  # nothing justifies the rewrite.
+  #
+  # `rollup: 4.59.0` and `serialize-javascript: 7.0.5` were the two left behind here on 2026-11-12
+  # as "already dead before this change, not mine to bundle in". They are gone now, together with a
+  # stale `@storybook/csf-plugin@10.5.10` in `minimumReleaseAgeExclude` (10.6 folded that package
+  # in, so it is absent at ANY version) and two orphan `catalog:` entries,
+  # `@tanstack/react-virtual` and `@tanstack/virtual-core`. Those last two are the subtlest shape of
+  # this bug and the reason the new L0-10 gate stage checks the catalog too: both packages ARE in
+  # the tree at the pinned 3.13.12, pulled by `@headlessui/react@1.7.19` (whose own declared range
+  # is `^3.0.0-beta.60`), so the pin reads as satisfied — but **no manifest references them as
+  # `catalog:`, so the catalog decided nothing in this tree**; headlessui's range did, and pnpm
+  # never recorded either package in the lockfile's own `catalogs:` block, which is the check to
+  # run on a suspected orphan. Their caret ranges, against this file's exact-pin rule, were the
+  # tell.
+  #
+  # Two precisions. **They were not completely without effect**: in pnpm 11.3.0's add path, when an
+  # alias is in the default catalog and no version is given, the bare specifier is rewritten to
+  # `"catalog:"` — so a future `pnpm add @tanstack/react-virtual` in any workspace package would
+  # have picked up `^3.13.12` and will now take the newest instead. That is the plausible original
+  # intent, and it is still the wrong tool for a transitive. **And pinning a transitive needs an
+  # `overrides:` entry — whose VALUE may perfectly well come from the catalog**: this file does
+  # exactly that six times (express, typescript, vite, lodash-es, axios, uuid). The thing that
+  # cannot pin a transitive is a catalog entry with no override and no manifest reference.
   morgan: 1.12.1
   compression: 1.8.2
   proxy-addr: 2.0.8
@@ -346,7 +379,6 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - '@storybook/addon-docs@10.6.2'
   - '@storybook/builder-vite@10.6.2'
-  - '@storybook/csf-plugin@10.5.10'
   - '@storybook/react-dom-shim@10.6.2'
   - '@storybook/react-vite@10.6.2'
   - '@storybook/react@10.6.2'
