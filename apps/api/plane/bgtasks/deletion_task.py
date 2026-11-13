@@ -24,8 +24,44 @@ from plane.utils.exception_logger import log_exception
 logger = logging.getLogger("plane.worker")
 
 
+def _announce_cascaded_issue_delete(issue, actor_id):
+    """Send the `issue`/`deleted` webhook for a work item this cascade soft-deleted (APLANE-56).
+
+    The direct delete paths send it from issue_activity; the items that go WITH something else —
+    sub-items of a deleted work item (Issue.parent is CASCADE), every item of a deleted project —
+    pass only through here, and n8n's Google Calendar event of each would otherwise stay for ever.
+    Imported here: this module is imported by db/mixins.py while the models are still loading, and
+    webhook_task imports the serializers.
+    """
+    from plane.bgtasks.webhook_task import webhook_activity
+
+    # Never let the webhook break the cascade: a broker that refuses the publish would otherwise
+    # land in the caller's per-relation except and skip this row's recursion AND the rest of the
+    # relation, leaving sub-items alive under a deleted parent.
+    try:
+        _queue_deleted_webhook(webhook_activity, issue, actor_id)
+    except Exception as e:
+        log_exception(e)
+
+
+def _queue_deleted_webhook(webhook_activity, issue, actor_id):
+    webhook_activity.delay(
+        event="issue",
+        verb="deleted",
+        field=None,
+        old_value=None,
+        new_value=None,
+        actor_id=str(actor_id) if actor_id else None,
+        slug=issue.workspace.slug,
+        current_site=None,
+        event_id=str(issue.pk),
+        old_identifier=None,
+        new_identifier=None,
+    )
+
+
 @shared_task
-def soft_delete_related_objects(app_label, model_name, instance_pk, using=None):
+def soft_delete_related_objects(app_label, model_name, instance_pk, using=None, actor_id=None):
     """
     Soft delete related objects for a given model instance
     """
@@ -37,6 +73,13 @@ def soft_delete_related_objects(app_label, model_name, instance_pk, using=None):
         instance = model_class.all_objects.get(pk=instance_pk)
     except model_class.DoesNotExist:
         return
+
+    # The person who deleted the ROOT: its delete() saved it inside the request, so updated_by is
+    # them. Passed down the recursion, because every row this task saves runs BaseModel.save() with
+    # no current user, which sets updated_by (and created_by) to None — below the root nobody is
+    # left to read it from. A root with no updated_by gives None at every level (webhook still sent).
+    if actor_id is None:
+        actor_id = getattr(instance, "updated_by_id", None)
 
     # Get all related fields that are reverse relationships
     all_related = [
@@ -81,12 +124,15 @@ def soft_delete_related_objects(app_label, model_name, instance_pk, using=None):
                             if not related_obj.deleted_at:
                                 related_obj.deleted_at = timezone.now()
                                 related_obj.save()
+                                if related_obj._meta.label == "db.Issue":
+                                    _announce_cascaded_issue_delete(related_obj, actor_id)
                                 # Recursively handle related objects
                                 soft_delete_related_objects(
                                     related_obj._meta.app_label,
                                     related_obj._meta.model_name,
                                     related_obj.pk,
                                     using,
+                                    actor_id=actor_id,
                                 )
                 else:
                     # Handle other relationships
@@ -94,15 +140,24 @@ def soft_delete_related_objects(app_label, model_name, instance_pk, using=None):
 
                     for related_obj in related_queryset:
                         if hasattr(related_obj, "deleted_at"):
+                            # The queryset was read once, before the loop; a recursion earlier in
+                            # it may already have deleted this row through another path (a parent
+                            # newer than its sub-item, walked first under ordering -created_at;
+                            # Issue.state and Issue.project both CASCADE). Re-read, or the row is
+                            # saved and announced twice (APLANE-56, reproduced in its tests).
+                            related_obj.refresh_from_db(fields=["deleted_at"])
                             if not related_obj.deleted_at:
                                 related_obj.deleted_at = timezone.now()
                                 related_obj.save()
+                                if related_obj._meta.label == "db.Issue":
+                                    _announce_cascaded_issue_delete(related_obj, actor_id)
                                 # Recursively handle related objects
                                 soft_delete_related_objects(
                                     related_obj._meta.app_label,
                                     related_obj._meta.model_name,
                                     related_obj.pk,
                                     using,
+                                    actor_id=actor_id,
                                 )
             except Exception as e:
                 # Log the error or handle as needed

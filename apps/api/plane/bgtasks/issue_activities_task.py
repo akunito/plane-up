@@ -17,6 +17,7 @@ from django.utils import timezone
 # Module imports
 from plane.app.serializers import IssueActivitySerializer
 from plane.bgtasks.notification_task import notifications
+from plane.bgtasks.webhook_task import webhook_activity
 from plane.db.models import (
     CommentReaction,
     Cycle,
@@ -1636,6 +1637,31 @@ def issue_activity(
 
         # Save all the values to database
         issue_activities_created = IssueActivity.objects.bulk_create(issue_activities)
+
+        # A work-item delete sends the `issue`/`deleted` webhook here, on every path that records the
+        # delete (app destroy, app bulk delete, v1 destroy, both intake deletes). v1.4.1 sends issue
+        # webhooks only through model_activity (created/updated), so a delete reached no consumer and
+        # n8n's Google Calendar event for the item stayed forever (APLANE-56, measured 2026-11-13).
+        # webhook_activity sends {"id": issue_id} as data for "deleted" and never reads the issue, so
+        # the soft delete having already happened does not matter.
+        # Work items removed WITH something else (sub-items, a deleted project's items) never reach
+        # this task: deletion_task's soft-delete cascade sends their webhook. Still not covered: rows
+        # hard_delete's real CASCADE removes, and a workspace delete (its Webhook rows are soft-deleted
+        # by the same cascade, racing the sends — unsupported).
+        if type == "issue.activity.deleted" and issue_id is not None:
+            webhook_activity.delay(
+                event="issue",
+                verb="deleted",
+                field=None,
+                old_value=None,
+                new_value=None,
+                actor_id=actor_id,
+                slug=project.workspace.slug,
+                current_site=origin,
+                event_id=str(issue_id),
+                old_identifier=None,
+                new_identifier=None,
+            )
 
         if notification:
             notifications.delay(

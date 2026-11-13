@@ -459,7 +459,10 @@ def webhook_activity(
                     "field": field,
                     "new_value": new_value,
                     "old_value": old_value,
-                    "actor": get_model_data(event="user", event_id=actor_id),
+                    # None when the actor is unknown (a cascade whose root carried no updated_by):
+                    # get_model_data would raise DoesNotExist, which the except below swallows, and
+                    # the whole webhook would be dropped for want of an actor (APLANE-56).
+                    "actor": get_model_data(event="user", event_id=actor_id) if actor_id else None,
                     "old_identifier": old_identifier,
                     "new_identifier": new_identifier,
                 },
