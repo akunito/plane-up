@@ -127,8 +127,25 @@ export default function Root() {
           shell is overflow-hidden, so the page never scrolls and the bars never hide. The bottom strip
           (last sidebar rows, last list rows) sat under Edge Canary's bottom bar, unreachable (Android
           prod, 2026-11-13, APLANE-53 — device check of the fix recorded there). Playwright has no
-          browser bars (vh == dvh there), so L1-28 pins it in source. */}
-      <div className={cn("relative flex h-dvh w-full flex-col overflow-hidden bg-canvas", "desktop-app-container")}>
+          browser bars (vh == dvh there), so L1-28 pins it in source.
+          The safe-area padding pairs with `viewport-fit=cover`, which app/(all)/layout.tsx and
+          app/(home)/layout.tsx serve on every workspace page through <Meta/> — it takes effect only
+          because <Meta/> renders AFTER the plain viewport meta in Layout and the last one wins. Cover
+          lets iOS draw the page under the home indicator and the notch, and nothing else in apps/web
+          moved content back out (APLANE-54).
+          env() is 0 wherever the browser reports no unsafe area, and box-sizing is border-box, so
+          h-dvh still includes the padding. No top inset, deliberately, until an iPhone says otherwise:
+          with apple-mobile-web-app-status-bar-style "default" the page starts below the status bar, so
+          the top inset is expected to be 0 anyway (not measured). <main> sits in the content box, so the
+          absolute drawer inside it stays out of the unsafe strip; fixed overlays and ModalCore portals do
+          not (bottom-docked sheets end 16 px from the bottom edge, APLANE-54 follow-up). */}
+      <div
+        className={cn(
+          "relative flex h-dvh w-full flex-col overflow-hidden bg-canvas",
+          "pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]",
+          "desktop-app-container"
+        )}
+      >
         <main className="relative h-full w-full overflow-hidden">
           <Outlet />
         </main>

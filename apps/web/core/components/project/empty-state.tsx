@@ -27,7 +27,7 @@ export function EmptyState({ title, description, image, primaryButton, secondary
       <div className="relative h-full w-full max-w-6xl">
         <img src={image} className="w-52 object-cover sm:w-60" alt={primaryButton?.text ?? ""} />
       </div>
-      <div className="absolute flex w-full flex-col items-center pt-[30vh] text-center md:pt-[35vh] lg:pt-[45vh]">
+      <div className="absolute flex w-full flex-col items-center pt-[30dvh] text-center md:pt-[35dvh] lg:pt-[45dvh]">
         <h6 className="mt-6 text-18 font-semibold">{title}</h6>
         {description && <p className="mb-7 text-tertiary">{description}</p>}
         <div className="flex items-center gap-4">

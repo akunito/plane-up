@@ -173,7 +173,7 @@ export const GlobalIssuesHeader = observer(function GlobalIssuesHeader() {
               {/* Fixed-height scroll box on phones so the bottom-docked sheet doesn't shrink/jump when
                   switching layouts (e.g. Calendar has fewer Display options). `md:contents` removes the
                   box on desktop so the popper sizes normally. */}
-              <div className="flex h-[70vh] flex-col overflow-y-auto md:contents">
+              <div className="flex h-[70dvh] flex-col overflow-y-auto md:contents">
                 {/* Layout switcher inside Display on phones, with labels (mirrors the desktop switcher). */}
                 <div className="mb-3 border-b border-subtle px-2 pt-1 pb-3 md:hidden">
                   <div className="text-xs mb-2 font-medium text-tertiary">Layout</div>

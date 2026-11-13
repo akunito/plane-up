@@ -393,7 +393,7 @@ export const IssueFormRoot = observer(function IssueFormRoot(props: IssueFormPro
               className={cn(
                 "space-y-3 bg-surface-1 pb-4",
                 activeAdditionalPropertiesLength > 4 &&
-                  "vertical-scrollbar scrollbar-sm max-h-[45vh] overflow-hidden overflow-y-auto"
+                  "vertical-scrollbar scrollbar-sm max-h-[45dvh] overflow-hidden overflow-y-auto"
               )}
             >
               <div className="px-5">

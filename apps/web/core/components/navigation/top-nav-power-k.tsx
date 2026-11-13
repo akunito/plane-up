@@ -249,7 +249,7 @@ export const TopNavPowerK = observer(() => {
         className={cn(
           "shadow-lg absolute -top-[6px] left-1/2 z-20 flex -translate-x-1/2 flex-col overflow-hidden rounded-md border border-subtle bg-surface-1 px-0 pt-10 transition-all duration-300 ease-in-out",
           {
-            "max-h-[80vh] w-[574px] opacity-100": isOpen,
+            "max-h-[80dvh] w-[574px] opacity-100": isOpen,
             "h-0 w-0 opacity-0": !isOpen,
           }
         )}
@@ -269,7 +269,7 @@ export const TopNavPowerK = observer(() => {
                      but we might need the context indicator if we want that feature.
                      For now, let's just render the list. */}
 
-            <Command.List className="vertical-scrollbar scrollbar-sm max-h-[60vh] overflow-y-auto px-2 pb-4 outline-none">
+            <Command.List className="vertical-scrollbar scrollbar-sm max-h-[60dvh] overflow-y-auto px-2 pb-4 outline-none">
               <ProjectsAppPowerKCommandsList
                 activePage={activePage}
                 context={context}

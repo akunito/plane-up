@@ -23,7 +23,7 @@ type Props = {
 export function FilterMobileSheet({ isOpen, onClose, title, children }: Props) {
   return (
     <ModalCore isOpen={isOpen} handleClose={onClose} position={EModalPosition.CENTER} width={EModalWidth.XL}>
-      <div className="flex max-h-[85vh] flex-col rounded-t-xl bg-surface-1">
+      <div className="flex max-h-[85dvh] flex-col rounded-t-xl bg-surface-1">
         {/* drag handle */}
         <div className="mx-auto mt-2 mb-1 h-1 w-10 flex-shrink-0 rounded-full bg-border-strong" />
         <div className="flex flex-shrink-0 items-center justify-between px-4 pt-1 pb-2">

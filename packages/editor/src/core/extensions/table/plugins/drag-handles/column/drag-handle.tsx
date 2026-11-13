@@ -248,7 +248,7 @@ export function ColumnDragHandle(props: ColumnDragHandleProps) {
             lockScroll
           />
           <div
-            className="max-h-[90vh] w-[12rem] overflow-y-auto rounded-md border-[0.5px] border-strong bg-surface-1 px-2 py-2.5 shadow-raised-200"
+            className="max-h-[90dvh] w-[12rem] overflow-y-auto rounded-md border-[0.5px] border-strong bg-surface-1 px-2 py-2.5 shadow-raised-200"
             ref={refs.setFloating}
             {...getFloatingProps()}
             style={{

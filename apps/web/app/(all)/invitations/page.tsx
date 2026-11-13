@@ -129,7 +129,7 @@ function UserInvitationsPage() {
               <div className="w-full space-y-10">
                 <h5 className="text-16">{t("we_see_that_someone_has_invited_you_to_join_a_workspace")}</h5>
                 <h4 className="text-20 font-semibold">{t("join_a_workspace")}</h4>
-                <div className="max-h-[37vh] space-y-4 overflow-y-auto md:w-3/5">
+                <div className="max-h-[37dvh] space-y-4 overflow-y-auto md:w-3/5">
                   {invitations.map((invitation) => {
                     const isSelected = invitationsRespond.includes(invitation.id);
 

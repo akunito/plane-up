@@ -222,7 +222,7 @@ export const CustomizeNavigationDialog = observer(function CustomizeNavigationDi
 
   return (
     <ModalCore isOpen={isOpen} handleClose={onClose} position={EModalPosition.CENTER} width={EModalWidth.XXL}>
-      <div className="flex max-h-[90vh] flex-col rounded-lg bg-surface-1">
+      <div className="flex max-h-[90dvh] flex-col rounded-lg bg-surface-1">
         {/* Header */}
         <div className="flex justify-between px-6 pt-4">
           <div>

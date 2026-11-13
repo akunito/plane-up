@@ -237,7 +237,7 @@ export const ManagePinnedDialog = observer(function ManagePinnedDialog({ isOpen,
 
   return (
     <ModalCore isOpen={isOpen} handleClose={onClose} position={EModalPosition.CENTER} width={EModalWidth.XXL}>
-      <div className="flex max-h-[85vh] flex-col bg-surface-1">
+      <div className="flex max-h-[85dvh] flex-col bg-surface-1">
         <div className="flex flex-shrink-0 items-center justify-between border-b border-subtle px-5 py-4">
           <div>
             <h3 className="text-15 font-semibold text-primary">Manage pinned items</h3>

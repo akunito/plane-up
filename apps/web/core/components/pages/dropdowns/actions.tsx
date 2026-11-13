@@ -185,7 +185,7 @@ export const PageActions = observer(function PageActions(props: Props) {
         storeType={storeType}
       />
       {parentRef && <ContextMenu parentRef={parentRef} items={arrangedOptions} />}
-      <CustomMenu placement="bottom-end" optionsClassName="max-h-[90vh]" ellipsis closeOnSelect>
+      <CustomMenu placement="bottom-end" optionsClassName="max-h-[90dvh]" ellipsis closeOnSelect>
         {arrangedOptions.map((item) => {
           if (item.shouldRender === false) return null;
           return (

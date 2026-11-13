@@ -50,7 +50,7 @@ export const PaidPlanUpgradeModal = observer(function PaidPlanUpgradeModal(props
 
   return (
     <ModalCore isOpen={isOpen} handleClose={handleClose} width={EModalWidth.VIIXL} className="rounded-2xl">
-      <div className="max-h-[90vh] overflow-auto p-10">
+      <div className="max-h-[90dvh] overflow-auto p-10">
         <div className="grid h-full grid-cols-12 gap-6">
           {/* Free Plan Section */}
           <div className={cn(COMMON_CARD_CLASSNAME)}>
