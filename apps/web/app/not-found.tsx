@@ -19,7 +19,7 @@ export const meta: Route.MetaFunction = () => [
 
 function PageNotFound() {
   return (
-    <div className={`h-screen w-full overflow-hidden bg-surface-1`}>
+    <div className={`h-dvh w-full overflow-hidden bg-surface-1`}>
       <div className="grid h-full place-items-center p-4">
         <div className="space-y-8 text-center">
           <div className="relative mx-auto h-60 w-60 lg:h-80 lg:w-80">

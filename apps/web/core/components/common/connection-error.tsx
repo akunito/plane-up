@@ -45,7 +45,7 @@ export function ConnectionErrorView(props: TConnectionErrorView) {
   return (
     <div
       role="alert"
-      className="relative flex h-screen w-full flex-col items-center justify-center gap-4 px-6 text-center"
+      className="relative flex h-dvh w-full flex-col items-center justify-center gap-4 px-6 text-center"
     >
       <CloudOff className="size-10 text-tertiary" aria-hidden="true" />
       <p className="text-16 font-medium text-primary">{t("something_went_wrong_please_try_again")}</p>

@@ -123,7 +123,12 @@ export const meta: Route.MetaFunction = () => [
 export default function Root() {
   return (
     <AppProvider>
-      <div className={cn("relative flex h-screen w-full flex-col overflow-hidden bg-canvas", "desktop-app-container")}>
+      {/* h-dvh, never h-screen: on mobile 100vh is the height with the browser bars HIDDEN, and this
+          shell is overflow-hidden, so the page never scrolls and the bars never hide. The bottom strip
+          (last sidebar rows, last list rows) sat under Edge Canary's bottom bar, unreachable (Android
+          prod, 2026-11-13, APLANE-53 — device check of the fix recorded there). Playwright has no
+          browser bars (vh == dvh there), so L1-28 pins it in source. */}
+      <div className={cn("relative flex h-dvh w-full flex-col overflow-hidden bg-canvas", "desktop-app-container")}>
         <main className="relative h-full w-full overflow-hidden">
           <Outlet />
         </main>
@@ -139,7 +144,7 @@ export function HydrateFallback() {
   if (typeof window === "undefined" || resolvedTheme === undefined) return <div />;
 
   return (
-    <div className="relative flex h-screen w-full items-center justify-center bg-canvas">
+    <div className="relative flex h-dvh w-full items-center justify-center bg-canvas">
       <LogoSpinner />
     </div>
   );

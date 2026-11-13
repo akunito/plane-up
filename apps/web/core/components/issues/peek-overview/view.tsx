@@ -145,7 +145,7 @@ export const IssueView = observer(function IssueView(props: IIssueView) {
           }}
         >
           {isError ? (
-            <div className="relative h-screen w-full overflow-hidden">
+            <div className="relative h-dvh w-full overflow-hidden">
               <IssuePeekOverviewError removeRoutePeekId={removeRoutePeekId} />
             </div>
           ) : (

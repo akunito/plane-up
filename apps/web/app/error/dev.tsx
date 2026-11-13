@@ -40,7 +40,7 @@ interface DevErrorComponentProps {
 export function DevErrorComponent({ error, onGoHome, onReload }: DevErrorComponentProps) {
   if (isRouteErrorResponse(error)) {
     return (
-      <div className="flex min-h-screen items-start justify-center bg-surface-2 p-6 transition-none">
+      <div className="flex min-h-dvh items-start justify-center bg-surface-2 p-6 transition-none">
         <div className="mt-12 w-full max-w-4xl space-y-4 transition-none">
           <Banner
             variant="error"
@@ -75,7 +75,7 @@ export function DevErrorComponent({ error, onGoHome, onReload }: DevErrorCompone
 
   if (error instanceof Error) {
     return (
-      <div className="flex min-h-screen items-start justify-center bg-surface-2 p-6 transition-none">
+      <div className="flex min-h-dvh items-start justify-center bg-surface-2 p-6 transition-none">
         <div className="mt-12 w-full max-w-4xl space-y-4 transition-none">
           <Banner
             variant="error"
@@ -130,7 +130,7 @@ export function DevErrorComponent({ error, onGoHome, onReload }: DevErrorCompone
   }
 
   return (
-    <div className="flex min-h-screen items-start justify-center bg-surface-2 p-6 transition-none">
+    <div className="flex min-h-dvh items-start justify-center bg-surface-2 p-6 transition-none">
       <div className="mt-12 w-full max-w-4xl space-y-4 transition-none">
         <Banner
           variant="error"

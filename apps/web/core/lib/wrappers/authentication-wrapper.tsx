@@ -97,7 +97,7 @@ export const AuthenticationWrapper = observer(function AuthenticationWrapper(pro
 
   if ((isUserSWRLoading || isUserLoading || workspacesLoader) && !currentUser?.id)
     return (
-      <div className="relative flex h-screen w-full items-center justify-center">
+      <div className="relative flex h-dvh w-full items-center justify-center">
         <LogoSpinner />
       </div>
     );

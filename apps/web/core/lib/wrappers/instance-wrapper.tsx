@@ -34,7 +34,7 @@ const InstanceWrapper = observer(function InstanceWrapper(props: TInstanceWrappe
   // loading state
   if ((isLoading || isInstanceSWRLoading) && !instance)
     return (
-      <div className="relative flex h-screen w-full items-center justify-center">
+      <div className="relative flex h-dvh w-full items-center justify-center">
         <LogoSpinner />
       </div>
     );
