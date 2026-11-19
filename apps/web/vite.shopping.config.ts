@@ -3,7 +3,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { defineConfig, type Plugin } from "vite";
-import { workerSource } from "../../packages/shopping-app/build/worker-source";
+import { workerSource } from "../../packages/shopping-app/tooling/worker-source";
 
 const root = path.resolve(__dirname, "../../packages/shopping-app");
 const base = "/shopping/";
