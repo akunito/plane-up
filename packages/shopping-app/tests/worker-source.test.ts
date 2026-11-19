@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { workerSource } from "../tooling/worker-source";
+import { workerSource } from "../../../apps/web/vite.shopping.worker";
 
 const TEMPLATE = 'const VERSION = "__SW_VERSION__"; const ASSETS = "__SW_ASSETS__"; const SCOPE = "__SW_SCOPE__";';
 
