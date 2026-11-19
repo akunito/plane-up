@@ -13,3 +13,9 @@ def test_probe_table_and_flag_exist():
     with connection.cursor() as cur:
         cur.execute("select 1 from information_schema.tables where table_name = 'm6_probes'")
         assert cur.fetchone() is not None
+
+
+@pytest.mark.unit
+def test_unrelated_change_for_m6b():
+    # SPIKE M6b, never merge: stands for an unrelated change deployed after the schema shipped.
+    assert True
