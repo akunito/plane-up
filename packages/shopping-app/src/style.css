@@ -1,0 +1,39 @@
+:root {
+  color-scheme: dark;
+}
+body {
+  margin: 0;
+  padding: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  background: #141415;
+  color: #e5e6e6;
+  font: 14px/1.4 system-ui, sans-serif;
+}
+h1 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}
+dl {
+  margin: 0 0 16px;
+  display: grid;
+  grid-template-columns: minmax(96px, 30%) 1fr;
+  gap: 4px 10px;
+}
+dt {
+  color: #9a9b9c;
+}
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+button {
+  display: block;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #1f7ab0;
+  color: #fff;
+  font: inherit;
+}

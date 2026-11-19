@@ -1055,6 +1055,9 @@ importers:
       '@plane/shared-state':
         specifier: workspace:*
         version: link:../../packages/shared-state
+      '@plane/shopping-app':
+        specifier: workspace:*
+        version: link:../../packages/shopping-app
       '@plane/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1718,6 +1721,12 @@ importers:
       typescript:
         specifier: 5.8.3
         version: 5.8.3
+
+  packages/shopping-app:
+    devDependencies:
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.12(@types/node@22.12.0)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1)(vite@8.1.6(@types/node@22.12.0)(esbuild@0.28.1)(jiti@2.6.1)(terser@5.43.1)(tsx@4.20.6)(yaml@2.8.3))
 
   packages/tailwind-config:
     dependencies:

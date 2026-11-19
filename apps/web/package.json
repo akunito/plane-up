@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "react-router dev --port 3000",
-    "build": "react-router build",
+    "build": "react-router build && vite build --config vite.shopping.config.ts",
     "preview": "react-router build && serve -s build/client -l 3000",
     "start": "serve -s build/client -l 3000",
     "clean": "rm -rf .turbo && rm -rf .next && rm -rf .react-router && rm -rf node_modules && rm -rf dist && rm -rf build",
@@ -35,6 +35,7 @@
     "@plane/propel": "workspace:*",
     "@plane/services": "workspace:*",
     "@plane/shared-state": "workspace:*",
+    "@plane/shopping-app": "workspace:*",
     "@plane/types": "workspace:*",
     "@plane/ui": "workspace:*",
     "@plane/utils": "workspace:*",

@@ -1,0 +1,14 @@
+{
+  "name": "@plane/shopping-app",
+  "version": "1.4.1",
+  "private": true,
+  "description": "PHASE 0 SPIKE (APLANE-58): throwaway stub of the standalone shopping app, built by apps/web as a second Vite build. Never merge this branch.",
+  "license": "AGPL-3.0",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}
