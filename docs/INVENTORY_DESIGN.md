@@ -174,7 +174,7 @@ So the phone screens are a small separate app, built by `apps/web` as a second V
 - **Links from the main app are full page loads.** Inside the main app the client router would treat `/shopping` as a workspace (`route(":workspaceSlug")`, `apps/web/app/routes/core.ts:63`). The sidebar entry cannot be an item of the static list: `SidebarItemBase` prefixes the workspace slug, renders a client-side link and translates a key (`apps/web/core/components/workspace/sidebar/sidebar-item.tsx:66-75`). It is its own small component with a plain anchor, rendered above that list.
 - **The worker's registration lives only in the shopping app's entry file**, never in the shared package: anything the main bundle imports that registers a worker turns L3-11 red.
 - **Manifest and worker.** Own manifest with `id`, `scope` and `start_url` all `/shopping/`; own worker with that scope; data and the queue in IndexedDB.
-- **Sign-in.** Same origin, so the session cookie is sent. There is no CSRF token to fetch: cookie-authenticated writes are checked by origin (`apps/api/plane/authentication/session.py:56-63`). When a request is answered with a sign-in page or a redirect, the app offers a full navigation to the main app, because a cached shell never navigates by itself.
+- **Sign-in.** Same origin, so the session cookie is sent. There is no CSRF token to fetch: cookie-authenticated writes are checked by origin (`apps/api/plane/authentication/session.py:56-63`). When a request is answered with a sign-in page or a redirect, the app offers a full navigation to the main app, because a cached shell never navigates by itself. The client sends `X-Requested-With: XMLHttpRequest` on every request and tells three cases apart — signed out of the app, signed out of the proxy, no network (see "Measured in phase 0", M4).
 - **Two hosts are two apps.** The internal and the public hostname are different origins: two installs, two queues, two "Done" lists that know nothing of each other. The owner wants both installed if that is possible and the **public** one if only one can be (2026-11-19). With the public one, "sent when the connection returns" depends on having a connection and nothing else. What is known: the internal name resolves to a VPN address, so away from home it needs the VPN up; both real phones are VPN nodes and both were offline on it when checked; the public name sits behind an authenticating proxy, whose session expires (M4, M11).
 - **Reserved name.** `shopping` joins both lists of restricted workspace names (`apps/api/plane/utils/constants.py:5` and `RESTRICTED_URLS` in `packages/constants/src/workspace.ts:12`), after checking that no workspace already has it.
 
@@ -194,6 +194,15 @@ Both UIs share one package of pure TypeScript: types, the derivation rules, oper
 - i18n: 19 locales at full parity, never edited by the fork, and by stated policy not to be extended (`connection-error.tsx:36-39`). A key missing everywhere renders as the raw key and nothing fails the build.
 - Claude reaches Plane through an upstream MCP server that has no inventory tools.
 
+## Measured in phase 0
+
+Each line says how it was measured. "Part" means the rest of that measurement is still open in the plan.
+
+- **M0, browsers (owner, and read from the test phone, 2026-11-19).** Both real phones use Edge Canary. The test phone has Edge Canary 152 as its default browser, and Chrome.
+- **M7, column defaults (run 2026-11-19 in the API test container, Django 5.2.15, a throwaway migration on a database of its own).** A field added with `default=False` produces `ADD COLUMN … DEFAULT false NOT NULL` followed by `ALTER COLUMN … DROP DEFAULT`: the database keeps no default. Code that does not know the column then cannot create a project at all — `IntegrityError: null value in column … violates not-null constraint`. The same field with `db_default=False` keeps the default, and the older code creates projects normally. **So every column this feature adds to an existing table carries `db_default` or is nullable**; otherwise a rollback to an image from before the column breaks project creation.
+- **M5, part (test phone over USB, 2026-11-19).** Edge Canary's debugging socket is `chrome_devtools_remote_<process id>`; Chrome's has no suffix. With the browser in the background the socket accepts a connection and never answers; brought to the front, it answers at once. The connection survives airplane mode, and the network is back about three seconds after airplane mode is turned off. Not yet measured: attaching to the installed app's own window.
+- **M4, part (`curl` without a session, 2026-11-19; no browser yet).** On the internal host an API request without a session gets `401` with a JSON body. On the public host the proxy answers `302` to another origin with an HTML body; a page's `fetch` cannot follow or read a redirect like that (expected from the fetch specification, not yet seen on the device), so to the app it would look like a dead network. The same request with `X-Requested-With: XMLHttpRequest` gets `401` with an HTML body instead. Three cases the client can therefore tell apart: `401` with JSON — signed out of the app; `401` without JSON — signed out of the proxy; no answer — no network. The session cookie belongs to one hostname and slides: it lasts 90 days from the last request (deployment setting, read from the running containers). Two installs therefore mean two sign-ins. Not yet measured: a write from `/shopping/` against the origin check, and all of this inside the installed app.
+
 ## The deploy gate and this feature
 
 The gate is one committed script set that runs for **every** ref, on one shared runner, against one shared dev database. Five things follow.
@@ -208,6 +217,7 @@ Each new check gets a self-test for three cases — feature expected and app mis
 
 ## Proposed model
 
+- `Project.inventory_view`: boolean, `default=False` **and** `db_default=False` (M7).
 - `InventoryList` (project): name, default mode, sort order.
 - `InventoryItem` (project, list): name, mode, the state fields above, `state_rev`, category, store, `buy_online`, purchase URL, variant, last price and currency, expiry date, barcode, photo (late), sort order, external source and id (so the seed import can be re-run).
 - `InventoryOrder` (project, item): as under Orders.
