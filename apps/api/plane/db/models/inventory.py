@@ -101,8 +101,9 @@ class InventoryItem(ProjectBaseModel):
     state_rev = models.PositiveBigIntegerField(default=0)
 
     # Data. Rule for phase 2: edited online through the item update endpoint, which does not advance
-    # state_rev. A mode change clears `quantity` only; min_quantity and restock_to are data and stay, so
-    # the restock CHECK below never fires on a mode change (the update endpoint validates the pair).
+    # state_rev. Of the `units` fields a mode change clears only `quantity`: min_quantity and restock_to
+    # are data and stay, so the restock CHECK below never fires on a mode change (the update endpoint
+    # validates the pair). Writers with no external id write NULL, never "" ("" pairs collide).
     min_quantity = models.IntegerField(null=True, blank=True)
     restock_to = models.IntegerField(null=True, blank=True)
     category = models.CharField(max_length=255, blank=True, default="")

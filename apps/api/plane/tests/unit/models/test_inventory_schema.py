@@ -57,7 +57,7 @@ def test_the_project_flag_is_off_by_default(project):
     assert project.inventory_view is False
 
 
-def test_a_project_insert_that_does_not_name_the_flag_still_works():
+def test_the_flag_column_keeps_a_database_default_for_inserts_that_do_not_name_it():
     """What an image from before this column does after a rollback (M7: with `default=` alone Django
     drops the database default and that INSERT fails with a not-null violation)."""
     with connection.cursor() as cur:
@@ -113,6 +113,9 @@ def test_the_seed_import_key_is_unique_per_project_among_live_items(inventory_li
     _item(inventory_list, name="d")
     InventoryItem.all_objects.filter(pk=first.pk).update(deleted_at=timezone.now())
     _item(inventory_list, name="e", external_source="seed", external_id="milk")
+    other_project = Project.objects.create(name="Office", identifier="OFF", workspace=project.workspace)
+    other_list = InventoryList.objects.create(name="Kitchen", project=other_project)
+    _item(other_list, name="f", external_source="seed", external_id="milk")
 
 
 def test_an_order_can_record_a_purchase_made_while_it_was_open(inventory_list, create_user):
@@ -122,7 +125,17 @@ def test_an_order_can_record_a_purchase_made_while_it_was_open(inventory_list, c
     order.bought_since_by = create_user
     order.save()
     order.refresh_from_db()
-    assert order.bought_since_by_id == create_user.id
+    assert order.bought_since_at is not None and order.bought_since_by_id == create_user.id
+
+
+def test_every_user_foreign_key_is_set_null():
+    """Removing a user must never remove inventory history or orders with them."""
+    from django.conf import settings
+
+    for model in (InventoryItem, InventoryOrder, InventoryEvent):
+        for field in model._meta.concrete_fields:
+            if field.is_relation and field.related_model._meta.label == settings.AUTH_USER_MODEL:
+                assert field.remote_field.on_delete.__name__ == "SET_NULL", (model.__name__, field.name)
 
 
 def test_a_list_holds_one_live_item_per_name(inventory_list, project):
