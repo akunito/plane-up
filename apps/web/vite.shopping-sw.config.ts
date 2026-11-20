@@ -10,7 +10,10 @@ const root = path.resolve(__dirname, "../../packages/shopping-app");
 const outDir = path.resolve(__dirname, "build/client/shopping");
 
 export default defineConfig((): UserConfig => {
-  const { version, assets } = precacheFromBuild(outDir, "/shopping/");
+  const { version, assets } = precacheFromBuild(outDir, "/shopping/", [
+    path.join(root, "src"),
+    path.resolve(__dirname, "../../packages/inventory/src"),
+  ]);
   return {
     root,
     publicDir: false,

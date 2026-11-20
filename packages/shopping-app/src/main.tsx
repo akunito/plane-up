@@ -37,21 +37,37 @@ function requestSync(): void {
     });
 }
 
+/** Unsaved work on screen: an open dialog, a toast (its Undo), or text typed in a field. */
+function busy(): boolean {
+  return (
+    !!document.querySelector('[role="dialog"], .toast') ||
+    [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")].some(
+      (el) => el.type !== "checkbox" && el.type !== "radio" && el.value !== ""
+    )
+  );
+}
+
 if ("serviceWorker" in navigator) {
   // A page that already had a worker is replaced by the new version's on the next hide, never in front of
   // the person; the very first install takes over a page that had none, and needs no reload.
   let hadController = !!navigator.serviceWorker.controller;
   let reloadWhenHidden = false;
+  // Never over unsaved work (phase 6 audit): switching apps to copy a name would lose the text typed in
+  // the search or a dialog, and a toast's Undo. The old page keeps working meanwhile (one chunk, no lazy
+  // imports, so nothing it needs is gone); the reload waits for a hide with nothing pending.
+  const reloadIfIdle = () => {
+    if (document.visibilityState === "hidden" && !busy()) location.reload();
+    else reloadWhenHidden = true;
+  };
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (!hadController) {
       hadController = true;
       return;
     }
-    if (document.visibilityState === "hidden") location.reload();
-    else reloadWhenHidden = true;
+    reloadIfIdle();
   });
   document.addEventListener("visibilitychange", () => {
-    if (reloadWhenHidden && document.visibilityState === "hidden") location.reload();
+    if (reloadWhenHidden && document.visibilityState === "hidden") reloadIfIdle();
   });
   navigator.serviceWorker.addEventListener("message", (event: MessageEvent<{ type?: string }>) => {
     if (event.data?.type === "queue-changed") void controller.reloadQueue();

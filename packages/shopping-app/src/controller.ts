@@ -145,6 +145,8 @@ export class Controller {
   /** Opened from a snapshot: the next sign of a connection starts the app again in full. */
   private openedOffline = false;
   private restarting: Promise<void> | null = null;
+  /** Who the server said is signed in during this start (settings, then lists); null before it answered. */
+  private confirmedUser: string | null = null;
 
   constructor(private readonly deps: Deps) {
     this.now = deps.now ?? Date.now;
@@ -200,18 +202,23 @@ export class Controller {
 
   private async startOnce(): Promise<void> {
     const client = this.client();
+    this.confirmedUser = null;
     const settings = await requestJson<{
+      id?: string;
       workspace?: { last_workspace_slug?: string | null; fallback_workspace_slug?: string | null };
     }>(client, "GET", "users/me/settings/");
     if (
       settings.kind === "failed" &&
       (settings.failure === "signed_out_app" || settings.failure === "signed_out_proxy")
     )
-      return this.set({ phase: "signed_out", connection: settings.failure });
+      return this.signedOut(settings.failure);
     if (settings.kind !== "ok") {
       if (settings.kind === "failed" && (await this.openOffline(settings.failure))) return;
       return this.set({ phase: "error", connection: settings.kind === "failed" ? settings.failure : "refused" });
     }
+    // From here an offline fallback may open only this person's snapshot (phase 6 audit: a person who had
+    // just signed in, then lost the network, was shown the previous person's lists and queue).
+    this.confirmedUser = settings.body.id ?? null;
     const workspaces = await requestJson<{ slug: string; name: string }[]>(client, "GET", "users/me/workspaces/");
     const all =
       workspaces.kind === "ok" && Array.isArray(workspaces.body)
@@ -259,7 +266,7 @@ export class Controller {
     // 403: a workspace guest, or not a member (guests have no access to inventory, brief).
     if (lists.kind === "refused" && lists.status === 403) return this.set({ phase: "no_access" });
     if (lists.kind === "failed" && (lists.failure === "signed_out_app" || lists.failure === "signed_out_proxy"))
-      return this.set({ phase: "signed_out", connection: lists.failure });
+      return this.signedOut(lists.failure);
     if (lists.kind !== "ok") {
       if (lists.kind === "failed" && (await this.openOffline(lists.failure))) return;
       return this.set({ phase: "error", connection: lists.kind === "failed" ? lists.failure : "refused" });
@@ -267,8 +274,20 @@ export class Controller {
     prefs.set("slug", this.state.slug);
     // Who used this device last: an offline start opens their snapshot and queue (and only theirs).
     prefs.set("user", lists.body.me.id);
-    if (lists.body.lists.length === 0) return this.set({ phase: "no_inventory", lists: lists.body });
+    this.confirmedUser = lists.body.me.id;
+    if (lists.body.lists.length === 0) {
+      this.openedOffline = false;
+      return this.set({ phase: "no_inventory", lists: lists.body });
+    }
     const key = `${lists.body.me.id}:${this.state.slug}`;
+    if (this.storeKey && this.storeKey !== key) {
+      // Another person or workspace than what is on screen (a reconnect after an offline start): nothing of
+      // the previous one may carry over, or be saved into this one's snapshot (phase 6 audit), as in
+      // switchWorkspace.
+      this.watched.clear();
+      if (this.toastTimer) clearTimeout(this.toastTimer);
+      this.set({ known: {}, orders: [], covered: null, preferences: EMPTY_PREFERENCES, toast: null });
+    }
     if (!this.store || this.storeKey !== key) {
       this.store = null;
       try {
@@ -288,11 +307,14 @@ export class Controller {
     }
     const queue = await this.store.read();
     this.set({ lists: lists.body, queue });
+    // The store is now the confirmed person's: sending, refreshing and saving the snapshot are safe again.
+    // Not earlier (phase 6 audit): a tap or poll while the start ran sent the snapshot's queue with the
+    // session of whoever is signed in now, and saved their lists under the previous person's key.
+    this.openedOffline = false;
     const prefsOut = await fetchPreferences(this.client());
     if (prefsOut.kind === "ok") this.set({ preferences: prefsOut.body });
     await this.refresh();
     this.expireDone();
-    this.openedOffline = false;
     this.set({ phase: "ready", offlineSince: null });
     this.saveSnapshot();
     void this.flush();
@@ -306,7 +328,7 @@ export class Controller {
    */
   private async openOffline(failure: FailureKind): Promise<boolean> {
     if (failure !== "offline" && failure !== "server") return false;
-    const userId = prefs.get("user");
+    const userId = this.confirmedUser ?? prefs.get("user");
     const slug = this.state.slug || prefs.get("slug") || "";
     if (!userId || !slug) return false;
     const snap = await this.snapshots.load(userId, slug);
@@ -348,6 +370,16 @@ export class Controller {
     return true;
   }
 
+  /**
+   * The server says nobody is signed in. The device forgets who used it last, so an offline start never
+   * shows that person's lists to whoever holds the device next (design: a shared device). Their queue
+   * stays stored and is sent after they sign in again.
+   */
+  private signedOut(failure: FailureKind): void {
+    prefs.set("user", null);
+    this.set({ phase: "signed_out", connection: failure });
+  }
+
   /** Opened offline and a connection may be back: start again in full (once at a time). */
   private reconnect(): Promise<void> {
     if (!this.openedOffline) return Promise.resolve();
@@ -355,10 +387,19 @@ export class Controller {
       try {
         const client = this.client();
         const probe = await requestJson(client, "GET", "users/me/settings/");
+        if (probe.kind === "failed" && (probe.failure === "signed_out_app" || probe.failure === "signed_out_proxy")) {
+          // The network is back but the session is gone (a proxy session expired meanwhile): ask to sign in
+          // rather than show "No connection" for ever while taps pile up (phase 6 audit).
+          this.openedOffline = false;
+          this.signedOut(probe.failure);
+          return;
+        }
         if (probe.kind !== "ok") return; // still offline: stay on the snapshot
-        this.openedOffline = false;
-        this.watched.clear();
+        // openedOffline stays set until openWorkspace holds the confirmed person's store.
         await this.startOnce();
+        // A start that ended on another screen (no access, no inventory, an error) is not offline any more;
+        // one that fell back to the snapshot again set the flag itself.
+        if (this.state.phase !== "ready") this.openedOffline = false;
       } catch {
         this.set({ phase: "error" });
       } finally {

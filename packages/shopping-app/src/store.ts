@@ -3,7 +3,7 @@
 // the transaction, so a tap in another tab cannot land between the read and the write (phase 3 audit:
 // a read, an await and a write loses updates).
 
-import type { QueueState, QueueStore } from "@plane/inventory";
+import type { Migration, QueueState, QueueStore } from "@plane/inventory";
 import { load, newQueue, parse, serialize, storageKey } from "@plane/inventory";
 
 export interface AppStore extends QueueStore {
@@ -36,7 +36,8 @@ function transact(
   key: string,
   userId: string,
   fn: (state: QueueState) => QueueState,
-  first: boolean
+  first: boolean,
+  migrations?: Record<number, Migration>
 ): Promise<QueueState> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite");
@@ -50,7 +51,7 @@ function transact(
         let state: QueueState;
         if (raw === undefined) state = newQueue(userId);
         else {
-          const loaded = first ? load(raw) : parse(raw);
+          const loaded = first ? load(raw) : parse(raw, migrations);
           if (!loaded.ok) throw new StoredQueueError(loaded.reason);
           state = loaded.state;
         }
@@ -219,6 +220,11 @@ export async function storedQueues(factory: IDBFactory = indexedDB): Promise<{ u
  * The queue for the worker: never counts as a restart (idbStore's first open clears "sending" flags,
  * which is safe in a page only because its replay runs under the device lock; the worker may open it
  * while a page is replaying).
+ *
+ * Rule for every future storage version (phase 6 audit): the worker reads only queues stored in ITS OWN
+ * version and never migrates one. A new worker takes over at once (skipWaiting) while an open page may
+ * still run the old bundle until its next hide; a queue the worker migrated would read as "newer" there,
+ * and every tap made in that page would be refused. Older queues wait for the page, which migrates them.
  */
 export async function idbStoreQuiet(
   userId: string,
@@ -227,8 +233,9 @@ export async function idbStoreQuiet(
 ): Promise<AppStore> {
   const db = await openDb(factory);
   const key = storageKey(userId, workspace);
+  const noMigrations: Record<number, Migration> = {};
   return {
-    update: (fn) => transact(db, key, userId, fn, false),
-    read: () => transact(db, key, userId, (s) => s, false),
+    update: (fn) => transact(db, key, userId, fn, false, noMigrations),
+    read: () => transact(db, key, userId, (s) => s, false, noMigrations),
   };
 }

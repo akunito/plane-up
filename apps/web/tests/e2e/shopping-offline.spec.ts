@@ -70,8 +70,17 @@ test.describe("shopping app offline @shopping-offline", () => {
     await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
     // The snapshot is written a moment after the list loads.
     await page.waitForTimeout(500);
+    // The shell must be in the worker's cache: if setOffline did not reach the worker's own fetch, its
+    // network fallback could pass this test while a phone in airplane mode gets nothing (phase 6 audit).
+    expect(
+      await page.evaluate(async () => {
+        const hit = await caches.match("/shopping/");
+        return hit ? (await hit.text()).includes('name="plane-shopping-shell"') : false;
+      })
+    ).toBe(true);
     await context.setOffline(true);
-    await page.reload();
+    const res = await page.reload();
+    expect(res?.fromServiceWorker()).toBe(true);
     await expect(page.locator(MARKER)).toHaveCount(1);
     await expect(page.locator("[data-phase]")).toHaveCount(0);
     await expect(page.getByText(/No connection: this is the list from/)).toBeVisible();

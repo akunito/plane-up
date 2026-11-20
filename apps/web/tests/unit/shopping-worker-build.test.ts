@@ -19,5 +19,7 @@ describe("precacheList (the build)", () => {
     const a = precacheList("/shopping/", ["a.js", "b.css"], "one");
     expect(precacheList("/shopping/", ["a.js", "b.css"], "two").version).not.toBe(a.version);
     expect(precacheList("/shopping/", ["b.css", "a.js", "a.js"], "one").version).toBe(a.version);
+    // The worker's own code changed, nothing else: a new cache name, never the active worker's.
+    expect(precacheList("/shopping/", ["a.js", "b.css"], "one", "worker v2").version).not.toBe(a.version);
   });
 });

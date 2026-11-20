@@ -53,6 +53,41 @@ export async function precacheProblem(url: string, res: Response, scope: string)
   return null;
 }
 
+export interface PrecacheDeps {
+  fetchImpl: (req: Request) => Promise<Response>;
+  caches: Pick<CacheStorage, "open" | "has" | "delete">;
+  cacheName: string;
+  assets: readonly string[];
+  scope: string;
+}
+
+/**
+ * Fetches and checks EVERY file before touching any cache, then stores them (phase 6 audit: writing as
+ * each answer arrived and deleting the cache on a refusal could delete the cache the active worker serves
+ * from, when a new worker had the same version name). A cache that existed before is never deleted; one
+ * this install created is removed if storing fails half way. Throws, failing the install, on any problem.
+ */
+export async function precacheInto(deps: PrecacheDeps): Promise<void> {
+  const fetched = await Promise.all(
+    deps.assets.map(async (url) => {
+      const res = await deps.fetchImpl(
+        new Request(url, { cache: "reload", credentials: "same-origin", redirect: "manual" })
+      );
+      return { url, res, problem: await precacheProblem(url, res, deps.scope) };
+    })
+  );
+  const problems = fetched.flatMap((f) => (f.problem ? [f.problem] : []));
+  if (problems.length > 0) throw new Error(`precache refused: ${problems.join("; ")}`);
+  const existed = await deps.caches.has(deps.cacheName);
+  const cache = await deps.caches.open(deps.cacheName);
+  try {
+    await Promise.all(fetched.map((f) => cache.put(f.url, f.res)));
+  } catch (error) {
+    if (!existed) await deps.caches.delete(deps.cacheName);
+    throw error;
+  }
+}
+
 export interface SendDeps {
   fetchImpl: typeof fetch;
   base: string;
@@ -83,22 +118,28 @@ export async function sendQueues(deps: SendDeps): Promise<SendOutcome> {
   let retry = false;
   for (const q of mine) {
     // Sequential: one replay at a time per device, and the lock is shared with every open tab.
-    // oxlint-disable-next-line no-await-in-loop
-    const store = await deps.openStore(q.userId, q.workspace);
-    // A sync means the network is back: the backoff is over (as when the app opens or goes online).
-    // oxlint-disable-next-line no-await-in-loop
-    await store.update(retryNow);
+    // One unreadable queue (corrupt, or stored by another app version) is skipped, never the rest
+    // (phase 6 audit); the page shows it on its own screen. Not a retry: it will not read better later.
     try {
       // oxlint-disable-next-line no-await-in-loop
-      await replay(store, { ...client, slug: q.workspace }, q.userId, deps.now, deps.lock);
+      const store = await deps.openStore(q.userId, q.workspace);
+      // A sync means the network is back: the backoff is over (as when the app opens or goes online).
+      // oxlint-disable-next-line no-await-in-loop
+      await store.update(retryNow);
+      try {
+        // oxlint-disable-next-line no-await-in-loop
+        await replay(store, { ...client, slug: q.workspace }, q.userId, deps.now, deps.lock);
+      } catch {
+        // replay marked the failure on the queue.
+      }
+      // oxlint-disable-next-line no-await-in-loop
+      const after = await store.read();
+      const n = waiting(after);
+      left += n;
+      if (n > 0 && (after.failure?.kind === "offline" || after.failure?.kind === "server")) retry = true;
     } catch {
-      // replay marked the failure on the queue.
+      // skipped, see above
     }
-    // oxlint-disable-next-line no-await-in-loop
-    const after = await store.read();
-    const n = waiting(after);
-    left += n;
-    if (n > 0 && (after.failure?.kind === "offline" || after.failure?.kind === "server")) retry = true;
   }
   return retry ? { kind: "retry" } : { kind: "sent", waiting: left };
 }

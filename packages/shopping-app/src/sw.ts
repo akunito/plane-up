@@ -9,7 +9,7 @@
 
 import { deviceLock } from "@plane/inventory";
 import { idbStoreQuiet, storedQueues } from "./store";
-import { CACHE_PREFIX, OLD_CACHE_PREFIXES, SYNC_TAG, precacheProblem, sendQueues } from "./worker-core";
+import { CACHE_PREFIX, OLD_CACHE_PREFIXES, SYNC_TAG, precacheInto, sendQueues } from "./worker-core";
 
 // The few worker types used here, declared locally: the "webworker" lib clashes with "dom" in the one
 // TypeScript program this package type-checks as.
@@ -46,21 +46,14 @@ function on<E extends Event>(type: string, listener: (event: E) => void): void {
 const SCOPE = "/shopping/";
 const CACHE = CACHE_PREFIX + __SW_VERSION__;
 
-async function precache(): Promise<void> {
-  const cache = await caches.open(CACHE);
-  const problems: string[] = [];
-  await Promise.all(
-    __SW_ASSETS__.map(async (url) => {
-      const res = await fetch(new Request(url, { cache: "reload", credentials: "same-origin", redirect: "manual" }));
-      const problem = await precacheProblem(url, res, SCOPE);
-      if (problem) problems.push(problem);
-      else await cache.put(url, res);
-    })
-  );
-  if (problems.length > 0) {
-    await caches.delete(CACHE);
-    throw new Error(`precache refused: ${problems.join("; ")}`);
-  }
+function precache(): Promise<void> {
+  return precacheInto({
+    fetchImpl: (req) => fetch(req),
+    caches,
+    cacheName: CACHE,
+    assets: __SW_ASSETS__,
+    scope: SCOPE,
+  });
 }
 
 on<WaitEvent>("install", (event) => {

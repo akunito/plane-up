@@ -4,7 +4,8 @@ import type { QueueState } from "@plane/inventory";
 import { createQueue, makeLock, refreshed, tap } from "@plane/inventory";
 import { memoryStore } from "../src/store";
 import type { AppStore } from "../src/store";
-import { expectedType, precacheProblem, sendQueues, SHELL_MARKER } from "../src/worker-core";
+import { StoredQueueError } from "../src/store";
+import { expectedType, precacheInto, precacheProblem, sendQueues, SHELL_MARKER } from "../src/worker-core";
 import { state } from "./fake-api";
 
 const SHELL = `<html><head><meta ${SHELL_MARKER} content="1"></head></html>`;
@@ -42,6 +43,98 @@ describe("precache refuses what M1 serves for a missing file", () => {
     expect(await precacheProblem("/shopping/x.bin", respond(200, "application/octet-stream"), "/shopping/")).toMatch(
       /no known/
     );
+  });
+});
+
+function fakeCaches(existing: string[], putFails = false) {
+  const names = new Set(existing);
+  const puts: string[] = [];
+  const deleted: string[] = [];
+  const caches = {
+    has: async (n: string) => names.has(n),
+    open: async (n: string) => {
+      names.add(n);
+      return {
+        put: async (url: string) => {
+          if (putFails && puts.length > 0) throw new Error("quota");
+          puts.push(url);
+        },
+      } as unknown as Cache;
+    },
+    delete: async (n: string) => {
+      deleted.push(n);
+      return names.delete(n);
+    },
+  };
+  return { caches, puts, deleted, names };
+}
+
+const fetchFrom = (answers: Record<string, () => Response>) => async (req: Request) => answers[req.url]!();
+
+describe("precacheInto (the install)", () => {
+  const SCOPE = "/shopping/";
+  const ASSETS = ["https://x/shopping/", "https://x/shopping/assets/a.js", "https://x/shopping/icon-512.png"];
+  const good: Record<string, () => Response> = {
+    "https://x/shopping/": () => respond(200, "text/html", SHELL),
+    "https://x/shopping/assets/a.js": () => respond(200, "text/javascript"),
+    "https://x/shopping/icon-512.png": () => respond(200, "image/png"),
+  };
+
+  it("checks every file before touching any cache: one wrong answer stores nothing and deletes nothing", async () => {
+    const f = fakeCaches(["plane-shopping-v1"]);
+    const answers = {
+      ...good,
+      "https://x/shopping/icon-512.png": () => respond(200, "text/html", "<html>main</html>"),
+    };
+    await expect(
+      precacheInto({
+        fetchImpl: fetchFrom(answers),
+        caches: f.caches,
+        cacheName: "plane-shopping-v1",
+        assets: ASSETS,
+        scope: SCOPE,
+      })
+    ).rejects.toThrow(/icon-512.png/);
+    expect(f.puts).toEqual([]);
+    expect(f.deleted).toEqual([]);
+    expect(f.names.has("plane-shopping-v1")).toBe(true);
+  });
+
+  it("stores every file when all are right", async () => {
+    const f = fakeCaches([]);
+    await precacheInto({
+      fetchImpl: fetchFrom(good),
+      caches: f.caches,
+      cacheName: "plane-shopping-v2",
+      assets: ASSETS,
+      scope: SCOPE,
+    });
+    expect(new Set(f.puts)).toEqual(new Set(ASSETS));
+  });
+
+  it("storing fails half way: a cache this install created is removed, one that existed is kept", async () => {
+    const fresh = fakeCaches([], true);
+    await expect(
+      precacheInto({
+        fetchImpl: fetchFrom(good),
+        caches: fresh.caches,
+        cacheName: "plane-shopping-v3",
+        assets: ASSETS,
+        scope: SCOPE,
+      })
+    ).rejects.toThrow(/quota/);
+    expect(fresh.deleted).toEqual(["plane-shopping-v3"]);
+    const live = fakeCaches(["plane-shopping-v3"], true);
+    await expect(
+      precacheInto({
+        fetchImpl: fetchFrom(good),
+        caches: live.caches,
+        cacheName: "plane-shopping-v3",
+        assets: ASSETS,
+        scope: SCOPE,
+      })
+    ).rejects.toThrow(/quota/);
+    expect(live.deleted).toEqual([]);
   });
 });
 
@@ -126,5 +219,17 @@ describe("sendQueues (background sync)", () => {
     stores.set(`${ANA}:home`, memoryStore(old));
     expect(await sendQueues(deps)).toEqual({ kind: "sent", waiting: 1 });
     expect(sent).toHaveLength(0);
+  });
+
+  it("one unreadable queue is skipped; the person's other queues are still sent", async () => {
+    const { deps, stores, sent } = setup({ status: 200, id: ANA });
+    stores.set(`${ANA}:work`, memoryStore(queueWithTap(ANA)));
+    const open = deps.openStore;
+    deps.openStore = async (userId, workspace) => {
+      if (workspace === "home") throw new StoredQueueError("newer");
+      return open(userId, workspace);
+    };
+    expect(await sendQueues(deps)).toEqual({ kind: "sent", waiting: 0 });
+    expect(sent.map((x) => x.url)).toEqual(["/api/workspaces/work/inventory/ops/"]);
   });
 });
