@@ -77,7 +77,7 @@ So a private list needs a **secret** project and no other workspace admin. The U
 | `units` | `quantity` (state); `min_quantity`, `restock_to` (data) | `max(quantity, 0) + on order < min_quantity` |
 
 - Every item, in any mode, keeps when it was last bought and by whom. That is the "bought N days ago" hint on pinned rows and the "bought while on order" mark below.
-- A state field belongs to one mode. Changing mode clears the state fields the new mode does not use. `min_quantity` and `restock_to` are the item's data, not state: a mode change keeps them, so leaving `units` and coming back restores the same thresholds, and the database rule `restock_to ≥ min_quantity` can never fire on a mode change (phase 1 audit). Changing **to** `units` carries the quantity typed by the user: it is a recount, never a leftover.
+- A state field belongs to one mode. Changing mode clears the state fields the new mode does not use. `min_quantity` and `restock_to` are the item's data, not state: a mode change keeps them, so leaving `units` and coming back restores the same thresholds, and the database rule `restock_to ≥ min_quantity` can never fire on a mode change (phase 1 audit). Changing **to** `units` carries the quantity typed by the user: it is a recount, never a leftover. If `min_quantity` is empty, the change sets it to 1, as for a new `units` item; otherwise the item could never reach the list.
 - Pinning an `on_demand` item clears `needed`. Unpinning gives `on_demand` with `needed = false`; the toast offers "needed".
 - "Buy" and "arrived" are mode-independent: they carry a quantity (1 if absent) and take effect according to the item's mode **when they are applied** — `pinned` records the purchase, `on_demand` clears `needed`, `level` becomes ok, `units` adds the quantity. A purchase therefore survives a mode change made in between. Any other operation that makes no sense for the current mode is rejected as `invalid_for_mode`.
 - `units`: `min_quantity ≥ 0`, and `restock_to` is empty or `≥ min_quantity`, both enforced in the database. **`quantity` is a signed integer and the server never clamps it**, because clamping at zero would make the result depend on the order in which two phones' changes arrive. A negative total is shown as 0 with a "recount" mark. A new `units` item gets a minimum of 1.
@@ -87,6 +87,9 @@ So a private list needs a **secret** project and no other workspace admin. The U
 
 ## Moving an item
 
+An import or any other writer that has no external id writes NULL, never an empty string: the database's uniqueness of `(project, external_source, external_id)` treats two empty strings as the same key.
+
+
 An item moved to another list keeps everything. Moved to another project, it takes its orders and history with it: the engine rewrites `project` and `workspace` on its orders and events in the same transaction, because both are copies with a cascade, and deleting the old project would otherwise take them (phase 1 audit). A bulk `update()` does not run the model's `save()`, which is what keeps `workspace` in step, so the move sets both explicitly.
 
 ## Orders
@@ -94,7 +97,7 @@ An item moved to another list keeps everything. Moved to another project, it tak
 - `InventoryOrder`: item, quantity, status, received quantity, who and when, source (web or api), free-text reference, optional expected date, and when and by whom the item was bought while the order was open. Several open orders per item are allowed.
 - Operations name the **order**. Its id is made on the device when it is marked ordered, so an arrival or a cancel tapped later without coverage can still name it. When an item has more than one open order, "Arrived" asks which.
 - **Order actions cannot be reverted.** "Mark ordered" is undone by cancelling the order; an arrival or a cancel tapped by mistake is corrected by hand.
-- **A purchase that lands on an item with an open order** is recorded on each open order at the moment it is applied (`bought_since_at`, `bought_since_by`). It cannot be derived from the item's last-bought time, which is the purchase's own time and can predate the order when it was made offline (S64).
+- **A purchase that lands on an item with an open order** is recorded on each open order at the moment it is applied (`bought_since_at`, `bought_since_by`). The first such purchase keeps the stamp; later ones do not overwrite it. Reverting the purchase that set a stamp clears it again, so the event records which orders it stamped. It cannot be derived from the item's last-bought time, which is the purchase's own time and can predate the order when it was made offline (S64).
 - **Such a purchase** (one person bought it in a store while the other ordered it) does not change the order's status or quantity. The row under "On the way" then says it was bought since, by whom, and offers to cancel the order. The people decide; the server does not.
 - Transitions: open → received, open → cancelled, cancelled → received (the parcel came anyway). Nothing leaves received: a second "arrived" or a cancel on a received order is rejected as `already_done`.
 - "Arrived" is one step: the order becomes received and the item gets a "buy" for the received quantity (the ordered quantity if none is given). It always applies.
