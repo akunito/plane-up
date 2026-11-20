@@ -75,6 +75,7 @@ export const RESTRICTED_URLS: string[] = [
   "licenses",
   "instances",
   "instance",
+  "shopping",
 ];
 
 export const ROLE = {

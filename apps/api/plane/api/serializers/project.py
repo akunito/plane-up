@@ -85,6 +85,7 @@ class ProjectCreateSerializer(BaseSerializer):
             "page_view",
             "intake_view",
             "guest_view_all_features",
+            "inventory_view",
             "archive_in",
             "close_in",
             "timezone",

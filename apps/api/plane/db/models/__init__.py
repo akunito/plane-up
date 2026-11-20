@@ -90,3 +90,15 @@ from .device import Device, DeviceSession
 from .sticky import Sticky
 
 from .description import Description, DescriptionVersion
+
+from .inventory import (
+    InventoryEvent,
+    InventoryItem,
+    InventoryLevel,
+    InventoryList,
+    InventoryMode,
+    InventoryOrder,
+    InventoryOrderStatus,
+    InventoryPreference,
+    InventorySource,
+)
