@@ -13,6 +13,7 @@ import { Breadcrumbs, Header } from "@plane/ui";
 import { CommonProjectBreadcrumbs } from "@/components/breadcrumbs/common";
 import { BreadcrumbLink } from "@/components/common/breadcrumb-link";
 import { inventoryLocale, inventoryT } from "@/components/inventory/i18n";
+import { shoppingHref } from "@/components/inventory/visibility";
 import { useProject } from "@/hooks/store/use-project";
 
 export const ProjectInventoryHeader = observer(function ProjectInventoryHeader() {
@@ -40,7 +41,7 @@ export const ProjectInventoryHeader = observer(function ProjectInventoryHeader()
       </Header.LeftItem>
       <Header.RightItem>
         {/* A plain anchor: /shopping/ is another app, so a full page load, never the router (S51). */}
-        <a href="/shopping/" className={getButtonStyling("secondary", "lg")}>
+        <a href={shoppingHref(workspaceSlug?.toString() ?? "")} className={getButtonStyling("secondary", "lg")}>
           {inventoryT(locale, "open_app")}
         </a>
       </Header.RightItem>

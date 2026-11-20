@@ -17,9 +17,7 @@ import type { Item } from "../online";
 import { failureMessage } from "../online";
 import { FIELD, modeKey } from "./dialogs";
 import { notifyInventoryChanged } from "../visibility";
-
-const text = (_field: string, value: unknown) =>
-  typeof value === "string" ? value : value == null ? "" : String(value);
+import { EditableField, str } from "../controls";
 
 const TEXT_FIELDS = ["purchase_url", "variant", "currency", "barcode"] as const;
 
@@ -54,13 +52,21 @@ export function ItemSheet(props: {
 
   if (!item) return null;
 
-  const save = async (data: Record<string, unknown>) => {
+  /** Resolves to the saved item, or null when nothing was saved (the field then shows the saved value). */
+  const save = async (data: Record<string, unknown>): Promise<Item | null> => {
     const out = await updateItem(opts, projectId, item.id, data);
-    if (out.kind === "ok") {
-      onSaved(out.body as Item);
-      notifyInventoryChanged();
-      setMessage(t("saved"));
-    } else setMessage(failureMessage(out as { kind: string; error?: string }, t));
+    if (out.kind !== "ok") {
+      setMessage(failureMessage(out as { kind: string; error?: string }, t));
+      return null;
+    }
+    onSaved(out.body as Item);
+    notifyInventoryChanged();
+    setMessage(t("saved"));
+    return out.body as Item;
+  };
+  const commit = (field: string, value: (draft: string) => unknown) => async (draft: string) => {
+    const saved = await save({ [field]: value(draft) });
+    return saved ? str(saved[field]) : null;
   };
 
   return (
@@ -88,39 +94,33 @@ export function ItemSheet(props: {
           {TEXT_FIELDS.map((field) => (
             <label key={field} className="flex flex-col gap-1 text-13 text-secondary">
               {t(`field_${field}` as InventoryKey)}
-              <input
+              <EditableField
                 className={FIELD}
-                defaultValue={text(field, item[field])}
+                value={str(item[field])}
                 maxLength={field === "currency" ? 3 : field === "barcode" ? 64 : 2048}
-                onBlur={(e) => {
-                  if (e.target.value.trim() !== text(field, item[field])) void save({ [field]: e.target.value.trim() });
-                }}
+                onCommit={commit(field, (d) => d.trim())}
               />
             </label>
           ))}
           <label className="flex flex-col gap-1 text-13 text-secondary">
             {t("field_last_price")}
-            <input
+            <EditableField
               className={FIELD}
               inputMode="decimal"
-              defaultValue={text("last_price", item.last_price)}
-              onBlur={(e) => {
-                const v = e.target.value.trim().replace(",", ".");
-                if (v === text("last_price", item.last_price)) return;
-                void save({ last_price: v === "" ? null : v });
-              }}
+              value={str(item.last_price)}
+              onCommit={commit("last_price", (d) => {
+                const v = d.trim().replace(",", ".");
+                return v === "" ? null : v;
+              })}
             />
           </label>
           <label className="flex flex-col gap-1 text-13 text-secondary">
             {t("field_expires_on")}
-            <input
+            <EditableField
               className={FIELD}
               type="date"
-              defaultValue={text("expires_on", item.expires_on)}
-              onBlur={(e) => {
-                if (e.target.value !== text("expires_on", item.expires_on))
-                  void save({ expires_on: e.target.value || null });
-              }}
+              value={str(item.expires_on)}
+              onCommit={commit("expires_on", (d) => d || null)}
             />
           </label>
         </div>

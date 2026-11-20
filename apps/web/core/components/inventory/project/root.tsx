@@ -31,7 +31,7 @@ import { clientOptions, failureMessage, sendNow } from "../online";
 import { AisleOrderDialog } from "./aisle-order";
 import { FIELD, ListDialog, MODES, PromptDialog, modeKey } from "./dialogs";
 import { ItemSheet } from "./item-sheet";
-import { StateControl } from "../controls";
+import { EditableField, StateControl, num, str } from "../controls";
 import { notifyInventoryChanged } from "../visibility";
 
 type Dialog =
@@ -74,14 +74,18 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
   const [dialog, setDialog] = useState<Dialog>(null);
   const [newName, setNewName] = useState("");
   const loadSeq = useRef(0);
+  const listsSeq = useRef(0);
 
   const loadLists = useCallback(async () => {
+    const seq = ++listsSeq.current;
     setLoadError(null);
     const [own, all, sugg] = await Promise.all([
       fetchProjectLists(opts, projectId),
       fetchLists(opts),
       fetchSuggestions(opts, ""),
     ]);
+    // An older load answering last must not replace a newer one (phase 5 audit).
+    if (seq !== listsSeq.current) return;
     if (own.kind !== "ok") {
       setLoadError(own.kind === "refused" && own.status === 403 ? t("no_access") : failureMessage(own, t));
       return;
@@ -129,24 +133,38 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
       // Moved to another list: it leaves this table.
       const listId = (item.list as { id: string } | undefined)?.id;
       if (listId && listId !== selected) return rows.filter((r) => r.id !== item.id);
-      return rows.map((r) => (r.id === item.id ? item : r));
+      // A late answer older than what is shown is dropped (phase 5 audit); data edits keep the revision,
+      // so an equal one is newer data.
+      return rows.map((r) => (r.id === item.id && item.rev >= r.rev ? item : r));
     });
   };
 
-  const op = async (item: Item, name: Parameters<typeof sendNow>[1], args: Record<string, unknown>) => {
+  /** Resolves to the item as the server now holds it (also after a stale refusal), or null. */
+  const op = async (
+    item: Item,
+    name: Parameters<typeof sendNow>[1],
+    args: Record<string, unknown>
+  ): Promise<Item | null> => {
     setMessage(null);
     const out = await sendNow(opts, name, item, args, t);
     replace(out.item);
     if (!out.ok) setMessage(out.message);
+    return out.item;
   };
 
-  const saveData = async (item: Item, data: Record<string, unknown>) => {
+  /** Resolves to the saved item, or null when nothing was saved (the field then shows the saved value). */
+  const saveData = async (item: Item, data: Record<string, unknown>): Promise<Item | null> => {
     setMessage(null);
     const out = await updateItem(opts, projectId, item.id, data);
-    if (out.kind === "ok") {
-      replace(out.body as Item);
-      notifyInventoryChanged();
-    } else setMessage(failureMessage(out, t));
+    if (out.kind !== "ok") {
+      setMessage(
+        out.kind === "conflict" ? t("exists", { name: String(data.name ?? item.name) }) : failureMessage(out, t)
+      );
+      return null;
+    }
+    replace(out.body as Item);
+    notifyInventoryChanged();
+    return out.body as Item;
   };
 
   const add = async () => {
@@ -267,11 +285,11 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
               ) : (
                 items.map((item) => (
                   <ItemRow
-                    key={`${item.id}:${item.rev}`}
+                    key={item.id}
                     item={item}
                     t={t}
-                    onOp={(name, args) => void op(item, name, args)}
-                    onData={(data) => void saveData(item, data)}
+                    onOp={(name, args) => op(item, name, args)}
+                    onData={(data) => saveData(item, data)}
                     onUnits={() => setDialog({ kind: "units", item })}
                     onDetails={() => setDialog({ kind: "sheet", itemId: item.id })}
                     onDelete={() => setDialog({ kind: "delete_item", item })}
@@ -320,13 +338,11 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
             dialog?.kind === "rename_list"
               ? await updateList(opts, projectId, dialog.list.id, data)
               : await createList(opts, projectId, data);
-          if (out.kind !== "ok") {
-            setMessage(failureMessage(out, t));
-            return;
-          }
+          if (out.kind !== "ok") return failureMessage(out, t);
           setDialog(null);
           await loadLists();
           setSelected(out.body.id);
+          return null;
         }}
       />
       <AlertModalCore
@@ -406,35 +422,27 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
   );
 }
 
-const str = (v: unknown) => (typeof v === "string" ? v : "");
-const num = (v: unknown) => (typeof v === "number" ? String(v) : "");
-
 function ItemRow(props: {
   item: Item;
   t: InventoryT;
-  onOp: (name: Parameters<typeof sendNow>[1], args: Record<string, unknown>) => void;
-  onData: (data: Record<string, unknown>) => void;
+  onOp: (name: Parameters<typeof sendNow>[1], args: Record<string, unknown>) => Promise<Item | null>;
+  onData: (data: Record<string, unknown>) => Promise<Item | null>;
   onUnits: () => void;
   onDetails: () => void;
   onDelete: () => void;
 }) {
   const { item, t, onOp, onData, onUnits, onDetails, onDelete } = props;
-  const blurText = (field: string) => (e: React.FocusEvent<HTMLInputElement>) => {
-    const v = e.target.value.trim();
-    if (field === "name" && !v) {
-      e.target.value = item.name;
-      return;
-    }
-    if (v !== str(item[field])) onData({ [field]: v });
+  const text = (field: string) => async (draft: string) => {
+    const v = draft.trim();
+    if (field === "name" && !v) return null;
+    const saved = await onData({ [field]: v });
+    return saved ? str(saved[field]) : null;
   };
-  const blurNumber = (field: "min_quantity" | "restock_to") => (e: React.FocusEvent<HTMLInputElement>) => {
-    const raw = e.target.value.trim();
-    if (raw === num(item[field])) return;
-    if (raw !== "" && !/^\d{1,6}$/.test(raw)) {
-      e.target.value = num(item[field]);
-      return;
-    }
-    onData({ [field]: raw === "" ? null : Number(raw) });
+  const number = (field: "min_quantity" | "restock_to") => async (draft: string) => {
+    const raw = draft.trim();
+    if (raw !== "" && !/^\d{1,6}$/.test(raw)) return null;
+    const saved = await onData({ [field]: raw === "" ? null : Number(raw) });
+    return saved ? num(saved[field]) : null;
   };
   const onOrder = typeof item.on_order === "number" ? item.on_order : 0;
   const toBuy = typeof item.to_buy === "number" ? item.to_buy : 0;
@@ -442,7 +450,7 @@ function ItemRow(props: {
   return (
     <tr data-testid="inventory-row" data-item={item.name}>
       <td className={CELL}>
-        <input className={INLINE} defaultValue={item.name} aria-label={t("field_name")} onBlur={blurText("name")} />
+        <EditableField className={INLINE} value={item.name} aria-label={t("field_name")} onCommit={text("name")} />
       </td>
       <td className={CELL}>
         <select
@@ -451,7 +459,7 @@ function ItemRow(props: {
           aria-label={`${item.name}: ${t("col_tracking")}`}
           onChange={(e) => {
             if (e.target.value === "units") onUnits();
-            else onOp("change_mode", { mode: e.target.value });
+            else void onOp("change_mode", { mode: e.target.value });
           }}
         >
           {MODES.map((m) => (
@@ -472,42 +480,42 @@ function ItemRow(props: {
       </td>
       <td className={CELL}>
         {item.mode === "units" ? (
-          <input
+          <EditableField
             className={`${INLINE} w-16`}
             inputMode="numeric"
-            defaultValue={num(item.min_quantity)}
+            value={num(item.min_quantity)}
             aria-label={`${item.name}: ${t("col_min")}`}
-            onBlur={blurNumber("min_quantity")}
+            onCommit={number("min_quantity")}
           />
         ) : null}
       </td>
       <td className={CELL}>
         {item.mode === "units" ? (
-          <input
+          <EditableField
             className={`${INLINE} w-16`}
             inputMode="numeric"
-            defaultValue={num(item.restock_to)}
+            value={num(item.restock_to)}
             aria-label={`${item.name}: ${t("col_restock")}`}
-            onBlur={blurNumber("restock_to")}
+            onCommit={number("restock_to")}
           />
         ) : null}
       </td>
       <td className={CELL}>
-        <input
+        <EditableField
           className={INLINE}
           list="inventory-categories"
-          defaultValue={str(item.category)}
+          value={str(item.category)}
           aria-label={`${item.name}: ${t("col_category")}`}
-          onBlur={blurText("category")}
+          onCommit={text("category")}
         />
       </td>
       <td className={CELL}>
-        <input
+        <EditableField
           className={INLINE}
           list="inventory-stores"
-          defaultValue={str(item.store)}
+          value={str(item.store)}
           aria-label={`${item.name}: ${t("col_store")}`}
-          onBlur={blurText("store")}
+          onCommit={text("store")}
         />
       </td>
       <td className={CELL}>
@@ -515,7 +523,7 @@ function ItemRow(props: {
           type="checkbox"
           checked={item.buy_online === true}
           aria-label={`${item.name}: ${t("col_online")}`}
-          onChange={(e) => onData({ buy_online: e.target.checked })}
+          onChange={(e) => void onData({ buy_online: e.target.checked })}
         />
       </td>
       <td className={`${CELL} whitespace-nowrap`}>

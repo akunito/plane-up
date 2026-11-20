@@ -33,6 +33,28 @@ const setNavigationMode = (page: Page, mode: "ACCORDION" | "TABBED") =>
 const setInventory = (page: Page, projectId: string, on: boolean) =>
   apiPatch(page, `/api/workspaces/qa-inv/projects/${projectId}/`, { inventory_view: on });
 
+/** Opens "New list" in a fresh one-member project (deleted afterwards) and says whether it warns. */
+async function firstListWarns(page: Page, network: 0 | 2): Promise<boolean> {
+  const created = await apiPost(page, "/api/workspaces/qa-inv/projects/", {
+    name: `QA e2e ${network}`,
+    identifier: `QE${network}${Date.now() % 10000}`,
+    network,
+  });
+  const pid = ((await created.json()) as { id: string }).id;
+  try {
+    await setInventory(page, pid, true);
+    await page.goto(`/qa-inv/projects/${pid}/inventory/`);
+    await page.getByTestId("project-inventory").getByRole("button", { name: "New list" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByLabel("Name")).toBeVisible();
+    const warns = (await dialog.getByText("This project is public").count()) > 0;
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    return warns;
+  } finally {
+    await apiDelete(page, `/api/workspaces/qa-inv/projects/${pid}/`);
+  }
+}
+
 test.describe("inventory in the main app @inventory-main", () => {
   test.skip(!INV, "the image under test has no inventory (seed-qa.sh decides from the image tag)");
   test.use({ storageState: authFile("qa-inv-ana") });
@@ -84,9 +106,13 @@ test.describe("inventory in the main app @inventory-main", () => {
   }, info) => {
     test.skip(isPhone(info.project.name), "the sidebar is a drawer on phones; the widget link is covered below");
     await home(page);
+    await expect(page.getByTestId("sidebar-shopping")).toHaveAttribute("href", "/shopping/?ws=qa-inv");
     await page.getByTestId("sidebar-shopping").click();
     await expect(page.locator(MARKER)).toHaveCount(1);
+    // The app read the workspace and dropped it from the address (a reload keeps its own choice).
     await expect(page).toHaveURL(/\/shopping\/$/);
+    await expect(page.locator("[data-phase]")).toHaveCount(0);
+    await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
     await home(page);
     await page.getByTestId("shopping-widget").getByRole("link", { name: "Open shopping app" }).click();
     await expect(page.locator(MARKER)).toHaveCount(1);
@@ -171,21 +197,22 @@ test.describe("inventory in the main app @inventory-main", () => {
     await expect(page.getByRole("dialog").getByText("History")).toBeVisible();
   });
 
-  test("the first list of a public project with one member warns (S21)", async ({ page }) => {
-    const created = await apiPost(page, "/api/workspaces/qa-inv/projects/", {
-      name: "QA e2e public",
-      identifier: `QE${Date.now() % 100000}`,
-      network: 2,
-    });
-    const pid = ((await created.json()) as { id: string }).id;
+  test("the first list of a public project with one member warns; a secret one does not (S21)", async ({ page }) => {
+    expect(await firstListWarns(page, 2)).toBe(true);
+    expect(await firstListWarns(page, 0)).toBe(false);
+  });
+
+  test("a guest sees neither the sidebar entry nor the widget", async ({ browser }, info) => {
+    const gus = await contextFor(browser, info, "qa-inv-gus");
     try {
-      await setInventory(page, pid, true);
-      await page.goto(`/qa-inv/projects/${pid}/inventory/`);
-      await page.getByTestId("project-inventory").getByRole("button", { name: "New list" }).click();
-      await expect(page.getByRole("dialog").getByRole("alert")).toContainText("This project is public");
-      await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+      await gus.page.goto("/qa-inv/");
+      await expect(gus.page.getByText("QA Inventory").first()).toBeVisible();
+      await expect(gus.page.getByTestId("shopping-widget")).toHaveCount(0);
+      await expect(gus.page.getByTestId("sidebar-shopping")).toHaveCount(0);
+      const res = await gus.page.request.get("/api/workspaces/qa-inv/home-preferences/");
+      expect(((await res.json()) as { key: string }[]).map((r) => r.key)).not.toContain("shopping_list");
     } finally {
-      await apiDelete(page, `/api/workspaces/qa-inv/projects/${pid}/`);
+      await gus.context.close();
     }
   });
 });

@@ -48,7 +48,8 @@ function ProjectInventoryPage({ params }: Route.ComponentProps) {
   return (
     <>
       <PageHead title={project?.name ? `${project.name} - ${t("page_title")}` : undefined} />
-      <ProjectInventoryRoot workspaceSlug={workspaceSlug} projectId={projectId} t={t} />
+      {/* Keyed: the router keeps the page mounted when only the project changes (phase 5 audit). */}
+      <ProjectInventoryRoot key={projectId} workspaceSlug={workspaceSlug} projectId={projectId} t={t} />
     </>
   );
 }

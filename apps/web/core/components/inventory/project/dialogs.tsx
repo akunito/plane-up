@@ -27,23 +27,27 @@ export function ListDialog(props: {
   /** The first list of a public project with one member: anyone in the workspace could join and see it. */
   warnPublic: boolean;
   onClose: () => void;
-  onSubmit: (data: { name: string; default_mode: string }) => Promise<void>;
+  /** Resolves to an error to show in the dialog, or null when done. */
+  onSubmit: (data: { name: string; default_mode: string }) => Promise<string | null>;
 }) {
   const { open, t, title, initial, warnPublic, onClose, onSubmit } = props;
   const [name, setName] = useState(initial.name);
   const [mode, setMode] = useState(initial.default_mode);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (open) {
       setName(initial.name);
       setMode(initial.default_mode);
+      setError(null);
     }
   }, [open, initial.name, initial.default_mode]);
   const submit = async () => {
     if (!name.trim() || busy) return;
     setBusy(true);
     try {
-      await onSubmit({ name: name.trim(), default_mode: mode });
+      // Shown here: the page's banner is behind the dialog (phase 5 audit).
+      setError(await onSubmit({ name: name.trim(), default_mode: mode }));
     } finally {
       setBusy(false);
     }
@@ -72,6 +76,11 @@ export function ListDialog(props: {
             ))}
           </select>
         </label>
+        {error && (
+          <p role="status" className="text-13 text-danger-primary">
+            {error}
+          </p>
+        )}
         {warnPublic && (
           <p role="alert" className="rounded-md bg-warning-subtle px-3 py-2 text-13 text-warning-primary">
             {t("public_warning")}

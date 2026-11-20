@@ -25,6 +25,7 @@ vi.mock("@/hooks/store/use-project", () => ({
   }),
 }));
 
+import { EditableField } from "@/components/inventory/controls";
 import { ShoppingListWidget } from "@/components/inventory/home-widget";
 import { InventorySidebarEntry } from "@/components/inventory/sidebar-entry";
 
@@ -81,7 +82,8 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("who sees the widget and the sidebar entry", () => {
-  it("nobody without a member role in a project with inventory on, and no request is made", () => {
+  // The widget itself is listed by the API only for such a viewer (contract test); the sidebar decides here.
+  it("the sidebar entry: nobody without a member role in a project with inventory on, and no request", () => {
     const cases: (typeof state.projects)[] = [
       {},
       { p1: { inventory_view: false, member_role: 20 } },
@@ -89,23 +91,18 @@ describe("who sees the widget and the sidebar entry", () => {
     ];
     for (const projects of cases) {
       state.projects = projects;
-      const { container, unmount } = render(
-        <>
-          <ShoppingListWidget workspaceSlug="home" />
-          <InventorySidebarEntry />
-        </>
-      );
+      const { container, unmount } = render(<InventorySidebarEntry />);
       expect(container.innerHTML).toBe("");
       unmount();
     }
     expect(calls).toEqual([]);
   });
 
-  it("the sidebar entry is a plain anchor to /shopping/ with the to-buy count", async () => {
+  it("the sidebar entry is a plain anchor to /shopping/ naming the workspace, with the to-buy count", async () => {
     render(<InventorySidebarEntry />);
     const link = screen.getByTestId("sidebar-shopping");
     expect(link.tagName).toBe("A");
-    expect(link.getAttribute("href")).toBe("/shopping/");
+    expect(link.getAttribute("href")).toBe("/shopping/?ws=home");
     await waitFor(() => expect(screen.getByTestId("sidebar-shopping-count").textContent).toBe("2"));
   });
 });
@@ -165,5 +162,82 @@ describe("the Home widget", () => {
     await screen.findByText("Bo changed it first; the row now shows their change.");
     const op = calls.find((c) => c.url.endsWith("/inventory/ops/"))!.body.ops[0];
     expect([op.op, op.args, op.base_rev]).toEqual(["set_needed", { needed: true }, 3]);
+  });
+
+  it("a double tick buys once: the row is hidden while its answer is pending (phase 5 audit)", async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const answer = opsAnswer;
+    opsAnswer = (body) => answer(body);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        const body = typeof init.body === "string" ? JSON.parse(init.body) : undefined;
+        calls.push({ url, method: init.method ?? "GET", body });
+        if (url.endsWith("/inventory/shopping-list/"))
+          return json(200, { items: listItems, count: listItems.length, on_the_way: [], generated_at: "" });
+        if (url.endsWith("/inventory/ops/")) {
+          await gate;
+          return answer(body);
+        }
+        return json(404, {});
+      })
+    );
+    render(<ShoppingListWidget workspaceSlug="home" />);
+    const box = await screen.findByLabelText("Wipes: bought");
+    fireEvent.click(box);
+    expect(screen.queryByLabelText("Wipes: bought")).toBeNull();
+    fireEvent.click(box);
+    release?.();
+    await screen.findByText("Wipes: bought.");
+    expect(calls.filter((c) => c.url.endsWith("/inventory/ops/"))).toHaveLength(1);
+  });
+
+  it("capture says what each action did", async () => {
+    listItems = [
+      item("a", "Milk", { needed: true }),
+      item("d", "Detergent", { mode: "level", needed: false, level: "low" }),
+      item("w", "Wipes", { mode: "units", quantity: 1, min_quantity: 2 }),
+    ];
+    opsAnswer = (body) =>
+      json(200, {
+        results: body.ops.map((op: any) => ({
+          client_op_id: op.client_op_id,
+          result: "applied",
+          rev: 4,
+          item: op.target === "w" ? item("w", "Wipes", { mode: "units", quantity: 2, rev: 4 }) : undefined,
+        })),
+      });
+    render(<ShoppingListWidget workspaceSlug="home" />);
+    fireEvent.change(screen.getByLabelText("Add or search…"), { target: { value: "e" } });
+    fireEvent.click(await screen.findByLabelText("Milk: Needed"));
+    await screen.findByText("Milk: off the shopping list.");
+    fireEvent.click(screen.getByRole("button", { name: "Out" }));
+    await screen.findByText("Detergent: Out.");
+    fireEvent.click(screen.getByLabelText("Wipes: +1"));
+    await screen.findByText("Wipes: 2 at home.");
+  });
+});
+
+describe("EditableField", () => {
+  it("shows the server's value after a save, and the saved one again after a failure", async () => {
+    const results: (string | null)[] = ["a b", null];
+    const commit = vi.fn(async () => results.shift() ?? null);
+    render(<EditableField aria-label="Name" value="old" onCommit={commit} />);
+    const input = screen.getByLabelText("Name") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "a   b" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(input.value).toBe("a b"));
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "rejected" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(input.value).toBe("old"));
+    expect(commit).toHaveBeenNthCalledWith(1, "a   b");
+    fireEvent.focus(input);
+    fireEvent.blur(input);
+    expect(commit).toHaveBeenCalledTimes(2);
   });
 });

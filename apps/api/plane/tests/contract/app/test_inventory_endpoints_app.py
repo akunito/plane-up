@@ -487,5 +487,16 @@ def test_renaming_a_category_reaches_every_editable_item_and_only_the_renamers_a
     assert alice.get(ws(workspace.slug, "preferences/")).json()["category_order"] == ["Bakery", "Dairy"]
     assert olga.get(ws(workspace.slug, "preferences/")).json()["category_order"] == ["Lácteos"]
 
+    # Inner spaces too: the app shows "Frozen  food" and "frozen food" as one group, so both are renamed.
+    a = _item(groceries, "Peas", "pinned", category="Frozen  food")
+    b = _item(groceries, "Ice", "pinned", category="frozen food")
+    response = alice.post(
+        ws(workspace.slug, "categories/rename/"), {"from": "Frozen food", "to": "Freezer"}, format="json"
+    )
+    assert response.json() == {"renamed": 2}
+    a.refresh_from_db()
+    b.refresh_from_db()
+    assert (a.category, b.category) == ("Freezer", "Freezer")
+
     for body in ({"from": "", "to": "x"}, {"from": "x", "to": "  "}, {"from": "x"}, {"from": 1, "to": "y"}):
         assert alice.post(ws(workspace.slug, "categories/rename/"), body, format="json").status_code == 400, body

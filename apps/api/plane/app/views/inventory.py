@@ -238,7 +238,7 @@ class InventorySuggestionsEndpoint(InventoryBaseView):
 
 class InventoryCategoryRenameEndpoint(InventoryBaseView):
     """Renames a category on every item the requester may edit (all their inventory projects in this
-    workspace), matching without regard to case or surrounding spaces, and in their own aisle order.
+    workspace), matching without regard to case or spacing, and in their own aisle order.
     Other people's aisle orders are theirs (brief: the aisle order is per user). A data edit: no revision."""
 
     def post(self, request, slug):
@@ -250,17 +250,22 @@ class InventoryCategoryRenameEndpoint(InventoryBaseView):
             return _bad("from")
         if not isinstance(target, str) or not target.strip() or len(target) > 255:
             return _bad("to")
-        source, target = source.strip(), target.strip()
-        renamed = (
-            visible_items(request.user, workspace.pk)
-            .filter(category__iexact=source)
-            .update(category=target, updated_at=timezone.now())
-        )
+        source, target = " ".join(source.split()), " ".join(target.split())
+        key = source.lower()
+        items = visible_items(request.user, workspace.pk)
+        # Matched the way the app groups categories (case and every run of spaces aside, phase 5 audit), so
+        # every spelling shown as one group is renamed; a database comparison would miss inner spaces.
+        spellings = [
+            c
+            for c in items.exclude(category="").order_by("category").values_list("category", flat=True).distinct()
+            if " ".join(c.split()).lower() == key
+        ]
+        renamed = items.filter(category__in=spellings).update(category=target, updated_at=timezone.now())
         pref = InventoryPreference.objects.filter(workspace=workspace, user=request.user).first()
         if pref is not None and pref.category_order:
             order, seen = [], set()
             for entry in pref.category_order:
-                value = target if entry.strip().lower() == source.lower() else entry
+                value = target if " ".join(entry.split()).lower() == key else entry
                 if value.lower() not in seen:
                     seen.add(value.lower())
                     order.append(value)

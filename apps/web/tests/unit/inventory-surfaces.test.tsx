@@ -29,7 +29,9 @@ vi.mock("@/hooks/store/use-app-theme", () => ({
     toggleSidebar: vi.fn(),
   }),
 }));
-vi.mock("@/hooks/store/use-project", () => ({ useProject: () => ({ getPartialProjectById: () => state.project }) }));
+// The project role is the viewer's role in the project, as the lite list carries it.
+const projectNow = () => (state.project ? { ...state.project, member_role: state.role } : undefined);
+vi.mock("@/hooks/store/use-project", () => ({ useProject: () => ({ getPartialProjectById: projectNow }) }));
 const allow = (access: number[]) => access.includes(state.role);
 vi.mock("@/hooks/store/user", () => ({ useUserPermissions: () => ({ allowPermissions: allow }) }));
 vi.mock("@/hooks/store/use-issue-detail", () => ({
@@ -53,7 +55,7 @@ const hookItems = () =>
     useNavigationItems({
       workspaceSlug: "home",
       projectId: "p1",
-      project: state.project as never,
+      project: projectNow() as never,
       allowPermissions: (access) => allow(access as number[]),
     })
   ).result.current;

@@ -105,6 +105,9 @@ const en = {
   widget_no_match: "No matching items.",
   widget_bought: "{name}: bought.",
   widget_added: "{name}: on the shopping list.",
+  widget_removed: "{name}: off the shopping list.",
+  widget_level: "{name}: {level}.",
+  widget_quantity: "{name}: {n} at home.",
   widget_created: "{name}: created and on the shopping list.",
   tick_label: "{name}: bought",
 };
@@ -213,6 +216,9 @@ const es: Dictionary = {
   widget_no_match: "Ningún artículo coincide.",
   widget_bought: "{name}: comprado.",
   widget_added: "{name}: en la lista de la compra.",
+  widget_removed: "{name}: fuera de la lista de la compra.",
+  widget_level: "{name}: {level}.",
+  widget_quantity: "{name}: {n} en casa.",
   widget_created: "{name}: creado y en la lista de la compra.",
   tick_label: "{name}: comprado",
 };
@@ -318,6 +324,9 @@ const pl: Dictionary = {
   widget_no_match: "Brak pasujących produktów.",
   widget_bought: "{name}: kupione.",
   widget_added: "{name}: na liście zakupów.",
+  widget_removed: "{name}: usunięto z listy zakupów.",
+  widget_level: "{name}: {level}.",
+  widget_quantity: "{name}: w domu {n}.",
   widget_created: "{name}: utworzone i na liście zakupów.",
   tick_label: "{name}: kupione",
 };
@@ -358,6 +367,7 @@ export const INVENTORY_NAV_LABELS: Readonly<Record<string, InventoryKey>> = {
 
 /** The label of a navigation entry: the fork's own for inventory, Plane's `t` for the rest. */
 export function navLabel(key: string, i18nKey: string, t: (key: string) => string, planeLocale: string): string {
-  const own = INVENTORY_NAV_LABELS[key];
+  // Own keys only: a plain object would answer "constructor" from its prototype (phase 5 audit).
+  const own = Object.hasOwn(INVENTORY_NAV_LABELS, key) ? INVENTORY_NAV_LABELS[key] : undefined;
   return own ? inventoryT(inventoryLocale(planeLocale), own) : t(i18nKey);
 }

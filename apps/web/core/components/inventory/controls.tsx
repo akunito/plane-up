@@ -8,6 +8,8 @@
 // needed (occasional), the three levels, − and + with the count (units; the table also lets you type a
 // recount), and the pinned hint.
 
+import type { InputHTMLAttributes } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { OpName } from "@plane/inventory";
 import type { InventoryT } from "./i18n";
 import type { Item } from "./online";
@@ -16,12 +18,64 @@ const PILL = "rounded-md border px-2 py-0.5 text-13";
 const ON = "border-accent-strong bg-accent-subtle text-accent-primary";
 const OFF = "border-subtle text-secondary hover:bg-layer-1";
 
-const num = (v: unknown) => (typeof v === "number" ? String(v) : "");
+export const num = (v: unknown) => (typeof v === "number" ? String(v) : "");
+export const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
+
+/**
+ * An inline field that shows what the server holds (phase 5 audit: uncontrolled inputs kept values that
+ * were never saved). The draft follows `value` while the field is not being edited; on leaving it the
+ * draft is committed, and the field then shows what the commit returns (the server's value, e.g. a name
+ * with its spaces collapsed) or, when the commit fails or is refused, the saved value again.
+ */
+export function EditableField(
+  props: Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "defaultValue" | "onChange" | "onBlur"> & {
+    value: string;
+    /** Resolves to the value now saved, or null when nothing was saved. Not called when unchanged. */
+    onCommit: (draft: string) => Promise<string | null>;
+  }
+) {
+  const { value, onCommit, ...rest } = props;
+  const [draft, setDraft] = useState(value);
+  const editing = useRef(false);
+  const latest = useRef(value);
+  latest.current = value;
+  useEffect(() => {
+    if (!editing.current) setDraft(value);
+  }, [value]);
+  return (
+    <input
+      {...rest}
+      value={draft}
+      onFocus={() => {
+        editing.current = true;
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") {
+          setDraft(latest.current);
+          e.currentTarget.blur();
+        }
+      }}
+      onBlur={() => {
+        editing.current = false;
+        if (draft === latest.current) return;
+        const sent = draft;
+        void onCommit(sent).then((saved) => {
+          // A newer edit started meanwhile: leave it alone.
+          if (!editing.current) setDraft(saved ?? latest.current);
+          return undefined;
+        });
+      }}
+    />
+  );
+}
 
 export function StateControl(props: {
   item: Item;
   t: InventoryT;
-  onOp: (name: OpName, args: Record<string, unknown>) => void;
+  /** Resolves to the item as the server answered (null when nothing came back). */
+  onOp: (name: OpName, args: Record<string, unknown>) => Promise<Item | null>;
   /** The table types a recount into the count; the widget only steps. */
   recount?: boolean;
 }) {
@@ -34,7 +88,7 @@ export function StateControl(props: {
         aria-pressed={item.needed}
         aria-label={`${item.name}: ${t("needed")}`}
         className={`${PILL} ${item.needed ? ON : OFF}`}
-        onClick={() => onOp("set_needed", { needed: !item.needed })}
+        onClick={() => void onOp("set_needed", { needed: !item.needed })}
       >
         {t("needed")}
       </button>
@@ -48,7 +102,7 @@ export function StateControl(props: {
             type="button"
             aria-pressed={item.level === level}
             className={`${PILL} ${item.level === level ? ON : OFF}`}
-            onClick={() => item.level !== level && onOp("set_level", { level })}
+            onClick={() => item.level !== level && void onOp("set_level", { level })}
           >
             {t(`level_${level}`)}
           </button>
@@ -61,24 +115,20 @@ export function StateControl(props: {
         type="button"
         className={`${PILL} ${OFF}`}
         aria-label={`${item.name}: −1`}
-        onClick={() => onOp("adjust", { delta: -1 })}
+        onClick={() => void onOp("adjust", { delta: -1 })}
       >
         −
       </button>
       {recount ? (
-        <input
+        <EditableField
           className="w-14 rounded-sm border border-subtle bg-transparent px-1.5 py-0.5 text-center text-13 text-primary outline-none focus:border-accent-strong"
           inputMode="numeric"
-          defaultValue={num(item.quantity)}
+          value={num(item.quantity)}
           aria-label={`${item.name}: ${t("col_state")}`}
-          onBlur={(e) => {
-            const raw = e.target.value.trim();
-            if (raw === num(item.quantity)) return;
-            if (!/^-?\d{1,6}$/.test(raw)) {
-              e.target.value = num(item.quantity);
-              return;
-            }
-            onOp("recount", { quantity: Number(raw) });
+          onCommit={async (raw) => {
+            if (!/^-?\d{1,6}$/.test(raw.trim())) return null;
+            const fresh = await onOp("recount", { quantity: Number(raw.trim()) });
+            return fresh ? num(fresh.quantity) : null;
           }}
         />
       ) : (
@@ -88,7 +138,7 @@ export function StateControl(props: {
         type="button"
         className={`${PILL} ${OFF}`}
         aria-label={`${item.name}: +1`}
-        onClick={() => onOp("adjust", { delta: 1 })}
+        onClick={() => void onOp("adjust", { delta: 1 })}
       >
         +
       </button>

@@ -1,6 +1,9 @@
 // Operations from the main app's surfaces (project page, Home widget): online only, no queue (plan, phase 5).
-// Each request gets a fresh queue_id, so the server's same-queue exemption never covers it and a change
-// made from a view that is not refreshed is refused as `stale` (S67). Nothing is kept when it fails.
+// Each request gets a fresh queue_id, so the server's same-queue exemption never covers it: a statement
+// (set_needed, set_level, pin, change_mode, recount: compared on base_rev) made from a view that is not
+// refreshed is refused as `stale` (S67). Purchases and ± (buy, adjust) are things that happened and are
+// always applied, by design (brief, behaviour 1): a tick from an old view still counts. Nothing is kept
+// when a request fails.
 
 import type { ClientOptions, ItemState, OpName, OpResult } from "@plane/inventory";
 import { buildOp, newUuid, sendOps } from "@plane/inventory";

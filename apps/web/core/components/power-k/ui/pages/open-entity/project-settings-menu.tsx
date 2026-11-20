@@ -8,6 +8,7 @@ import { observer } from "mobx-react";
 // plane imports
 import { EUserPermissionsLevel, PROJECT_SETTINGS } from "@plane/constants";
 import { useTranslation } from "@plane/i18n";
+import { navLabel } from "@/components/inventory/i18n";
 // components
 import type { TPowerKContext } from "@/components/power-k/core/types";
 import { PowerKSettingsMenu } from "@/components/power-k/menus/settings";
@@ -23,7 +24,7 @@ type Props = {
 export const PowerKOpenProjectSettingsMenu = observer(function PowerKOpenProjectSettingsMenu(props: Props) {
   const { context, handleSelect } = props;
   // plane hooks
-  const { t } = useTranslation();
+  const { t, currentLocale } = useTranslation();
   // store hooks
   const { allowPermissions } = useUserPermissions();
   // derived values
@@ -40,7 +41,7 @@ export const PowerKOpenProjectSettingsMenu = observer(function PowerKOpenProject
   );
   const settingsListWithIcons = settingsList.map((setting) => ({
     ...setting,
-    label: t(setting.i18n_label),
+    label: navLabel(setting.key, setting.i18n_label, t, currentLocale),
     icon: PROJECT_SETTINGS_ICONS[setting.key],
   }));
 

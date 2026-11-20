@@ -140,7 +140,9 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
         href: `/${workspaceSlug}/projects/${projectId}/inventory`,
         icon: Package,
         access: [EUserPermissions.ADMIN, EUserPermissions.MEMBER],
-        shouldRender: project?.inventory_view ?? false,
+        // The project role itself, as the server checks it: allowPermissions lifts a workspace admin to
+        // project admin, so one with a guest role in the project would get a page that refuses them.
+        shouldRender: !!project?.inventory_view && typeof project.member_role === "number" && project.member_role >= 15,
         sortOrder: 7,
       },
     ],

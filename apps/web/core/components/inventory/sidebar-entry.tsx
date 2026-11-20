@@ -13,7 +13,7 @@ import { ShoppingCart } from "lucide-react";
 import { useTranslation } from "@plane/i18n";
 import { SidebarNavItem } from "@/components/sidebar/sidebar-navigation";
 import { inventoryLocale, inventoryT } from "./i18n";
-import { useInventoryVisible, useShoppingCount } from "./visibility";
+import { shoppingHref, useInventoryVisible, useShoppingCount } from "./visibility";
 
 export const InventorySidebarEntry = observer(function InventorySidebarEntry() {
   const { workspaceSlug } = useParams();
@@ -24,7 +24,7 @@ export const InventorySidebarEntry = observer(function InventorySidebarEntry() {
   if (!visible) return null;
   const label = inventoryT(inventoryLocale(currentLocale), "nav_shopping");
   return (
-    <a href="/shopping/" data-testid="sidebar-shopping">
+    <a href={shoppingHref(slug)} data-testid="sidebar-shopping">
       <SidebarNavItem>
         <div className="flex items-center gap-1.5 py-[1px]">
           <ShoppingCart className="size-4 flex-shrink-0" />

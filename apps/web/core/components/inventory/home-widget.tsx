@@ -18,15 +18,15 @@ import { StateControl } from "./controls";
 import { makeInventoryT } from "./i18n";
 import type { Item } from "./online";
 import { clientOptions, failureMessage, sendNow } from "./online";
-import { INVENTORY_CHANGED, notifyInventoryChanged, useInventoryVisible } from "./visibility";
+import { INVENTORY_CHANGED, notifyInventoryChanged, shoppingHref } from "./visibility";
 
 /** Rows shown before "N more in the shopping app". */
 const MAX_ROWS = 12;
 const norm = (s: unknown) => (typeof s === "string" ? s.split(/\s+/).filter(Boolean).join(" ").toLowerCase() : "");
 
+// No client-side visibility check: the API lists this widget only for a viewer who can see inventory, and
+// a second check from the store could disagree with it (stale store) and leave an empty slot on Home.
 export const ShoppingListWidget = observer(function ShoppingListWidget({ workspaceSlug }: THomeWidgetProps) {
-  const visible = useInventoryVisible();
-  if (!visible) return null;
   return <Widget workspaceSlug={workspaceSlug} />;
 });
 
@@ -42,9 +42,15 @@ function Widget({ workspaceSlug }: THomeWidgetProps) {
   const [lists, setLists] = useState<Lists | null>(null);
   const [listId, setListId] = useState("");
   const searchSeq = useRef(0);
+  const loadSeq = useRef(0);
+  // Rows ticked and not yet answered: hidden, and a second tick is ignored (a double tick bought twice).
+  const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     const out = await fetchShoppingList(opts);
+    // Focus and a change often fire together: an older answer landing last must not bring back a row.
+    if (seq !== loadSeq.current) return;
     if (out.kind !== "ok") {
       setMessage(failureMessage(out, t));
       setRows((r) => r ?? []);
@@ -93,12 +99,35 @@ function Widget({ workspaceSlug }: THomeWidgetProps) {
     return () => clearTimeout(timer);
   }, [query, search]);
 
-  const act = async (item: Item, name: OpName, args: Record<string, unknown>, done: string) => {
+  /** What a successful action did, in words (phase 5 audit: every action used to say "on the list"). */
+  const done = (item: Item, name: OpName, args: Record<string, unknown>, fresh: Item | null): string => {
+    if (name === "buy") return t("widget_bought", { name: item.name });
+    if (name === "set_needed") return t(args.needed ? "widget_added" : "widget_removed", { name: item.name });
+    if (name === "set_level")
+      return t("widget_level", { name: item.name, level: t(`level_${String(args.level)}` as never) });
+    return t("widget_quantity", { name: item.name, n: Math.max(fresh?.quantity ?? 0, 0) });
+  };
+
+  const act = async (item: Item, name: OpName, args: Record<string, unknown>): Promise<Item | null> => {
     setMessage(null);
     const out = await sendNow(opts, name, item, args, t);
-    setMessage(out.ok ? done : out.message);
+    setMessage(out.ok ? done(item, name, args, out.item) : out.message);
     if (out.item) setFound((f) => f?.map((i) => (i.id === out.item!.id ? out.item! : i)) ?? f);
     // sendNow told the counter; the list reloads through the same event.
+    return out.item;
+  };
+
+  const tick = async (item: Item, quantity: number) => {
+    if (pending.has(item.id)) return;
+    setPending((p) => new Set(p).add(item.id));
+    const out = await act(item, "buy", item.mode === "units" ? { quantity } : {});
+    // Bought: off the list now, unless pinned (always on it); the reload confirms either way.
+    if (out && item.mode !== "pinned") setRows((r) => r?.filter((x) => x.id !== item.id) ?? r);
+    setPending((p) => {
+      const next = new Set(p);
+      next.delete(item.id);
+      return next;
+    });
   };
 
   const create = async () => {
@@ -119,10 +148,10 @@ function Widget({ workspaceSlug }: THomeWidgetProps) {
   const sorted = useMemo(
     () =>
       // oxlint-disable-next-line unicorn/no-array-sort -- a copy; the web lib is es2022 (no toSorted)
-      [...(rows ?? [])].sort(
-        (a, b) => norm(a.category).localeCompare(norm(b.category)) || norm(a.name).localeCompare(norm(b.name))
-      ),
-    [rows]
+      (rows ?? [])
+        .filter((r) => !pending.has(r.id))
+        .sort((a, b) => norm(a.category).localeCompare(norm(b.category)) || norm(a.name).localeCompare(norm(b.name))),
+    [rows, pending]
   );
   const exact = found?.some((i) => norm(i.name) === norm(query));
 
@@ -137,7 +166,7 @@ function Widget({ workspaceSlug }: THomeWidgetProps) {
             </span>
           )}
         </h3>
-        <a href="/shopping/" className="text-13 text-accent-primary hover:underline">
+        <a href={shoppingHref(workspaceSlug)} className="text-13 text-accent-primary hover:underline">
           {t("open_app")}
         </a>
       </div>
@@ -165,11 +194,7 @@ function Widget({ workspaceSlug }: THomeWidgetProps) {
                 {item.name}
                 <span className="ml-2 text-11 text-tertiary">{(item.list as { name?: string } | undefined)?.name}</span>
               </span>
-              <StateControl
-                item={item}
-                t={t}
-                onOp={(name, args) => void act(item, name, args, t("widget_added", { name: item.name }))}
-              />
+              <StateControl item={item} t={t} onOp={(name, args) => act(item, name, args)} />
             </li>
           ))}
           {query.trim() && !exact && lists && lists.lists.length > 0 && (
@@ -212,7 +237,7 @@ function Widget({ workspaceSlug }: THomeWidgetProps) {
                 {item.buy_online === true ? (
                   // Bought online: ordered from the app, not ticked (brief).
                   <a
-                    href={`/shopping/#/item/${item.id}`}
+                    href={shoppingHref(workspaceSlug, `#/item/${item.id}`)}
                     className="text-13 text-accent-primary"
                     aria-label={item.name}
                   >
@@ -224,12 +249,7 @@ function Widget({ workspaceSlug }: THomeWidgetProps) {
                     aria-label={t("tick_label", { name: item.name })}
                     onChange={(e) => {
                       e.target.checked = false;
-                      void act(
-                        item,
-                        "buy",
-                        item.mode === "units" ? { quantity: toBuy } : {},
-                        t("widget_bought", { name: item.name })
-                      );
+                      void tick(item, toBuy);
                     }}
                   />
                 )}
@@ -244,7 +264,7 @@ function Widget({ workspaceSlug }: THomeWidgetProps) {
         </ul>
       )}
       {found === null && sorted.length > MAX_ROWS && (
-        <a href="/shopping/" className="text-13 text-tertiary hover:underline">
+        <a href={shoppingHref(workspaceSlug)} className="text-13 text-tertiary hover:underline">
           {t("widget_more", { n: sorted.length - MAX_ROWS })}
         </a>
       )}
