@@ -38,7 +38,10 @@ class InstanceEndpoint(BaseAPIView):
             return [InstanceReadThrottle()]
         return super().get_throttles()
 
-    @cache_response(60 * 60 * 2, user=False)
+    # path fixed: keyed on the full path, any ?x=<random> was a miss (three queries and a new two-hour Redis key
+    # each, never invalidated, as every invalidation deletes only "/api/instances/") — APLANE-70 audit, which
+    # raised this endpoint's budget tenfold. The answer reads no query parameter.
+    @cache_response(60 * 60 * 2, path="/api/instances/", user=False)
     @method_decorator(cache_control(private=True, max_age=12))
     def get(self, request):
         instance = Instance.objects.first()
