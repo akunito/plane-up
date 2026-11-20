@@ -61,7 +61,7 @@ export const en = {
   unpin_label: "{item}: unpin",
   needed: "Needed",
   needed_label: "{item}: needed",
-  create_into: "Create “{name}” and add it to the shopping",
+  create_into: "Create “{name}” and add it to the shopping list",
   in_list: "in list",
   created_toast: "{item}: added to the shopping list.",
   exists: "“{name}” already exists in that list.",
