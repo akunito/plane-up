@@ -206,8 +206,14 @@ const M = [
   [
     "load keeps the backoff",
     "src/storage.ts",
+    "  return out.ok ? { ok: true, state: onRestart(out.state) } : out;",
+    "  return out.ok ? { ok: true, state: { ...out.state, sending: false } } : out;",
+  ],
+  [
+    "parse clears a live replay's sending flag",
+    "src/storage.ts",
+    "  return { ok: true, state: state as QueueState };",
     "  return { ok: true, state: onRestart(state as QueueState) };",
-    "  return { ok: true, state: { ...(state as QueueState), sending: false } };",
   ],
 ];
 

@@ -1,0 +1,150 @@
+// Quick capture: search, one action per mode, pin toggle, create into a list (mockup Apuntar). Creating
+// needs a connection: items are created by the server, never queued (brief).
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { view } from "@plane/inventory";
+import type { AppState } from "../controller";
+import { prefs } from "../store";
+import { ItemControl, useCtx } from "../ui";
+
+const DEBOUNCE_MS = 200;
+
+function Highlight({ name, query }: { name: string; query: string }) {
+  const at = query ? name.toLocaleLowerCase().indexOf(query.toLocaleLowerCase()) : -1;
+  if (at < 0) return <>{name}</>;
+  return (
+    <>
+      {name.slice(0, at)}
+      <strong>{name.slice(at, at + query.length)}</strong>
+      {name.slice(at + query.length)}
+    </>
+  );
+}
+
+export function Capture({ s }: { s: AppState }) {
+  const { c, t } = useCtx();
+  const [query, setQuery] = useState("");
+  const [ids, setIds] = useState<string[]>([]);
+  const [message, setMessage] = useState<string | null>(null);
+  const lists = s.lists?.lists ?? [];
+  const [listId, setListId] = useState(() => {
+    const last = prefs.get("captureList");
+    return lists.some((l) => l.id === last) ? last! : (lists[0]?.id ?? "");
+  });
+  const seq = useRef(0);
+  const input = useRef<HTMLInputElement>(null);
+
+  useEffect(() => input.current?.focus(), []);
+  useEffect(() => {
+    const q = query.trim();
+    setMessage(null);
+    if (!q) {
+      setIds([]);
+      return;
+    }
+    const mine = ++seq.current;
+    const timer = setTimeout(async () => {
+      const out = await c.search(q);
+      if (mine !== seq.current) return; // a later keystroke owns the screen
+      if (out) setIds(out.ids);
+      else setMessage(t("needs_connection"));
+    }, DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query, c, t]);
+
+  const shown = useMemo(() => view(s.queue), [s.queue]);
+  const q = query.trim();
+  const exact = ids.some(
+    (id) => s.known[id]?.data.name.toLocaleLowerCase() === q.toLocaleLowerCase() && s.known[id]?.data.list.id === listId
+  );
+
+  async function create() {
+    if (!q || !listId) return;
+    prefs.set("captureList", listId);
+    const out = await c.createItem(listId, q);
+    if (out.kind === "created") {
+      setIds((prev) => [out.id, ...prev.filter((x) => x !== out.id)]);
+      c.showToast(t("created_toast", { item: q }));
+    } else if (out.kind === "exists") {
+      if (out.id) setIds((prev) => [out.id!, ...prev.filter((x) => x !== out.id)]);
+      setMessage(t("exists", { name: q }));
+    } else setMessage(t("needs_connection"));
+  }
+
+  return (
+    <div className="screen">
+      <header className="topbar">
+        <label className="search">
+          <span className="visually-hidden">{t("search_label")}</span>
+          <input
+            ref={input}
+            type="search"
+            enterKeyHint="search"
+            autoComplete="off"
+            aria-label={t("search_label")}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </label>
+        <a href="#/" className="text-button">
+          {t("close")}
+        </a>
+      </header>
+      <main className="scroll">
+        {q && ids.length === 0 && !message ? <p className="empty">{t("no_results")}</p> : null}
+        {ids.map((id) => {
+          const k = s.known[id];
+          const state = shown[id];
+          if (!k || !state) return null;
+          const hint =
+            state.mode === "pinned"
+              ? t("always_on_list")
+              : state.mode === "on_demand"
+                ? t("occasional")
+                : state.mode === "units"
+                  ? t("minimum", { n: state.min_quantity ?? 0 })
+                  : null;
+          return (
+            <div className="row tall" key={id} data-item={id}>
+              <div className="grow">
+                <a href={`#/item/${id}`} className="name block">
+                  <Highlight name={k.data.name} query={q} />
+                </a>
+                <span className="sub block">
+                  {[k.data.list.name, k.data.project.name, hint].filter(Boolean).join(" · ")}
+                </span>
+              </div>
+              <ItemControl data={k.data} state={state} />
+            </div>
+          );
+        })}
+        {message ? (
+          <p className="notice" role="alert">
+            {message}
+          </p>
+        ) : null}
+        {q && !exact && lists.length > 0 ? (
+          <div className="create">
+            <button type="button" className="dashed" onClick={() => void create()}>
+              {t("create_into", { name: q })}
+            </button>
+            <div className="chips" role="group" aria-label={t("in_list")}>
+              <span className="muted small">{t("in_list")}</span>
+              {lists.map((l) => (
+                <button
+                  key={l.id}
+                  type="button"
+                  className="chip"
+                  aria-pressed={l.id === listId}
+                  onClick={() => setListId(l.id)}
+                >
+                  {l.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </main>
+    </div>
+  );
+}

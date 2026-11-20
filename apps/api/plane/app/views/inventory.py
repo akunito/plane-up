@@ -5,11 +5,12 @@
 # Inventory endpoints (APLANE-60). Thin: state changes go through plane.app.inventory.engine, visibility
 # through plane.app.inventory.access. Session or API key; guests get 403 everywhere.
 
+import uuid
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from django.db import IntegrityError, transaction
-from django.db.models import Count, IntegerField, OuterRef, Subquery, Sum, Value
+from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import status
@@ -18,7 +19,14 @@ from rest_framework.response import Response
 from plane.api.rate_limit import ApiKeyRateThrottle
 from plane.app.inventory import engine
 from plane.bgtasks.deletion_task import soft_delete_related_objects
-from plane.app.inventory.access import can_use_project, is_inventory_member, visible_items, visible_lists
+from plane.app.inventory.access import (
+    MEMBER_ROLES,
+    can_use_project,
+    is_inventory_member,
+    visible_items,
+    visible_lists,
+    visible_projects,
+)
 from plane.app.inventory.derive import OVERDUE_AFTER, counts, to_buy
 from plane.api.middleware.api_authentication import APIKeyAuthentication as ApiKeyAuth
 from plane.app.middleware.api_authentication import APIKeyAuthentication as AppApiKeyAuth
@@ -32,7 +40,9 @@ from plane.db.models import (
     InventoryOrderStatus,
     InventoryPreference,
     Project,
+    ProjectMember,
     Workspace,
+    WorkspaceMember,
 )
 from plane.db.models.inventory import normalise_item_name
 
@@ -92,6 +102,8 @@ def item_payload(item, on_order=0, has_open=False):
         "list": {"id": str(item.inventory_list_id), "name": item.inventory_list.name},
         "project": {"id": str(item.project_id), "name": item.project.name, "identifier": item.project.identifier},
         "needed": item.needed,
+        "needed_by": str(item.needed_by_id) if item.needed_by_id else None,
+        "needed_at": item.needed_at.isoformat() if item.needed_at else None,
         "level": item.level,
         "quantity": item.quantity,
         "min_quantity": item.min_quantity,
@@ -162,14 +174,27 @@ class InventoryShoppingListEndpoint(InventoryBaseView):
             if payload["to_buy"]:
                 rows.append(payload)
                 count += counts(item.mode)
-        on_the_way = InventoryOrder.objects.filter(
-            status=InventoryOrderStatus.OPEN, item__in=visible_items(request.user, workspace.pk)
-        ).select_related("item")
+        on_the_way = list(
+            InventoryOrder.objects.filter(
+                status=InventoryOrderStatus.OPEN, item__in=visible_items(request.user, workspace.pk)
+            )
+            .select_related("item")
+            .order_by("created_at")
+        )
+        # Items fully covered by an order are not on the to-buy list, yet "Arrived" and "Cancel" are
+        # operations on them: the device needs their state (revision included) to queue those.
+        listed = {row["id"] for row in rows}
+        waiting = {o.item_id for o in on_the_way if str(o.item_id) not in listed}
+        on_the_way_items = []
+        if waiting:
+            for item in with_orders(visible_items(request.user, workspace.pk).filter(pk__in=waiting)):
+                on_the_way_items.append(item_payload(item, item.on_order, item.open_count > 0))
         return Response(
             {
                 "items": rows,
                 "count": count,
-                "on_the_way": [order_payload(o, now) for o in on_the_way.order_by("created_at")],
+                "on_the_way": [order_payload(o, now) for o in on_the_way],
+                "on_the_way_items": on_the_way_items,
                 "generated_at": now.isoformat(),
             }
         )
@@ -209,6 +234,73 @@ class InventorySuggestionsEndpoint(InventoryBaseView):
         )
         stores = list(items.exclude(store="").order_by("store").values_list("store", flat=True).distinct()[:200])
         return Response({"items": matches, "categories": categories, "stores": stores})
+
+
+class InventoryListsEndpoint(InventoryBaseView):
+    """Every list the viewer can see, and who else can see each one (brief: Privacy). The app needs the
+    lists without knowing the projects, and the people's names for "bought by" and "flagged by"."""
+
+    def get(self, request, slug):
+        workspace = self._workspace(slug)
+        if workspace is None or not is_inventory_member(request.user, workspace.pk):
+            return _forbidden()
+        projects = list(visible_projects(request.user, workspace.pk).order_by("name"))
+        ids = [p.pk for p in projects]
+        members = {}
+        # Who can see a project's lists is exactly who passes visible_projects: active project Members
+        # and Admins who are also active workspace Members or Admins (a workspace guest never does).
+        workspace_members = WorkspaceMember.objects.filter(
+            workspace=workspace, is_active=True, role__in=MEMBER_ROLES
+        ).values("member_id")
+        for row in (
+            ProjectMember.objects.filter(
+                project_id__in=ids, is_active=True, role__in=MEMBER_ROLES, member_id__in=workspace_members
+            )
+            .order_by("member__display_name")
+            .values("project_id", "member_id", "member__display_name")
+        ):
+            members.setdefault(row["project_id"], []).append(
+                {"id": str(row["member_id"]), "display_name": row["member__display_name"]}
+            )
+        # Workspace admins can add themselves to any project, secret ones too (brief: Privacy), so a list
+        # is only as private as the number of admins outside its project.
+        admins = set(
+            WorkspaceMember.objects.filter(workspace=workspace, is_active=True, role=20).values_list(
+                "member_id", flat=True
+            )
+        )
+        lists = (
+            visible_lists(request.user, workspace.pk)
+            .annotate(item_count=Count("items", filter=Q(items__deleted_at__isnull=True)))
+            .order_by("project__name", "sort_order", "created_at")
+        )
+        return Response(
+            {
+                "me": {"id": str(request.user.pk), "display_name": request.user.display_name},
+                "projects": [
+                    {
+                        "id": str(p.pk),
+                        "name": p.name,
+                        "identifier": p.identifier,
+                        "network": p.network,
+                        "members": members.get(p.pk, []),
+                        "admins_outside": len(admins - {uuid.UUID(m["id"]) for m in members.get(p.pk, [])}),
+                    }
+                    for p in projects
+                ],
+                "lists": [
+                    {
+                        "id": str(lst.pk),
+                        "name": lst.name,
+                        "project": str(lst.project_id),
+                        "default_mode": lst.default_mode,
+                        "sort_order": lst.sort_order,
+                        "item_count": lst.item_count,
+                    }
+                    for lst in lists
+                ],
+            }
+        )
 
 
 class InventoryPreferenceEndpoint(InventoryBaseView):
@@ -530,3 +622,38 @@ class ProjectInventoryItemDetailEndpoint(ProjectInventoryBaseView):
             item_pk = item.pk
             transaction.on_commit(lambda: soft_delete_related_objects.delay("db", "inventoryitem", item_pk))
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# Arguments shown in the history; anything else an operation carried stays in the ledger only.
+HISTORY_ARGS = ("delta", "quantity", "level", "needed", "pinned", "mode", "order_id", "reference", "reverts")
+
+
+class ProjectInventoryItemHistoryEndpoint(ProjectInventoryBaseView):
+    def get(self, request, slug, project_id, pk):
+        project = self._project(request, slug, project_id)
+        if project is None:
+            return _forbidden()
+        if not InventoryItem.objects.filter(pk=pk, project=project, inventory_list__deleted_at__isnull=True).exists():
+            return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        # Applied steps only: a refused operation changed nothing, and the ledger keeps it anyway.
+        events = (
+            InventoryEvent.objects.filter(item_id=pk, result="applied")
+            .select_related("actor")
+            .order_by("-received_at")[:50]
+        )
+        return Response(
+            [
+                {
+                    "id": str(e.pk),
+                    "client_op_id": str(e.client_op_id),
+                    "op": e.op,
+                    "args": {k: e.args[k] for k in HISTORY_ARGS if isinstance(e.args, dict) and k in e.args},
+                    "actor": ({"id": str(e.actor_id), "display_name": e.actor.display_name} if e.actor_id else None),
+                    "source": e.source,
+                    "occurred_at": e.occurred_at.isoformat(),
+                    "received_at": e.received_at.isoformat(),
+                    "reverted": e.reverted_at is not None,
+                }
+                for e in events
+            ]
+        )

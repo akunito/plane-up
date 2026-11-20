@@ -5,11 +5,13 @@
 from django.urls import path
 
 from plane.app.views.inventory import (
+    InventoryListsEndpoint,
     InventoryOpsEndpoint,
     InventoryPreferenceEndpoint,
     InventoryShoppingListEndpoint,
     InventorySuggestionsEndpoint,
     ProjectInventoryItemDetailEndpoint,
+    ProjectInventoryItemHistoryEndpoint,
     ProjectInventoryItemsEndpoint,
     ProjectInventoryListDetailEndpoint,
     ProjectInventoryListsEndpoint,
@@ -21,6 +23,7 @@ urlpatterns = [
         InventoryShoppingListEndpoint.as_view(),
         name="inventory-shopping-list",
     ),
+    path("workspaces/<str:slug>/inventory/lists/", InventoryListsEndpoint.as_view(), name="inventory-lists"),
     path("workspaces/<str:slug>/inventory/ops/", InventoryOpsEndpoint.as_view(), name="inventory-ops"),
     path(
         "workspaces/<str:slug>/inventory/suggestions/",
@@ -51,5 +54,10 @@ urlpatterns = [
         "workspaces/<str:slug>/projects/<uuid:project_id>/inventory/items/<uuid:pk>/",
         ProjectInventoryItemDetailEndpoint.as_view(),
         name="project-inventory-item-detail",
+    ),
+    path(
+        "workspaces/<str:slug>/projects/<uuid:project_id>/inventory/items/<uuid:pk>/history/",
+        ProjectInventoryItemHistoryEndpoint.as_view(),
+        name="project-inventory-item-history",
     ),
 ]

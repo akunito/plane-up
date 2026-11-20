@@ -38,11 +38,10 @@ export function serialize(state: QueueState): string {
 export type Loaded = { ok: true; state: QueueState } | { ok: false; reason: "newer" | "corrupt"; raw: string };
 
 /**
- * Read a stored queue. A queue from a NEWER app is kept as it is and the app asks to be updated,
- * never discarded (brief: queue ownership). Loading counts as a restart: no replay is running, and
- * the backoff is over.
+ * Read a stored queue as it is, for an atomic read-modify-write inside the running app. A queue from a
+ * NEWER app is kept as it is and the app asks to be updated, never discarded (brief: queue ownership).
  */
-export function load(
+export function parse(
   raw: string,
   migrations: Record<number, Migration> = MIGRATIONS,
   current: number = STORAGE_VERSION
@@ -62,5 +61,18 @@ export function load(
     if (!step) return { ok: false, reason: "corrupt", raw };
     state = step(state);
   }
-  return { ok: true, state: onRestart(state as QueueState) };
+  return { ok: true, state: state as QueueState };
+}
+
+/**
+ * Read a stored queue when the app starts. Loading counts as a restart: no replay is running, and the
+ * backoff is over. Never inside a running app's update: it would clear the "sending" of a live replay.
+ */
+export function load(
+  raw: string,
+  migrations: Record<number, Migration> = MIGRATIONS,
+  current: number = STORAGE_VERSION
+): Loaded {
+  const out = parse(raw, migrations, current);
+  return out.ok ? { ok: true, state: onRestart(out.state) } : out;
 }

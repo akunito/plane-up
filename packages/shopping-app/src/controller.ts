@@ -1,0 +1,531 @@
+// The app's state and everything that changes it: loading, polling, taps, undo, sending, online-only
+// edits. React reads it through useSyncExternalStore (app.tsx); tests drive it with a fake fetch and a
+// memory store.
+//
+// Polling (brief, Designer defaults): on focus, on reconnect, after the device's own operations and every
+// 20 s while a screen is visible. Phase 4 is online: the queue still holds every tap until it is
+// answered, so nothing is lost when a request fails, but the offline screens are phase 6.
+
+import type {
+  ClientOptions,
+  Entry,
+  FailureKind,
+  Lists,
+  Notice,
+  OpName,
+  Preferences,
+  QueueState,
+} from "@plane/inventory";
+import {
+  approve,
+  createItem,
+  createQueue,
+  discard,
+  discardHead,
+  dismiss,
+  fetchListItems,
+  fetchLists,
+  fetchPreferences,
+  fetchShoppingList,
+  fetchSuggestions,
+  finishShopping,
+  newQueue,
+  newUuid,
+  applyAnyway,
+  refreshed,
+  replay,
+  requestJson,
+  retryNow,
+  savePreferences,
+  tap,
+  undo,
+  updateItem,
+} from "@plane/inventory";
+import type { Lock } from "@plane/inventory";
+import type { AppStore } from "./store";
+import { idbStore, memoryStore, prefs, StoredQueueError } from "./store";
+import type { Grouping, ItemData, Known, Order } from "./model";
+import { dropMissingFromList, mergeFetched, mergeSnapshot } from "./model";
+
+export const POLL_MS = 20_000;
+/** "Done" empties itself after six hours without a tick (brief, Designer defaults). */
+export const DONE_RESET_MS = 6 * 60 * 60 * 1000;
+const TOAST_MS = 6_000;
+
+export type Phase = "loading" | "ready" | "signed_out" | "no_workspace" | "no_inventory" | "error" | "newer";
+
+export interface Toast {
+  id: number;
+  /** Text already translated by the screen that made it. */
+  text: string;
+  /** The entry an "Undo" would revert; absent for order actions, which have no undo (brief). */
+  undoId?: string;
+}
+
+export interface AppState {
+  phase: Phase;
+  slug: string;
+  workspaces: { slug: string; name: string }[];
+  lists: Lists | null;
+  known: Record<string, Known>;
+  orders: Order[];
+  ordersFetchedAt: number;
+  queue: QueueState;
+  preferences: Preferences;
+  /** The last request failure that is not the queue's own (refresh, edits). */
+  connection: FailureKind | null;
+  toast: Toast | null;
+  lastTickAt: number;
+}
+
+export interface Deps {
+  base: string;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+  /** A store for the given user; defaults to IndexedDB, falling back to memory. */
+  openStore?: (userId: string) => Promise<AppStore>;
+  lock?: Lock;
+  /** The workspace in the address, if any. */
+  slug?: string | null;
+}
+
+type Listener = () => void;
+
+const EMPTY_PREFERENCES: Preferences = { category_order: [], default_grouping: "category" };
+
+export class Controller {
+  private state: AppState;
+  private listeners = new Set<Listener>();
+  private store: AppStore | null = null;
+  private readonly now: () => number;
+  private readonly lock: Lock | undefined;
+  private refreshing: Promise<void> | null = null;
+  private refreshAgain = false;
+  private toastTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Lists an inventory screen is showing: reloaded with every refresh. */
+  private watched = new Set<string>();
+  private toastSeq = 0;
+
+  constructor(private readonly deps: Deps) {
+    this.now = deps.now ?? Date.now;
+    this.lock = deps.lock;
+    this.state = {
+      phase: "loading",
+      slug: deps.slug ?? "",
+      workspaces: [],
+      lists: null,
+      known: {},
+      orders: [],
+      ordersFetchedAt: 0,
+      queue: createQueue("", ""),
+      preferences: EMPTY_PREFERENCES,
+      connection: null,
+      toast: null,
+      lastTickAt: Number(prefs.get("lastTickAt") ?? 0),
+    };
+  }
+
+  // ---------------------------------------------------------------- React plumbing
+
+  subscribe = (listener: Listener): (() => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+
+  get = (): AppState => this.state;
+
+  private set(patch: Partial<AppState>): void {
+    this.state = { ...this.state, ...patch };
+    for (const l of this.listeners) l();
+  }
+
+  client(): ClientOptions {
+    const opts: ClientOptions = { base: this.deps.base, slug: this.state.slug };
+    if (this.deps.fetchImpl) opts.fetchImpl = this.deps.fetchImpl;
+    return opts;
+  }
+
+  // ---------------------------------------------------------------- start
+
+  async start(): Promise<void> {
+    const client = this.client();
+    const settings = await requestJson<{
+      workspace?: { last_workspace_slug?: string | null; fallback_workspace_slug?: string | null };
+    }>(client, "GET", "users/me/settings/");
+    if (
+      settings.kind === "failed" &&
+      (settings.failure === "signed_out_app" || settings.failure === "signed_out_proxy")
+    )
+      return this.set({ phase: "signed_out", connection: settings.failure });
+    if (settings.kind !== "ok")
+      return this.set({ phase: "error", connection: settings.kind === "failed" ? settings.failure : "refused" });
+    const workspaces = await requestJson<{ slug: string; name: string }[]>(client, "GET", "users/me/workspaces/");
+    const all =
+      workspaces.kind === "ok" && Array.isArray(workspaces.body)
+        ? workspaces.body.map((w) => ({ slug: w.slug, name: w.name }))
+        : [];
+    const remembered = prefs.get("slug");
+    const slug =
+      this.state.slug ||
+      (remembered && (all.length === 0 || all.some((w) => w.slug === remembered)) ? remembered : "") ||
+      settings.body.workspace?.last_workspace_slug ||
+      settings.body.workspace?.fallback_workspace_slug ||
+      "";
+    if (!slug) return this.set({ phase: "no_workspace", workspaces: all });
+    this.set({ slug, workspaces: all });
+    await this.openWorkspace();
+  }
+
+  async switchWorkspace(slug: string): Promise<void> {
+    this.watched.clear();
+    this.set({ slug, phase: "loading", lists: null, known: {}, orders: [], ordersFetchedAt: 0 });
+    await this.openWorkspace();
+  }
+
+  private async openWorkspace(): Promise<void> {
+    const lists = await fetchLists(this.client());
+    if (lists.kind === "refused" && lists.status === 403) return this.set({ phase: "no_inventory" });
+    if (lists.kind === "failed" && (lists.failure === "signed_out_app" || lists.failure === "signed_out_proxy"))
+      return this.set({ phase: "signed_out", connection: lists.failure });
+    if (lists.kind !== "ok")
+      return this.set({ phase: "error", connection: lists.kind === "failed" ? lists.failure : "refused" });
+    prefs.set("slug", this.state.slug);
+    if (lists.body.lists.length === 0) return this.set({ phase: "no_inventory", lists: lists.body });
+    if (!this.store || this.state.queue.userId !== lists.body.me.id) {
+      try {
+        const open = this.deps.openStore ?? defaultStore;
+        this.store = await open(lists.body.me.id);
+      } catch (error) {
+        if (error instanceof StoredQueueError && error.reason === "newer") return this.set({ phase: "newer" });
+        throw error;
+      }
+    }
+    const queue = await this.store.read();
+    this.set({ lists: lists.body, queue });
+    const prefsOut = await fetchPreferences(this.client());
+    if (prefsOut.kind === "ok") this.set({ preferences: prefsOut.body });
+    await this.refresh();
+    this.expireDone();
+    this.set({ phase: "ready" });
+    void this.flush();
+  }
+
+  // ---------------------------------------------------------------- reading
+
+  /** The to-buy list and "On the way", plus every list an inventory screen is showing. Coalesced. */
+  refresh(): Promise<void> {
+    if (this.refreshing) {
+      this.refreshAgain = true;
+      return this.refreshing;
+    }
+    this.refreshing = (async () => {
+      do {
+        this.refreshAgain = false;
+        // Sequential on purpose: one fetch at a time, again only if asked while one was running.
+        // oxlint-disable-next-line no-await-in-loop
+        await this.refreshOnce();
+      } while (this.refreshAgain);
+    })().finally(() => {
+      this.refreshing = null;
+    });
+    return this.refreshing;
+  }
+
+  private async refreshOnce(): Promise<void> {
+    const startedAt = this.now();
+    const out = await fetchShoppingList(this.client());
+    if (out.kind !== "ok") return this.set({ connection: out.kind === "failed" ? out.failure : "refused" });
+    const payloads = [...out.list.items, ...(out.list.on_the_way_items ?? [])] as unknown as ItemData[];
+    await this.updateQueue((s) => refreshed(s, payloads));
+    this.set({
+      known: mergeSnapshot(this.state.known, payloads, startedAt),
+      orders: out.list.on_the_way as unknown as Order[],
+      ordersFetchedAt: startedAt,
+      connection: null,
+    });
+    await Promise.all([...this.watched].map((id) => this.loadList(id)));
+  }
+
+  watch(listId: string, on: boolean): void {
+    if (on) this.watched.add(listId);
+    else this.watched.delete(listId);
+  }
+
+  /** Every item of one list, for the inventory screen. */
+  async loadList(listId: string): Promise<void> {
+    const list = this.state.lists?.lists.find((l) => l.id === listId);
+    if (!list) return;
+    const startedAt = this.now();
+    const out = await fetchListItems(this.client(), list.project, listId);
+    if (out.kind !== "ok") return this.set({ connection: out.kind === "failed" ? out.failure : "refused" });
+    const payloads = out.items as unknown as ItemData[];
+    await this.updateQueue((s) => refreshed(s, payloads));
+    // Open orders of this list: upserted. Closed ones disappear with the next to-buy fetch, which lists
+    // every open order the viewer can see.
+    const orders = new Map(this.state.orders.map((o) => [o.id, o]));
+    for (const o of out.open_orders as unknown as Order[]) orders.set(o.id, o);
+    this.set({
+      known: dropMissingFromList(mergeFetched(this.state.known, payloads, startedAt), listId, payloads, startedAt),
+      orders: [...orders.values()],
+      connection: null,
+    });
+  }
+
+  /** Quick capture's search. The items it returns become known, so a tap on one can be queued. */
+  async search(query: string): Promise<{ ids: string[]; categories: string[]; stores: string[] } | null> {
+    const startedAt = this.now();
+    const out = await fetchSuggestions(this.client(), query);
+    if (out.kind !== "ok") {
+      this.set({ connection: out.kind === "failed" ? out.failure : "refused" });
+      return null;
+    }
+    const payloads = out.body.items as unknown as ItemData[];
+    await this.updateQueue((s) => refreshed(s, payloads));
+    this.set({ known: mergeFetched(this.state.known, payloads, startedAt), connection: null });
+    return { ids: payloads.map((p) => p.id), categories: out.body.categories, stores: out.body.stores };
+  }
+
+  // ---------------------------------------------------------------- the queue
+
+  private async updateQueue(fn: (s: QueueState) => QueueState): Promise<QueueState> {
+    if (!this.store) throw new Error("no store");
+    const next = await this.store.update(fn);
+    this.set({ queue: next });
+    return next;
+  }
+
+  /**
+   * One tap: queued at once, shown at once (the queue's preview), sent right after. Returns the entry's
+   * id, or null when the item is not known (nothing queued).
+   */
+  async act(
+    name: OpName,
+    itemId: string,
+    args: Record<string, unknown>,
+    options: { tick?: boolean; orderQuantity?: number; toast?: string } = {}
+  ): Promise<string | null> {
+    if (!this.state.queue.known[itemId]) return null;
+    let id: string | null = null;
+    const tapOptions: { tick?: boolean; orderQuantity?: number } = {};
+    if (options.tick !== undefined) tapOptions.tick = options.tick;
+    if (options.orderQuantity !== undefined) tapOptions.orderQuantity = options.orderQuantity;
+    await this.updateQueue((s) => {
+      const next = tap(s, name, itemId, args, { now: this.now(), newId: newUuid }, tapOptions);
+      id = next.entries[next.entries.length - 1]!.op.client_op_id;
+      return next;
+    });
+    if (options.tick) {
+      prefs.set("lastTickAt", String(this.now()));
+      this.set({ lastTickAt: this.now() });
+    }
+    if (options.toast !== undefined) {
+      const order = name === "mark_ordered" || name === "arrived" || name === "cancel";
+      this.showToast(options.toast, order ? undefined : (id ?? undefined));
+    }
+    void this.flush();
+    return id;
+  }
+
+  /** Undo an entry. False when there is nothing to undo (the queue returned the same state). */
+  async undo(clientOpId: string): Promise<boolean> {
+    let changed = false;
+    await this.updateQueue((s) => {
+      const next = undo(s, clientOpId, { now: this.now(), newId: newUuid });
+      changed = next !== s;
+      return next;
+    });
+    this.set({ toast: null });
+    void this.flush();
+    return changed;
+  }
+
+  async finishShopping(): Promise<void> {
+    await this.updateQueue((s) => finishShopping(s, this.now()));
+  }
+
+  /** "Done" also empties itself after six hours without a tick. */
+  expireDone(): void {
+    const last = this.state.lastTickAt;
+    if (Object.keys(this.state.queue.done).length > 0 && last > 0 && this.now() - last > DONE_RESET_MS)
+      void this.finishShopping();
+  }
+
+  async approve(ids: string[]): Promise<void> {
+    await this.updateQueue((s) => approve(s, ids, this.now()));
+    void this.flush();
+  }
+
+  async discard(id: string): Promise<void> {
+    await this.updateQueue((s) => discard(s, id));
+    void this.flush();
+  }
+
+  /** "Discard all": one atomic change, so a replay cannot slip between two discards. */
+  async discardMany(ids: string[]): Promise<void> {
+    await this.updateQueue((s) => ids.reduce((acc, id) => discard(acc, id), s));
+    void this.flush();
+  }
+
+  async discardHead(): Promise<void> {
+    await this.updateQueue((s) => discardHead(s));
+    void this.flush();
+  }
+
+  async applyAnyway(notice: Notice): Promise<void> {
+    await this.updateQueue((s) => applyAnyway(s, notice, { now: this.now(), newId: newUuid }));
+    void this.flush();
+  }
+
+  async dismiss(notice: Notice): Promise<void> {
+    await this.updateQueue((s) => dismiss(s, notice));
+  }
+
+  async retry(): Promise<void> {
+    await this.updateQueue((s) => retryNow(s));
+    await this.flush();
+  }
+
+  /** Send what can be sent, then read the lists again (polling after one's own operations). */
+  async flush(): Promise<void> {
+    if (!this.store || this.state.phase === "loading") return;
+    const store: AppStore = {
+      update: (fn) => this.updateQueue(fn),
+      read: () => this.store!.read(),
+    };
+    const userId = this.state.queue.userId;
+    const before = this.state.queue.entries.length;
+    try {
+      await replay(store, this.client(), userId, this.now, this.lock);
+    } catch {
+      // replay already marked the failure on the queue; the screen shows it.
+    }
+    this.scheduleRetry();
+    if (before > 0 || this.state.queue.entries.length > 0) await this.refresh();
+  }
+
+  private scheduleRetry(): void {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    const failure = this.state.queue.failure;
+    if (!failure || this.state.queue.entries.length === 0) return;
+    const wait = Math.max(failure.nextTryAt - this.now(), 0) + 50;
+    this.retryTimer = setTimeout(() => void this.flush(), wait);
+  }
+
+  // ---------------------------------------------------------------- online-only edits
+
+  /** Create an item in a list. "exists" carries the existing item, which the screen then offers. */
+  async createItem(
+    listId: string,
+    name: string,
+    mode?: string
+  ): Promise<{ kind: "created"; id: string } | { kind: "exists"; id: string | null } | { kind: "failed" }> {
+    const list = this.state.lists?.lists.find((l) => l.id === listId);
+    if (!list) return { kind: "failed" };
+    const startedAt = this.now();
+    const body: Record<string, unknown> = { name };
+    if (mode) body.mode = mode;
+    const out = await createItem(this.client(), list.project, listId, body);
+    if (out.kind === "conflict") {
+      const existing = out.body.item as unknown as ItemData | undefined;
+      if (existing) await this.learn([existing], startedAt);
+      return { kind: "exists", id: existing?.id ?? null };
+    }
+    if (out.kind !== "ok") {
+      this.set({ connection: out.kind === "failed" ? out.failure : "refused" });
+      return { kind: "failed" };
+    }
+    await this.learn([out.body as unknown as ItemData], startedAt);
+    return { kind: "created", id: out.body.id };
+  }
+
+  /** Edit an item's data (never its state). Returns the error field on a refusal. */
+  async updateItem(
+    itemId: string,
+    data: Record<string, unknown>
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const item = this.state.known[itemId]?.data;
+    if (!item) return { ok: false, error: "gone" };
+    const startedAt = this.now();
+    const out = await updateItem(this.client(), item.project.id, itemId, data);
+    if (out.kind === "conflict") return { ok: false, error: "exists" };
+    if (out.kind === "refused") return { ok: false, error: out.error };
+    if (out.kind !== "ok") {
+      this.set({ connection: out.failure });
+      return { ok: false, error: out.failure };
+    }
+    await this.learn([out.body as unknown as ItemData], startedAt);
+    return { ok: true };
+  }
+
+  async setGrouping(grouping: Grouping): Promise<void> {
+    const preferences = { ...this.state.preferences, default_grouping: grouping };
+    this.set({ preferences });
+    const out = await savePreferences(this.client(), preferences);
+    if (out.kind === "ok") this.set({ preferences: out.body });
+  }
+
+  private async learn(payloads: ItemData[], startedAt: number): Promise<void> {
+    await this.updateQueue((s) => refreshed(s, payloads));
+    this.set({ known: mergeFetched(this.state.known, payloads, startedAt) });
+  }
+
+  // ---------------------------------------------------------------- toasts
+
+  showToast(text: string, undoId?: string): void {
+    if (this.toastTimer) clearTimeout(this.toastTimer);
+    const toast: Toast = { id: ++this.toastSeq, text };
+    if (undoId !== undefined) toast.undoId = undoId;
+    this.set({ toast });
+    this.toastTimer = setTimeout(() => this.set({ toast: null }), TOAST_MS);
+  }
+
+  dismissToast(): void {
+    this.set({ toast: null });
+  }
+
+  // ---------------------------------------------------------------- the browser's signals
+
+  /** Focus, reconnect and every 20 s while visible. Returns a function that stops it. */
+  attach(win: Window): () => void {
+    const onFocus = () => {
+      this.expireDone();
+      void this.refresh();
+      void this.flush();
+    };
+    const onOnline = () => void this.retry();
+    const onVisible = () => {
+      if (win.document.visibilityState === "visible") onFocus();
+    };
+    win.addEventListener("focus", onFocus);
+    win.addEventListener("online", onOnline);
+    win.document.addEventListener("visibilitychange", onVisible);
+    const timer = win.setInterval(() => {
+      if (win.document.visibilityState === "visible" && this.state.phase === "ready") void this.refresh();
+    }, POLL_MS);
+    return () => {
+      win.removeEventListener("focus", onFocus);
+      win.removeEventListener("online", onOnline);
+      win.document.removeEventListener("visibilitychange", onVisible);
+      win.clearInterval(timer);
+    };
+  }
+}
+
+async function defaultStore(userId: string): Promise<AppStore> {
+  try {
+    return await idbStore(userId);
+  } catch (error) {
+    if (error instanceof StoredQueueError) throw error;
+    // IndexedDB refused (a private window): keep working, in memory.
+    return memoryStore(newQueue(userId));
+  }
+}
+
+export function entryOf(state: QueueState, clientOpId: string): Entry | undefined {
+  return (
+    state.entries.find((e) => e.op.client_op_id === clientOpId) ??
+    state.recent.find((e) => e.op.client_op_id === clientOpId)
+  );
+}

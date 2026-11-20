@@ -87,6 +87,8 @@ def test_guests_get_403_on_every_endpoint(workspace, people, home, groceries):
         ("post", ws(workspace.slug, "ops/"), {"ops": []}),
         ("get", ws(workspace.slug, "suggestions/?q=mi"), None),
         ("get", ws(workspace.slug, "preferences/"), None),
+        ("get", ws(workspace.slug, "lists/"), None),
+        ("get", proj(workspace.slug, home, f"items/{item.pk}/history/"), None),
         ("put", ws(workspace.slug, "preferences/"), {}),
         ("get", proj(workspace.slug, home, "lists/"), None),
         ("post", proj(workspace.slug, home, "lists/"), {"name": "x"}),
@@ -199,6 +201,8 @@ def test_the_to_buy_list_counter_and_on_the_way(workspace, people, home, groceri
     assert to_buy == {"Bread": 1, "Milk": 1, "Rice": 1, "Water": 5}
     assert body["count"] == 3, "pinned rows do not count"
     assert [(o["item_name"], o["overdue"]) for o in body["on_the_way"]] == [("Coffee", True)]
+    # Coffee is covered by its order, so it is off the list, but the device needs its state for "Arrived".
+    assert [(i["name"], i["to_buy"], i["on_order"]) for i in body["on_the_way_items"]] == [("Coffee", 0, 1)]
 
 
 def test_the_to_buy_list_stays_within_a_query_budget(workspace, people, home, groceries, django_assert_max_num_queries):
@@ -377,3 +381,71 @@ def test_deleting_an_item_cascades_only_after_the_commit(
         callback()
     assert calls == [("db", "inventoryitem", item.pk)]
     assert InventoryItem.all_objects.get(pk=item.pk).deleted_at is not None
+
+
+# ---------------------------------------------------------------- what the shopping app reads (phase 4)
+
+
+def test_the_lists_endpoint_shows_each_visible_list_and_who_can_see_it(workspace, people, home, groceries):
+    _item(groceries, "Milk", "on_demand", needed=True)
+    gone = _item(groceries, "Old", "pinned")
+    InventoryItem.all_objects.filter(pk=gone.pk).update(deleted_at=timezone.now())
+    InventoryList.objects.create(name="Empty", project=home)
+    secret = Project.objects.create(name="Me", identifier="ME", workspace=workspace, inventory_view=True, network=0)
+    ProjectMember.objects.create(project=secret, member=people["alice"], role=20)
+    InventoryList.objects.create(name="Supplements", project=secret)
+    off = Project.objects.create(name="Off", identifier="OFF", workspace=workspace, inventory_view=False)
+    ProjectMember.objects.create(project=off, member=people["alice"], role=20)
+    InventoryList.objects.create(name="Hidden", project=off)
+    # olga is a workspace member who was a project member once: an inactive row is not someone who sees it.
+    ProjectMember.objects.create(project=home, member=people["olga"], role=15, is_active=False)
+
+    body = _client(people["bob"]).get(ws(workspace.slug, "lists/")).json()
+    assert body["me"]["id"] == str(people["bob"].pk)
+    assert [p["name"] for p in body["projects"]] == ["Home"], "bob is not in the secret project"
+    assert sorted((lst["name"], lst["item_count"]) for lst in body["lists"]) == [("Empty", 0), ("Supermarket", 1)]
+    home_payload = body["projects"][0]
+    # gus is a guest: guests never see inventory, so they are not among the people who can.
+    assert sorted(m["display_name"] for m in home_payload["members"]) == ["bob", people["alice"].display_name]
+    assert home_payload["network"] == 0
+
+    body = _client(people["alice"]).get(ws(workspace.slug, "lists/")).json()
+    assert sorted(lst["name"] for lst in body["lists"]) == ["Empty", "Supermarket", "Supplements"]
+    me = next(p for p in body["projects"] if p["name"] == "Me")
+    assert [m["display_name"] for m in me["members"]] == [people["alice"].display_name]
+    # alice is the only workspace admin and she is in the project: nobody can add themselves unseen.
+    assert me["admins_outside"] == 0
+    WorkspaceMember.objects.filter(workspace=workspace, member=people["olga"]).update(role=20)
+    body = _client(people["alice"]).get(ws(workspace.slug, "lists/")).json()
+    assert next(p for p in body["projects"] if p["name"] == "Me")["admins_outside"] == 1
+
+
+def test_the_item_payload_says_who_flagged_it_needed(workspace, people, home, groceries):
+    item = _item(groceries, "Milk", "on_demand", needed=False)
+    op = {"v": 1, "client_op_id": str(uuid.uuid4()), "target": str(item.pk), "op": "set_needed"}
+    op.update(args={"needed": True}, base_rev=0)
+    assert _client(people["bob"]).post(ws(workspace.slug, "ops/"), {"ops": [op]}, format="json").status_code == 200
+    row = _client(people["alice"]).get(ws(workspace.slug, "shopping-list/")).json()["items"][0]
+    assert row["needed_by"] == str(people["bob"].pk) and row["needed_at"] is not None
+
+
+def test_item_history_lists_applied_steps_newest_first(workspace, people, home, groceries):
+    item = _item(groceries, "Water", "units", quantity=1, min_quantity=2)
+    other = _item(groceries, "Salt", "pinned")
+    client = _client(people["bob"])
+
+    def op(name, args, **extra):
+        return {"v": 1, "client_op_id": str(uuid.uuid4()), "target": str(item.pk), "op": name, "args": args, **extra}
+
+    batch = [op("adjust", {"delta": -1}), op("set_level", {"level": "low"}, base_rev=1)]
+    batch.append(op("buy", {"quantity": 3, "secret": "x"}))
+    results = client.post(ws(workspace.slug, "ops/"), {"ops": batch}, format="json").json()["results"]
+    assert [r["result"] for r in results] == ["applied", "rejected", "applied"]
+    body = client.get(proj(workspace.slug, home, f"items/{item.pk}/history/")).json()
+    assert [(e["op"], e["args"]) for e in body] == [("buy", {"quantity": 3}), ("adjust", {"delta": -1})]
+    assert body[0]["actor"]["display_name"] == "bob" and body[0]["reverted"] is False
+    assert client.get(proj(workspace.slug, home, f"items/{other.pk}/history/")).json() == []
+    # An item of a project the requester cannot use is a 403; a deleted one is a 404.
+    assert _client(people["olga"]).get(proj(workspace.slug, home, f"items/{item.pk}/history/")).status_code == 403
+    InventoryItem.all_objects.filter(pk=other.pk).update(deleted_at=timezone.now())
+    assert client.get(proj(workspace.slug, home, f"items/{other.pk}/history/")).status_code == 404

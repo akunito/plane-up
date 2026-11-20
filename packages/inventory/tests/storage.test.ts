@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createQueue } from "../src/queue";
-import { load, serialize, STORAGE_VERSION } from "../src/storage";
+import { load, parse, serialize, STORAGE_VERSION } from "../src/storage";
 import type { Migration } from "../src/storage";
 
 describe("storage", () => {
@@ -27,5 +27,17 @@ describe("storage", () => {
     expect(load(newer)).toEqual({ ok: false, reason: "newer", raw: newer });
     expect(load(JSON.stringify({ version: 1, state: {} }), {}, 2)).toMatchObject({ ok: false, reason: "corrupt" });
     expect(load("{nope")).toMatchObject({ ok: false, reason: "corrupt" });
+  });
+
+  it("parse, used inside the running app's atomic updates, keeps a live replay's sending flag and backoff", () => {
+    const failing = {
+      ...createQueue("ana", "q"),
+      sending: true,
+      failure: { kind: "server" as const, attempts: 2, nextTryAt: 99 },
+    };
+    expect(parse(serialize(failing))).toMatchObject({ ok: true, state: { sending: true, failure: { nextTryAt: 99 } } });
+    expect(load(serialize(failing))).toMatchObject({ ok: true, state: { sending: false } });
+    const newer = JSON.stringify({ version: STORAGE_VERSION + 1, state: {} });
+    expect(parse(newer)).toEqual({ ok: false, reason: "newer", raw: newer });
   });
 });
