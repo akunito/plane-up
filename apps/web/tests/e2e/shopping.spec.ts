@@ -63,6 +63,9 @@ const server = (page: Page, name: string, field: keyof Item) =>
  * failed every later one).
  */
 async function restoreSeed(page: Page) {
+  // Leave the app first: a tap still waiting in it could otherwise land between the reads below and
+  // their operations and make them stale (phase 4 re-review).
+  await page.goto("about:blank");
   const ops: Record<string, unknown>[] = [];
   const want: [string, { needed?: boolean; quantity?: number }][] = [
     ["Milk", { needed: true }],
@@ -83,10 +86,22 @@ async function restoreSeed(page: Page) {
   const seeded = new Set([INV!.inventory.orders.open, INV!.inventory.orders.overdue]);
   for (const o of list.on_the_way as { id: string; item: string }[])
     if (!seeded.has(o.id)) ops.push({ target: o.item, op: "cancel", args: { order_id: o.id } });
-  if (ops.length)
-    await apiPost(page, "/api/workspaces/qa-inv/inventory/ops/", {
+  if (ops.length) {
+    const res = await apiPost(page, "/api/workspaces/qa-inv/inventory/ops/", {
       ops: ops.map((o) => Object.assign(o, { v: 1, client_op_id: randomUUID(), queue_id: null })),
     });
+    // A 200 is not a restore: every operation must have applied (a cancel of an order closed meanwhile
+    // is already done, which is fine).
+    const results = ((await res.json()) as { results: { result: string; reason?: string }[] }).results;
+    for (const r of results)
+      expect(r.result === "applied" || r.reason === "already_done", `restoreSeed: ${JSON.stringify(r)}`).toBeTruthy();
+  }
+  // An item a failed create test left behind is needed, so it would change every later count.
+  const leftovers = await (await page.request.get("/api/workspaces/qa-inv/inventory/suggestions/?q=QA%20e2e")).json();
+  for (const left of leftovers.items as Item[])
+    if (left.name.startsWith("QA e2e "))
+      // oxlint-disable-next-line no-await-in-loop -- rarely more than one
+      await apiDelete(page, `/api/workspaces/qa-inv/projects/${left.project.id}/inventory/items/${left.id}/`);
   const salt = await item(page, "Salt");
   if (salt.category !== "Pantry")
     await apiPatch(page, `/api/workspaces/qa-inv/projects/${salt.project.id}/inventory/items/${salt.id}/`, {
@@ -303,12 +318,14 @@ const shot = async (page: Page, name: string) => {
     // Two identical captures in a row, as toHaveScreenshot waits for, so a frame mid-render is never
     // taken as the reference (phase 4 audit).
     let previous = await page.screenshot(options);
-    for (let i = 0; i < 10; i++) {
+    let stable = false;
+    for (let i = 0; i < 10 && !stable; i++) {
       // oxlint-disable-next-line no-await-in-loop -- each capture is compared with the one before it
       const next = await page.screenshot(options);
-      if (next.equals(previous)) break;
+      stable = next.equals(previous);
       previous = next;
     }
+    expect(stable, `${name}: the screen never held still for two captures; no baseline written`).toBe(true);
     fs.writeFileSync(file, previous);
     console.log(`BASELINE CREATED ${path.basename(file)} — look at it before trusting it`);
     test.info().annotations.push({ type: "baseline-created", description: file });

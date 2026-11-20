@@ -428,6 +428,38 @@ describe("the queue belongs to its workspace", () => {
     expect(api.server.items.get(MILK)!.needed).toBe(false);
   });
 
+  it("after a reload, an order answered before it is not shown again as a phantom", async () => {
+    window.location.hash = "#/";
+    api = new FakeApi(catalog());
+    // A queue from the previous page load: it marked Salt ordered and got the answer; the order has since
+    // arrived on another phone, so no snapshot returns Salt or the order any more.
+    const old = createQueue("00000000-0000-4000-8000-000000000001", newUuid());
+    const salt = { ...state(SALT, "on_demand"), rev: 1 };
+    const queued = tap(
+      { ...old, known: { [SALT]: salt } },
+      "mark_ordered",
+      SALT,
+      { order_id: newUuid() },
+      { now: Date.now() - 60_000, newId: newUuid }
+    );
+    const answered = {
+      ...queued,
+      entries: [],
+      known: {},
+      recent: [{ ...queued.entries[0]!, transmission: "answered" as const, resultRev: 2 }],
+    };
+    controller = new Controller({
+      base: "",
+      fetchImpl: (input, init) => api.fetch(input, init),
+      lock: makeLock(undefined),
+      openStore: async () => memoryStore(answered),
+    });
+    await controller.start();
+    render(<App controller={controller} locale="en" />);
+    expect(screen.getByText("5 missing · 1 pinned")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: /On the way/ })).toBeNull();
+  });
+
   it("a held entry at the head does not make the app retry in a loop", async () => {
     await boot();
     await act(async () => {

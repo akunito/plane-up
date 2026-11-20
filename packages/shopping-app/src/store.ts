@@ -69,7 +69,7 @@ function transact(
 }
 
 /**
- * The app's store. Opening it counts as a restart (storage.ts load): once per page load and tab, which
+ * The app's store. Opening it counts as a restart (storage.ts load): once per page load, tab and workspace (the controller keeps what it opened), which
  * is safe while another tab replays only because replay runs under the exclusive Web Lock and clears a
  * stale "sending" inside it.
  */

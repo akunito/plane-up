@@ -78,9 +78,9 @@ describe("the board", () => {
     const milk = data(state(uid(), "on_demand", { needed: true }));
     const q = queueWith([milk]);
     let known = mergeSnapshot({}, [milk], 1);
-    expect(board(known, q, []).toBuy).toHaveLength(1);
+    expect(board(known, q, [], new Set()).toBuy).toHaveLength(1);
     known = mergeSnapshot(known, [], 2);
-    expect(board(known, q, []).toBuy).toHaveLength(0);
+    expect(board(known, q, [], new Set()).toBuy).toHaveLength(0);
   });
 
   it("an item this device flagged needed shows at once, and stays after its answer, before any snapshot", () => {
@@ -89,20 +89,20 @@ describe("the board", () => {
     const known = mergeFetched({}, [salt], 1);
     const e = buildOp("set_needed", salt, { needed: true }, tap);
     q = enqueue(q, e);
-    expect(board(known, q, []).toBuy.map((r) => r.id)).toEqual([salt.id]);
+    expect(board(known, q, [], new Set()).toBuy.map((r) => r.id)).toEqual([salt.id]);
     q = { ...q, entries: q.entries.map((x) => ({ ...x, transmission: "transmitted" as const })) };
     q = onDelivered(q, [
       { client_op_id: e.op.client_op_id, result: "applied", rev: 1, item: { ...salt, needed: true, rev: 1 } },
     ]);
     expect(q.entries).toHaveLength(0);
-    expect(board(known, q, []).toBuy.map((r) => r.id)).toEqual([salt.id]);
+    expect(board(known, q, [], new Set()).toBuy.map((r) => r.id)).toEqual([salt.id]);
   });
 
   it("a tick puts the row under Done and keeps it off the list, pinned ones too", () => {
     const bread = data(state(uid(), "pinned"));
     let q = queueWith([bread]);
     q = enqueue(q, buildOp("buy", bread, {}, tap, { tick: true }));
-    const b = board(mergeSnapshot({}, [bread], 1), q, []);
+    const b = board(mergeSnapshot({}, [bread], 1), q, [], new Set());
     expect(b.toBuy).toHaveLength(0);
     expect(b.done.map((r) => r.id)).toEqual([bread.id]);
   });
@@ -112,7 +112,7 @@ describe("the board", () => {
     let q = queueWith([wipes]);
     const known = mergeSnapshot({}, [wipes], 1);
     q = enqueue(q, buildOp("mark_ordered", wipes, { order_id: "o1", quantity: 2 }, { ...tap, now: 5 }));
-    const b = board(known, q, []);
+    const b = board(known, q, [], new Set());
     expect(b.toBuy).toHaveLength(0);
     expect(b.onTheWay.map((o) => o.order.id)).toEqual(["o1"]);
     const server: Order[] = [
@@ -131,19 +131,23 @@ describe("the board", () => {
         bought_since_by: null,
       },
     ];
-    const partly = board(known, queueWith([wipes]), server);
+    const partly = board(known, queueWith([wipes]), server, new Set());
     expect(partly.toBuy[0]!.quantity).toBe(1);
   });
 
-  it("an order action answered at a revision newer than the last fetch shows; once a fetch has it, the server decides", () => {
+  it("an answered order action shows until a snapshot that started after its answer; never one from before", () => {
     const item = data(state(uid(), "pinned"));
     const q0 = queueWith([item]);
     const e = buildOp("mark_ordered", item, { order_id: "o9" }, { ...tap, now: 100 });
     const q = { ...q0, recent: [{ ...e, transmission: "answered" as const, resultRev: 1 }] };
-    // The last payload is at rev 0: the answer (rev 1) is newer, whatever the device clock says.
-    expect(openOrders([], q, mergeFetched({}, [item], 999)).map((o) => o.id)).toEqual(["o9"]);
-    // A fetch that already holds rev 1 is the server's word: no order in it, none shown.
-    expect(openOrders([], q, mergeFetched({}, [{ ...item, rev: 1 }], 50))).toEqual([]);
+    // Answered after the last snapshot started: the snapshot's On the way may not have it yet.
+    expect(openOrders([], q, new Set()).map((o) => o.id)).toEqual(["o9"]);
+    // A snapshot that started after the answer is the server's word: no open order in it, none shown
+    // (the order arrived on another phone).
+    expect(openOrders([], q, new Set([e.op.client_op_id]))).toEqual([]);
+    // Re-review: after a reload nothing is known and no snapshot has run yet; an old answer in `recent`
+    // must not come back as a phantom order.
+    expect(openOrders([], q, null)).toEqual([]);
   });
 
   it("a snapshot that leaves an item out covers the newer state the device held when it started", () => {
@@ -152,19 +156,21 @@ describe("the board", () => {
     let q = queueWith([bread]);
     let known = mergeFetched({}, [bread], 1);
     q = refreshed(q, [{ ...bread, level: "out", rev: 5 }]);
-    expect(board(known, q, []).toBuy.map((r) => r.id)).toEqual([bread.id]);
+    expect(board(known, q, [], new Set()).toBuy.map((r) => r.id)).toEqual([bread.id]);
     // The next snapshot, started while the device held rev 5, does not list it: off the list for good.
     known = mergeSnapshot(known, [], 10, { [bread.id]: 5 });
-    expect(board(known, q, []).toBuy).toEqual([]);
+    expect(board(known, q, [], new Set()).toBuy).toEqual([]);
     // A snapshot started BEFORE the answer (rev 4 then) does not cover rev 5: the device's state stands.
-    expect(board(mergeSnapshot(mergeFetched({}, [bread], 1), [], 10, { [bread.id]: 4 }), q, []).toBuy).toHaveLength(1);
+    expect(
+      board(mergeSnapshot(mergeFetched({}, [bread], 1), [], 10, { [bread.id]: 4 }), q, [], new Set()).toBuy
+    ).toHaveLength(1);
   });
 });
 
 describe("grouping and badges", () => {
   const row = (name: string, category: string, s: ItemState) => {
     const d = data(s, { name, category });
-    return board(mergeSnapshot({}, [d], 1), queueWith([d]), []).toBuy[0]!;
+    return board(mergeSnapshot({}, [d], 1), queueWith([d]), [], new Set()).toBuy[0]!;
   };
 
   it("follows the person's aisle order, then names, with unnamed groups last", () => {

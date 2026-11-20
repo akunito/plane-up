@@ -120,21 +120,19 @@ export function dropMissingFromList(
 }
 
 /**
- * Open orders as the device should show them: the server's, plus order actions still queued, plus those
- * answered at a revision newer than the item's last fetched payload (every applied operation advances
- * the item's revision, an order action included). Decided by revision, never by device clock (phase 4
- * audit: a fetch that started after the tap could read the database before the answer, and a clock set
- * back resurrected old orders). A refused action leaves the queue at its answer and is not in `recent`,
- * so it stops showing then.
+ * Open orders as the device should show them: the server's (complete for every item the viewer sees,
+ * as of the last to-buy snapshot), plus order actions still queued, plus answered ones the snapshot did
+ * not cover. `covered`: the client_op_ids already answered when that snapshot STARTED (null before the
+ * first one). Decided by which answers existed, never by device clock or by a fetched revision (phase 4
+ * audit and re-review: the clock let a fetch read the database before the answer, and the revision
+ * showed a phantom order after a reload, for an item no snapshot returns once it has arrived). A
+ * refused action leaves the queue at its answer and is not in `recent`, so it stops showing then.
  */
-export function openOrders(server: readonly Order[], queue: QueueState, known: Record<string, Known>): Order[] {
+export function openOrders(server: readonly Order[], queue: QueueState, covered: ReadonlySet<string> | null): Order[] {
   const byId = new Map<string, Order>();
   for (const o of server) if (o.status === "open") byId.set(o.id, o);
   const local: Entry[] = [];
-  for (const e of queue.recent) {
-    const fetched = known[e.op.target]?.data.rev;
-    if (e.resultRev !== undefined && (fetched === undefined || e.resultRev > fetched)) local.push(e);
-  }
+  if (covered) for (const e of queue.recent) if (!covered.has(e.op.client_op_id)) local.push(e);
   for (const e of queue.entries) local.push(e);
   local.sort((a, b) => a.tappedAt - b.tappedAt);
   for (const e of local) {
@@ -229,9 +227,14 @@ export function rowFor(
  * verdict of the last fetch stands, because the device does not know the state of an item that left
  * the list on someone else's phone.
  */
-export function board(known: Record<string, Known>, queue: QueueState, serverOrders: readonly Order[]): Board {
+export function board(
+  known: Record<string, Known>,
+  queue: QueueState,
+  serverOrders: readonly Order[],
+  covered: ReadonlySet<string> | null
+): Board {
   const shown = view(queue);
-  const orders = openOrders(serverOrders, queue, known);
+  const orders = openOrders(serverOrders, queue, covered);
   const pending = new Set(queue.entries.map((e) => e.op.target));
   const toBuyRows: Row[] = [];
   const done: Row[] = [];

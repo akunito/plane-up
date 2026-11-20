@@ -41,7 +41,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
   const k = s.known[id];
   const shown = useMemo(() => view(s.queue), [s.queue]);
   const state = shown[id];
-  const row = useMemo(() => board(s.known, s.queue, s.orders), [s.known, s.queue, s.orders]);
+  const row = useMemo(() => board(s.known, s.queue, s.orders, s.covered), [s.known, s.queue, s.orders, s.covered]);
   const toBuyRow = row.toBuy.find((r) => r.id === id) ?? null;
   const [history, setHistory] = useState<HistoryEntry[] | null>(null);
   const [message, setMessage] = useState<string | null>(null);

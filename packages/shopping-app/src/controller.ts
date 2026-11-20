@@ -20,6 +20,7 @@ import type {
 } from "@plane/inventory";
 import {
   approve,
+  BACKOFF_MAX_MS,
   createItem,
   createQueue,
   discard,
@@ -80,6 +81,8 @@ export interface AppState {
   lists: Lists | null;
   known: Record<string, Known>;
   orders: Order[];
+  /** Answers already in when the last to-buy snapshot started: its On the way covers them (model openOrders). */
+  covered: ReadonlySet<string> | null;
   queue: QueueState;
   preferences: Preferences;
   /** The last request failure that is not the queue's own (refresh, edits). */
@@ -109,6 +112,12 @@ export class Controller {
   private store: AppStore | null = null;
   /** user:workspace of the open store. */
   private storeKey = "";
+  /**
+   * Every store opened in this page load, by user:workspace: switching back reuses it instead of
+   * opening (and restarting) it again, and the in-memory fallback keeps a workspace's waiting taps
+   * across switches (phase 4 re-review).
+   */
+  private stores = new Map<string, AppStore>();
   private readonly now: () => number;
   private readonly lock: Lock | undefined;
   private refreshing: Promise<void> | null = null;
@@ -129,6 +138,7 @@ export class Controller {
       lists: null,
       known: {},
       orders: [],
+      covered: null,
       queue: createQueue("", ""),
       preferences: EMPTY_PREFERENCES,
       connection: null,
@@ -199,7 +209,9 @@ export class Controller {
 
   async switchWorkspace(slug: string): Promise<void> {
     this.watched.clear();
-    this.set({ slug, phase: "loading", lists: null, known: {}, orders: [] });
+    // A toast from the other workspace would offer an Undo this one cannot do.
+    if (this.toastTimer) clearTimeout(this.toastTimer);
+    this.set({ slug, phase: "loading", lists: null, known: {}, orders: [], covered: null, toast: null });
     try {
       await this.openWorkspace();
     } catch {
@@ -230,8 +242,13 @@ export class Controller {
     if (!this.store || this.storeKey !== key) {
       this.store = null;
       try {
-        const open = this.deps.openStore ?? defaultStore;
-        this.store = await open(lists.body.me.id, this.state.slug);
+        let store = this.stores.get(key);
+        if (!store) {
+          const open = this.deps.openStore ?? defaultStore;
+          store = await open(lists.body.me.id, this.state.slug);
+          this.stores.set(key, store);
+        }
+        this.store = store;
         this.storeKey = key;
       } catch (error) {
         if (error instanceof StoredQueueError)
@@ -275,18 +292,24 @@ export class Controller {
   }
 
   private async refreshOnce(): Promise<void> {
-    if (!this.store) return; // a focus event while the app is still opening
+    const target = this.store;
+    if (!target) return; // a focus event while the app is still opening
     const startedAt = this.now();
+    const covered = new Set(this.state.queue.recent.map((e) => e.op.client_op_id));
     // What the device held for each item when the request started: the snapshot's verdict covers it.
     const revsAtStart: Record<string, number> = {};
     for (const [id, s] of Object.entries(this.state.queue.known)) revsAtStart[id] = s.rev;
     const out = await fetchShoppingList(this.client());
+    // A workspace switch while it was in flight: the answer belongs to the other workspace's queue.
+    if (this.store !== target) return;
     if (out.kind !== "ok") return this.set({ connection: out.kind === "failed" ? out.failure : "refused" });
     const payloads = [...out.list.items, ...(out.list.on_the_way_items ?? [])] as unknown as ItemData[];
-    await this.updateQueue((s) => refreshed(s, payloads));
+    await this.updateQueue((s) => refreshed(s, payloads), target);
+    if (this.store !== target) return;
     this.set({
       known: mergeSnapshot(this.state.known, payloads, startedAt, revsAtStart),
       orders: out.list.on_the_way as unknown as Order[],
+      covered,
       connection: null,
     });
     await Promise.all([...this.watched].map((id) => this.loadList(id)));
@@ -301,11 +324,15 @@ export class Controller {
   async loadList(listId: string): Promise<void> {
     const list = this.state.lists?.lists.find((l) => l.id === listId);
     if (!list) return;
+    const target = this.store;
+    if (!target) return;
     const startedAt = this.now();
     const out = await fetchListItems(this.client(), list.project, listId);
+    if (this.store !== target) return;
     if (out.kind !== "ok") return this.set({ connection: out.kind === "failed" ? out.failure : "refused" });
     const payloads = out.items as unknown as ItemData[];
-    await this.updateQueue((s) => refreshed(s, payloads));
+    await this.updateQueue((s) => refreshed(s, payloads), target);
+    if (this.store !== target) return;
     // Open orders of this list: upserted. Closed ones disappear with the next to-buy fetch, which lists
     // every open order the viewer can see.
     const orders = new Map(this.state.orders.map((o) => [o.id, o]));
@@ -319,14 +346,17 @@ export class Controller {
 
   /** Quick capture's search. The items it returns become known, so a tap on one can be queued. */
   async search(query: string): Promise<{ ids: string[]; categories: string[]; stores: string[] } | null> {
+    const target = this.store;
     const startedAt = this.now();
     const out = await fetchSuggestions(this.client(), query);
+    if (!target || this.store !== target) return null;
     if (out.kind !== "ok") {
       this.set({ connection: out.kind === "failed" ? out.failure : "refused" });
       return null;
     }
     const payloads = out.body.items as unknown as ItemData[];
-    await this.updateQueue((s) => refreshed(s, payloads));
+    await this.updateQueue((s) => refreshed(s, payloads), target);
+    if (this.store !== target) return null;
     this.set({ known: mergeFetched(this.state.known, payloads, startedAt), connection: null });
     return { ids: payloads.map((p) => p.id), categories: out.body.categories, stores: out.body.stores };
   }
@@ -431,6 +461,7 @@ export class Controller {
   }
 
   async retry(): Promise<void> {
+    if (!this.store) return; // still opening, or on the corrupt screen
     await this.updateQueue((s) => retryNow(s));
     await this.flush();
   }
@@ -461,7 +492,10 @@ export class Controller {
     // Only a real backoff in the future. A failure whose time has passed means the replay that just ran
     // had nothing it could send (a held head waits for the person): retrying then loops every 50 ms
     // (phase 4 audit). The person's approve, discard or "retry" calls flush() themselves.
-    if (!failure || this.state.queue.entries.length === 0 || failure.nextTryAt <= this.now()) return;
+    // And not past BACKOFF_MAX_MS ahead, which nextBatch treats as a clock jump and ignores: a timer that
+    // far out overflows setTimeout and fires at once, every time (phase 4 re-review).
+    const ahead = failure ? failure.nextTryAt - this.now() : 0;
+    if (!failure || this.state.queue.entries.length === 0 || ahead <= 0 || ahead > BACKOFF_MAX_MS) return;
     const wait = Math.max(failure.nextTryAt - this.now(), 0) + 50;
     this.retryTimer = setTimeout(() => void this.flush(), wait);
   }
@@ -476,20 +510,21 @@ export class Controller {
   ): Promise<{ kind: "created"; id: string } | { kind: "exists"; id: string | null } | { kind: "failed" }> {
     const list = this.state.lists?.lists.find((l) => l.id === listId);
     if (!list) return { kind: "failed" };
+    const target = this.store;
     const startedAt = this.now();
     const body: Record<string, unknown> = { name };
     if (mode) body.mode = mode;
     const out = await createItem(this.client(), list.project, listId, body);
     if (out.kind === "conflict") {
       const existing = out.body.item as unknown as ItemData | undefined;
-      if (existing) await this.learn([existing], startedAt);
+      if (existing) await this.learn([existing], startedAt, target);
       return { kind: "exists", id: existing?.id ?? null };
     }
     if (out.kind !== "ok") {
       this.set({ connection: out.kind === "failed" ? out.failure : "refused" });
       return { kind: "failed" };
     }
-    await this.learn([out.body as unknown as ItemData], startedAt);
+    await this.learn([out.body as unknown as ItemData], startedAt, target);
     return { kind: "created", id: out.body.id };
   }
 
@@ -500,6 +535,7 @@ export class Controller {
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     const item = this.state.known[itemId]?.data;
     if (!item) return { ok: false, error: "gone" };
+    const target = this.store;
     const startedAt = this.now();
     const out = await updateItem(this.client(), item.project.id, itemId, data);
     if (out.kind === "conflict") return { ok: false, error: "exists" };
@@ -508,7 +544,7 @@ export class Controller {
       this.set({ connection: out.failure });
       return { ok: false, error: out.failure };
     }
-    await this.learn([out.body as unknown as ItemData], startedAt);
+    await this.learn([out.body as unknown as ItemData], startedAt, target);
     return { ok: true };
   }
 
@@ -519,8 +555,10 @@ export class Controller {
     if (out.kind === "ok") this.set({ preferences: out.body });
   }
 
-  private async learn(payloads: ItemData[], startedAt: number): Promise<void> {
-    await this.updateQueue((s) => refreshed(s, payloads));
+  private async learn(payloads: ItemData[], startedAt: number, target: AppStore | null): Promise<void> {
+    if (!target || this.store !== target) return; // answered after a workspace switch
+    await this.updateQueue((s) => refreshed(s, payloads), target);
+    if (this.store !== target) return;
     this.set({ known: mergeFetched(this.state.known, payloads, startedAt) });
   }
 

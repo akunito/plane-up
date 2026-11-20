@@ -28,7 +28,7 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
   }, [key, c]);
 
   const shown = useMemo(() => view(s.queue), [s.queue]);
-  const orders = useMemo(() => openOrders(s.orders, s.queue, s.known), [s.orders, s.queue, s.known]);
+  const orders = useMemo(() => openOrders(s.orders, s.queue, s.covered), [s.orders, s.queue, s.covered]);
   const [recount, setRecount] = useState<{ id: string; name: string; value: string } | null>(null);
   const [arriving, setArriving] = useState<{ itemId: string; name: string; orders: Order[] } | null>(null);
 
