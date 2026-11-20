@@ -215,7 +215,9 @@ it("a queue per user on this install, with a UUID queue id", () => {
   const q = newQueue("ana");
   expect(q.queueId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   expect(newQueue("ana").queueId).not.toBe(q.queueId);
-  expect(storageKey("ana")).not.toBe(storageKey("bob"));
+  expect(storageKey("ana", "home")).not.toBe(storageKey("bob", "home"));
+  // A queue never travels to another workspace, where the server would refuse its items as gone.
+  expect(storageKey("ana", "home")).not.toBe(storageKey("ana", "work"));
 });
 
 describe("phase 3 re-review", () => {

@@ -3,7 +3,9 @@
 // memory store.
 //
 // Polling (brief, Designer defaults): on focus, on reconnect, after the device's own operations and every
-// 20 s while a screen is visible. Phase 4 is online: the queue still holds every tap until it is
+// 20 s while a screen is visible. The queue is per user AND workspace (storage.ts storageKey): a workspace
+// switch opens the other workspace's queue, and a replay already running keeps writing to the queue it
+// started with. Phase 4 is online: the queue still holds every tap until it is
 // answered, so nothing is lost when a request fails, but the offline screens are phase 6.
 
 import type {
@@ -43,7 +45,7 @@ import {
 } from "@plane/inventory";
 import type { Lock } from "@plane/inventory";
 import type { AppStore } from "./store";
-import { idbStore, memoryStore, prefs, StoredQueueError } from "./store";
+import { discardStored, idbStore, memoryStore, prefs, StoredQueueError } from "./store";
 import type { Grouping, ItemData, Known, Order } from "./model";
 import { dropMissingFromList, mergeFetched, mergeSnapshot } from "./model";
 
@@ -53,6 +55,7 @@ export const DONE_RESET_MS = 6 * 60 * 60 * 1000;
 const TOAST_MS = 6_000;
 
 export type Phase =
+  | "corrupt"
   | "loading"
   | "ready"
   | "signed_out"
@@ -77,7 +80,6 @@ export interface AppState {
   lists: Lists | null;
   known: Record<string, Known>;
   orders: Order[];
-  ordersFetchedAt: number;
   queue: QueueState;
   preferences: Preferences;
   /** The last request failure that is not the queue's own (refresh, edits). */
@@ -90,8 +92,8 @@ export interface Deps {
   base: string;
   fetchImpl?: typeof fetch;
   now?: () => number;
-  /** A store for the given user; defaults to IndexedDB, falling back to memory. */
-  openStore?: (userId: string) => Promise<AppStore>;
+  /** A store for the given user and workspace; defaults to IndexedDB, falling back to memory. */
+  openStore?: (userId: string, workspace: string) => Promise<AppStore>;
   lock?: Lock;
   /** The workspace in the address, if any. */
   slug?: string | null;
@@ -105,6 +107,8 @@ export class Controller {
   private state: AppState;
   private listeners = new Set<Listener>();
   private store: AppStore | null = null;
+  /** user:workspace of the open store. */
+  private storeKey = "";
   private readonly now: () => number;
   private readonly lock: Lock | undefined;
   private refreshing: Promise<void> | null = null;
@@ -125,7 +129,6 @@ export class Controller {
       lists: null,
       known: {},
       orders: [],
-      ordersFetchedAt: 0,
       queue: createQueue("", ""),
       preferences: EMPTY_PREFERENCES,
       connection: null,
@@ -157,6 +160,15 @@ export class Controller {
   // ---------------------------------------------------------------- start
 
   async start(): Promise<void> {
+    try {
+      await this.startOnce();
+    } catch {
+      // Anything unexpected ends on a screen with "Try again", never on "Loading…" for ever.
+      this.set({ phase: "error" });
+    }
+  }
+
+  private async startOnce(): Promise<void> {
     const client = this.client();
     const settings = await requestJson<{
       workspace?: { last_workspace_slug?: string | null; fallback_workspace_slug?: string | null };
@@ -187,8 +199,21 @@ export class Controller {
 
   async switchWorkspace(slug: string): Promise<void> {
     this.watched.clear();
-    this.set({ slug, phase: "loading", lists: null, known: {}, orders: [], ordersFetchedAt: 0 });
-    await this.openWorkspace();
+    this.set({ slug, phase: "loading", lists: null, known: {}, orders: [] });
+    try {
+      await this.openWorkspace();
+    } catch {
+      this.set({ phase: "error" });
+    }
+  }
+
+  /** The person chose to throw away a stored queue that cannot be read. */
+  async discardStoredQueue(): Promise<void> {
+    const me = this.state.lists?.me.id;
+    if (!me) return;
+    await discardStored(me, this.state.slug);
+    this.set({ phase: "loading" });
+    await this.start();
   }
 
   private async openWorkspace(): Promise<void> {
@@ -201,12 +226,16 @@ export class Controller {
       return this.set({ phase: "error", connection: lists.kind === "failed" ? lists.failure : "refused" });
     prefs.set("slug", this.state.slug);
     if (lists.body.lists.length === 0) return this.set({ phase: "no_inventory", lists: lists.body });
-    if (!this.store || this.state.queue.userId !== lists.body.me.id) {
+    const key = `${lists.body.me.id}:${this.state.slug}`;
+    if (!this.store || this.storeKey !== key) {
+      this.store = null;
       try {
         const open = this.deps.openStore ?? defaultStore;
-        this.store = await open(lists.body.me.id);
+        this.store = await open(lists.body.me.id, this.state.slug);
+        this.storeKey = key;
       } catch (error) {
-        if (error instanceof StoredQueueError && error.reason === "newer") return this.set({ phase: "newer" });
+        if (error instanceof StoredQueueError)
+          return this.set({ phase: error.reason === "newer" ? "newer" : "corrupt", lists: lists.body });
         throw error;
       }
     }
@@ -229,28 +258,35 @@ export class Controller {
       return this.refreshing;
     }
     this.refreshing = (async () => {
-      do {
-        this.refreshAgain = false;
-        // Sequential on purpose: one fetch at a time, again only if asked while one was running.
-        // oxlint-disable-next-line no-await-in-loop
-        await this.refreshOnce();
-      } while (this.refreshAgain);
-    })().finally(() => {
-      this.refreshing = null;
-    });
+      try {
+        do {
+          this.refreshAgain = false;
+          // Sequential on purpose: one fetch at a time, again only if asked while one was running.
+          // oxlint-disable-next-line no-await-in-loop
+          await this.refreshOnce();
+        } while (this.refreshAgain);
+      } finally {
+        // Cleared here, in the same turn as the last check of refreshAgain: a `.finally()` outside ran a
+        // microtask later, and a refresh asked in between was dropped (phase 4 audit).
+        this.refreshing = null;
+      }
+    })();
     return this.refreshing;
   }
 
   private async refreshOnce(): Promise<void> {
+    if (!this.store) return; // a focus event while the app is still opening
     const startedAt = this.now();
+    // What the device held for each item when the request started: the snapshot's verdict covers it.
+    const revsAtStart: Record<string, number> = {};
+    for (const [id, s] of Object.entries(this.state.queue.known)) revsAtStart[id] = s.rev;
     const out = await fetchShoppingList(this.client());
     if (out.kind !== "ok") return this.set({ connection: out.kind === "failed" ? out.failure : "refused" });
     const payloads = [...out.list.items, ...(out.list.on_the_way_items ?? [])] as unknown as ItemData[];
     await this.updateQueue((s) => refreshed(s, payloads));
     this.set({
-      known: mergeSnapshot(this.state.known, payloads, startedAt),
+      known: mergeSnapshot(this.state.known, payloads, startedAt, revsAtStart),
       orders: out.list.on_the_way as unknown as Order[],
-      ordersFetchedAt: startedAt,
       connection: null,
     });
     await Promise.all([...this.watched].map((id) => this.loadList(id)));
@@ -297,10 +333,14 @@ export class Controller {
 
   // ---------------------------------------------------------------- the queue
 
-  private async updateQueue(fn: (s: QueueState) => QueueState): Promise<QueueState> {
-    if (!this.store) throw new Error("no store");
-    const next = await this.store.update(fn);
-    this.set({ queue: next });
+  private async updateQueue(
+    fn: (s: QueueState) => QueueState,
+    target: AppStore | null = this.store
+  ): Promise<QueueState> {
+    if (!target) throw new Error("no store");
+    const next = await target.update(fn);
+    // Only the open workspace's queue is on screen; a replay of the previous one still lands in its own.
+    if (target === this.store) this.set({ queue: next });
     return next;
   }
 
@@ -398,9 +438,10 @@ export class Controller {
   /** Send what can be sent, then read the lists again (polling after one's own operations). */
   async flush(): Promise<void> {
     if (!this.store || this.state.phase === "loading") return;
+    const target = this.store;
     const store: AppStore = {
-      update: (fn) => this.updateQueue(fn),
-      read: () => this.store!.read(),
+      update: (fn) => this.updateQueue(fn, target),
+      read: () => target.read(),
     };
     const userId = this.state.queue.userId;
     const before = this.state.queue.entries.length;
@@ -417,7 +458,10 @@ export class Controller {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
     const failure = this.state.queue.failure;
-    if (!failure || this.state.queue.entries.length === 0) return;
+    // Only a real backoff in the future. A failure whose time has passed means the replay that just ran
+    // had nothing it could send (a held head waits for the person): retrying then loops every 50 ms
+    // (phase 4 audit). The person's approve, discard or "retry" calls flush() themselves.
+    if (!failure || this.state.queue.entries.length === 0 || failure.nextTryAt <= this.now()) return;
     const wait = Math.max(failure.nextTryAt - this.now(), 0) + 50;
     this.retryTimer = setTimeout(() => void this.flush(), wait);
   }
@@ -503,7 +547,10 @@ export class Controller {
       void this.refresh();
       void this.flush();
     };
-    const onOnline = () => void this.retry();
+    const onOnline = () => {
+      void this.retry();
+      void this.refresh(); // reconnect is a polling point even with nothing queued
+    };
     const onVisible = () => {
       if (win.document.visibilityState === "visible") onFocus();
     };
@@ -522,9 +569,9 @@ export class Controller {
   }
 }
 
-async function defaultStore(userId: string): Promise<AppStore> {
+async function defaultStore(userId: string, workspace: string): Promise<AppStore> {
   try {
-    return await idbStore(userId);
+    return await idbStore(userId, workspace);
   } catch (error) {
     if (error instanceof StoredQueueError) throw error;
     // IndexedDB refused (a private window): keep working, in memory.

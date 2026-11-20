@@ -210,6 +210,9 @@ export const pl: Dictionary = {
   no_workspace: "Nie należysz jeszcze do żadnej przestrzeni roboczej.",
   error: "Nie udało się wczytać. Sprawdź połączenie i spróbuj ponownie.",
   try_again: "Spróbuj ponownie",
+  corrupt:
+    "Nie można odczytać zmian zapisanych na tym telefonie. Odrzuć je, aby kontynuować: to, co nie zostało wysłane, przepadnie.",
+  discard_stored: "Odrzuć zapisane zmiany",
   newer: "Ten telefon ma zmiany z nowszej wersji aplikacji. Odśwież, aby ją zaktualizować.",
   reload: "Odśwież",
   workspace: "Przestrzeń robocza",

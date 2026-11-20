@@ -15,7 +15,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Browser, Page, TestInfo } from "@playwright/test";
-import { apiDelete, authFile, expect, expectNoHorizontalOverflow, manifest, test } from "./helpers";
+import { randomUUID } from "node:crypto";
+import { apiDelete, apiPatch, apiPost, authFile, expect, expectNoHorizontalOverflow, manifest, test } from "./helpers";
 
 const INV = manifest.workspaces["qa-inv"];
 const items = INV?.inventory.items ?? {};
@@ -23,6 +24,8 @@ const items = INV?.inventory.items ?? {};
 type Item = {
   id: string;
   name: string;
+  rev: number;
+  project: { id: string };
   needed: boolean;
   level: string | null;
   quantity: number | null;
@@ -50,6 +53,47 @@ async function item(page: Page, name: string): Promise<Item> {
   return found!;
 }
 
+/** A server value, polled: a single read can reach the server before the tap was applied. */
+const server = (page: Page, name: string, field: keyof Item) =>
+  expect.poll(async () => (await item(page, name))[field], { timeout: 15_000 });
+
+/**
+ * Put back what the workflows touch, through the API, whatever the test did or where it stopped: the
+ * android project runs after desktop against the same seed (phase 4 audit: a test failing halfway
+ * failed every later one).
+ */
+async function restoreSeed(page: Page) {
+  const ops: Record<string, unknown>[] = [];
+  const want: [string, { needed?: boolean; quantity?: number }][] = [
+    ["Milk", { needed: true }],
+    ["Salt", { needed: false }],
+    ["Wipes", { quantity: 1 }],
+    ["Protein", { quantity: 0 }],
+  ];
+  for (const [name, state] of want) {
+    // Sequential: each read gives the revision its own operation names.
+    // oxlint-disable-next-line no-await-in-loop
+    const now = await item(page, name);
+    if (state.needed !== undefined && now.needed !== state.needed)
+      ops.push({ target: now.id, op: "set_needed", args: { needed: state.needed }, base_rev: now.rev });
+    if (state.quantity !== undefined && now.quantity !== state.quantity)
+      ops.push({ target: now.id, op: "recount", args: { quantity: state.quantity }, base_rev: now.rev });
+  }
+  const list = await (await page.request.get("/api/workspaces/qa-inv/inventory/shopping-list/")).json();
+  const seeded = new Set([INV!.inventory.orders.open, INV!.inventory.orders.overdue]);
+  for (const o of list.on_the_way as { id: string; item: string }[])
+    if (!seeded.has(o.id)) ops.push({ target: o.item, op: "cancel", args: { order_id: o.id } });
+  if (ops.length)
+    await apiPost(page, "/api/workspaces/qa-inv/inventory/ops/", {
+      ops: ops.map((o) => Object.assign(o, { v: 1, client_op_id: randomUUID(), queue_id: null })),
+    });
+  const salt = await item(page, "Salt");
+  if (salt.category !== "Pantry")
+    await apiPatch(page, `/api/workspaces/qa-inv/projects/${salt.project.id}/inventory/items/${salt.id}/`, {
+      category: "Pantry",
+    });
+}
+
 async function recount(page: Page, name: string, from: number, to: number) {
   await open(page, "#/inventory");
   await page.getByRole("button", { name: `${name}: type the count, now ${from}` }).click();
@@ -72,6 +116,7 @@ test.describe("shopping app @shopping", () => {
     ({ browserName }) => browserName === "webkit",
     "Chromium only: the app's devices are Android phones and desktop"
   );
+  test.afterEach(async ({ page }) => restoreSeed(page));
 
   test("the to-buy list: rows, counter without pinned rows, On the way with the overdue order", async ({ page }) => {
     await open(page);
@@ -94,11 +139,12 @@ test.describe("shopping app @shopping", () => {
     await page.getByRole("checkbox", { name: "Milk: bought" }).click();
     await expect(page.getByRole("region", { name: "Done · 1" })).toBeVisible();
     await settled(page);
-    expect((await item(page, "Milk")).needed).toBe(false);
+    await server(page, "Milk", "needed").toBe(false);
     await page.getByRole("button", { name: "Undo" }).click();
-    await settled(page);
+    // The undo is queued once the row is back on the list; only then is "nothing waiting" meaningful.
     await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
-    expect((await item(page, "Milk")).needed).toBe(true);
+    await settled(page);
+    await server(page, "Milk", "needed").toBe(true);
   });
 
   test("shopping mode: no online items, a stepper on units rows, untick from Done, finish", async ({ page }) => {
@@ -108,11 +154,13 @@ test.describe("shopping app @shopping", () => {
     // Wipes: 1 at home, restock to 4 → buys 3; one more → 4.
     await page.getByRole("button", { name: "Wipes: one more" }).click();
     await page.getByRole("checkbox", { name: "Wipes: bought" }).click();
+    await expect(page.getByRole("checkbox", { name: "Wipes: not bought after all" })).toBeVisible();
     await settled(page);
-    expect((await item(page, "Wipes")).quantity).toBe(5);
+    await server(page, "Wipes", "quantity").toBe(5);
     await page.getByRole("checkbox", { name: "Wipes: not bought after all" }).click();
+    await expect(page.getByRole("checkbox", { name: "Wipes: bought" })).toBeVisible();
     await settled(page);
-    expect((await item(page, "Wipes")).quantity).toBe(1);
+    await server(page, "Wipes", "quantity").toBe(1);
     await page.getByRole("link", { name: "Finish shopping" }).click();
     await expect(page).toHaveURL(/\/shopping\/#\/$/);
   });
@@ -125,10 +173,11 @@ test.describe("shopping app @shopping", () => {
     await needed.click();
     await expect(needed).toHaveAttribute("aria-pressed", "true");
     await settled(page);
-    expect((await item(page, "Salt")).needed).toBe(true);
+    await server(page, "Salt", "needed").toBe(true);
     await needed.click();
+    await expect(needed).toHaveAttribute("aria-pressed", "false");
     await settled(page);
-    expect((await item(page, "Salt")).needed).toBe(false);
+    await server(page, "Salt", "needed").toBe(false);
 
     const name = `QA e2e ${Date.now()}`;
     await page.getByRole("searchbox").fill(name);
@@ -148,7 +197,7 @@ test.describe("shopping app @shopping", () => {
     ).toBeVisible();
     await expect(page.getByRole("region", { name: "Garden" }).getByText(/public project/)).toBeVisible();
     await recount(page, "Wipes", 1, 5);
-    expect((await item(page, "Wipes")).quantity).toBe(5);
+    await server(page, "Wipes", "quantity").toBe(5);
     await recount(page, "Wipes", 5, 1);
   });
 
@@ -176,8 +225,9 @@ test.describe("shopping app @shopping", () => {
     const arrival = page.getByRole("dialog");
     await arrival.getByLabel("Quantity received").fill("1");
     await arrival.getByRole("button", { name: "Arrived" }).click();
+    await expect(page.getByRole("region", { name: "On the way · 2" })).toBeVisible();
     await settled(page);
-    expect((await item(page, "Protein")).quantity).toBe(1);
+    await server(page, "Protein", "quantity").toBe(1);
     await expect(page.getByRole("region", { name: "On the way · 2" })).toBeVisible();
     await recount(page, "Protein", 1, 0);
   });
@@ -190,10 +240,10 @@ test.describe("shopping app @shopping", () => {
     await expect(category).toHaveValue("Pantry");
     await category.fill("Spices");
     await category.press("Enter");
-    await expect.poll(async () => (await item(page, "Salt")).category).toBe("Spices");
+    await server(page, "Salt", "category").toBe("Spices");
     await category.fill("Pantry");
     await category.press("Enter");
-    await expect.poll(async () => (await item(page, "Salt")).category).toBe("Pantry");
+    await server(page, "Salt", "category").toBe("Pantry");
   });
 
   test("two people: one flags it needed, the other sees it on the next refresh; lists stay private", async ({
@@ -206,7 +256,8 @@ test.describe("shopping app @shopping", () => {
     await open(bo.page, "#/capture");
     await bo.page.getByRole("searchbox").fill("salt");
     await bo.page.getByRole("button", { name: "Salt: needed" }).click();
-    await settled(bo.page);
+    await expect(bo.page.getByRole("button", { name: "Salt: needed" })).toHaveAttribute("aria-pressed", "true");
+    await server(bo.page, "Salt", "needed").toBe(true);
     // Polling on focus (brief): the other phone coming back to the app.
     await ana.page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(ana.page.getByRole("checkbox", { name: "Salt: bought" })).toBeVisible();
@@ -219,7 +270,8 @@ test.describe("shopping app @shopping", () => {
     await open(bo.page, "#/capture");
     await bo.page.getByRole("searchbox").fill("salt");
     await bo.page.getByRole("button", { name: "Salt: needed" }).click();
-    await settled(bo.page);
+    await expect(bo.page.getByRole("button", { name: "Salt: needed" })).toHaveAttribute("aria-pressed", "false");
+    await server(bo.page, "Salt", "needed").toBe(false);
     await ana.page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(ana.page.getByRole("checkbox", { name: "Salt: bought" })).toHaveCount(0);
     await ana.context.close();
@@ -248,7 +300,16 @@ const shot = async (page: Page, name: string) => {
   const file = test.info().snapshotPath(`${name}.png`, { kind: "screenshot" });
   if (!fs.existsSync(file)) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    await page.screenshot({ ...options, path: file });
+    // Two identical captures in a row, as toHaveScreenshot waits for, so a frame mid-render is never
+    // taken as the reference (phase 4 audit).
+    let previous = await page.screenshot(options);
+    for (let i = 0; i < 10; i++) {
+      // oxlint-disable-next-line no-await-in-loop -- each capture is compared with the one before it
+      const next = await page.screenshot(options);
+      if (next.equals(previous)) break;
+      previous = next;
+    }
+    fs.writeFileSync(file, previous);
     console.log(`BASELINE CREATED ${path.basename(file)} — look at it before trusting it`);
     test.info().annotations.push({ type: "baseline-created", description: file });
     return;

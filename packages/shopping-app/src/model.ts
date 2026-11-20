@@ -51,6 +51,13 @@ export interface Known {
   fetchedAt: number;
   /** The server's to-buy verdict in that payload (to_buy > 0). */
   onList: boolean;
+  /**
+   * Set when a to-buy snapshot left the item out: the revision the device held for it when that request
+   * started. The server's "not on the list" then covers every state up to it (phase 4 audit: without it,
+   * an answer at a newer revision than the last payload kept the row on the list for good, because the
+   * item never appears in a snapshot again).
+   */
+  offRev?: number;
 }
 
 export type Grouping = "category" | "store" | "list" | "urgency";
@@ -75,17 +82,23 @@ export function mergeFetched(
 
 /**
  * A to-buy snapshot requested at `startedAt`: every item it leaves out was not on the list then, unless
- * something fetched later says otherwise.
+ * something fetched later says otherwise. `revsAtStart`: the revision the device's queue held for each
+ * item when the request started; the snapshot's verdict covers those.
  */
 export function mergeSnapshot(
   known: Record<string, Known>,
   payloads: readonly ItemData[],
-  startedAt: number
+  startedAt: number,
+  revsAtStart: Readonly<Record<string, number>> = {}
 ): Record<string, Known> {
   const out = mergeFetched(known, payloads, startedAt);
   const listed = new Set(payloads.map((p) => p.id));
   for (const [id, k] of Object.entries(out)) {
-    if (!listed.has(id) && k.fetchedAt < startedAt) out[id] = { ...k, fetchedAt: startedAt, onList: false };
+    if (listed.has(id) || k.fetchedAt >= startedAt) continue;
+    const next: Known = { ...k, fetchedAt: startedAt, onList: false };
+    const rev = revsAtStart[id];
+    if (rev !== undefined) next.offRev = rev;
+    out[id] = next;
   }
   return out;
 }
@@ -107,15 +120,21 @@ export function dropMissingFromList(
 }
 
 /**
- * Open orders as the device should show them: the server's, plus order actions tapped after the
- * server's list was requested (queued, or answered and not yet in a newer fetch). A refused action shows
- * until the next fetch, which follows every answer.
+ * Open orders as the device should show them: the server's, plus order actions still queued, plus those
+ * answered at a revision newer than the item's last fetched payload (every applied operation advances
+ * the item's revision, an order action included). Decided by revision, never by device clock (phase 4
+ * audit: a fetch that started after the tap could read the database before the answer, and a clock set
+ * back resurrected old orders). A refused action leaves the queue at its answer and is not in `recent`,
+ * so it stops showing then.
  */
-export function openOrders(server: readonly Order[], queue: QueueState, ordersFetchedAt: number): Order[] {
+export function openOrders(server: readonly Order[], queue: QueueState, known: Record<string, Known>): Order[] {
   const byId = new Map<string, Order>();
   for (const o of server) if (o.status === "open") byId.set(o.id, o);
   const local: Entry[] = [];
-  for (const e of queue.recent) if (e.tappedAt > ordersFetchedAt) local.push(e);
+  for (const e of queue.recent) {
+    const fetched = known[e.op.target]?.data.rev;
+    if (e.resultRev !== undefined && (fetched === undefined || e.resultRev > fetched)) local.push(e);
+  }
   for (const e of queue.entries) local.push(e);
   local.sort((a, b) => a.tappedAt - b.tappedAt);
   for (const e of local) {
@@ -210,14 +229,9 @@ export function rowFor(
  * verdict of the last fetch stands, because the device does not know the state of an item that left
  * the list on someone else's phone.
  */
-export function board(
-  known: Record<string, Known>,
-  queue: QueueState,
-  serverOrders: readonly Order[],
-  ordersFetchedAt: number
-): Board {
+export function board(known: Record<string, Known>, queue: QueueState, serverOrders: readonly Order[]): Board {
   const shown = view(queue);
-  const orders = openOrders(serverOrders, queue, ordersFetchedAt);
+  const orders = openOrders(serverOrders, queue, known);
   const pending = new Set(queue.entries.map((e) => e.op.target));
   const toBuyRows: Row[] = [];
   const done: Row[] = [];
@@ -231,7 +245,7 @@ export function board(
       continue;
     }
     const k = known[id]!;
-    const trustLocal = pending.has(id) || row.state.rev > k.data.rev;
+    const trustLocal = pending.has(id) || row.state.rev > Math.max(k.data.rev, k.offRev ?? -1);
     if (row.quantity <= 0 || (!trustLocal && !k.onList)) continue;
     toBuyRows.push(row);
     if (counts(row.state.mode)) count++;

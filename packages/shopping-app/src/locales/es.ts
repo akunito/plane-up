@@ -211,6 +211,9 @@ export const es: Dictionary = {
   no_workspace: "Todavía no estás en ningún espacio de trabajo.",
   error: "No se pudo cargar. Comprueba la conexión y vuelve a intentarlo.",
   try_again: "Reintentar",
+  corrupt:
+    "Los cambios guardados en este móvil no se pueden leer. Descártalos para seguir: lo que no se haya enviado se pierde.",
+  discard_stored: "Descartar los cambios guardados",
   newer: "Este móvil guarda cambios de una versión más nueva de la app. Recarga para actualizarla.",
   reload: "Recargar",
   workspace: "Espacio de trabajo",

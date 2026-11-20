@@ -29,10 +29,7 @@ export function ToBuy({ s }: { s: AppState }) {
   const [listFilter, setListFilter] = useState(prefs.get("listFilter") ?? "");
   const [ordering, setOrdering] = useState<Row | null>(null);
   const [arriving, setArriving] = useState<{ itemId: string; name: string; orders: Order[] } | null>(null);
-  const b = useMemo(
-    () => board(s.known, s.queue, s.orders, s.ordersFetchedAt),
-    [s.known, s.queue, s.orders, s.ordersFetchedAt]
-  );
+  const b = useMemo(() => board(s.known, s.queue, s.orders), [s.known, s.queue, s.orders]);
   const lists = s.lists?.lists ?? [];
   const filter = lists.some((l) => l.id === listFilter) ? listFilter : "";
   const rows = filter ? b.toBuy.filter((r) => r.data.list.id === filter) : b.toBuy;

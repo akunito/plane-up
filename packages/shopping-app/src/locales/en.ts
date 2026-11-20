@@ -211,6 +211,8 @@ export const en = {
   no_workspace: "You are not in any workspace yet.",
   error: "Could not load. Check the connection and try again.",
   try_again: "Try again",
+  corrupt: "The changes stored on this phone cannot be read. Discard them to go on: anything not sent yet is lost.",
+  discard_stored: "Discard the stored changes",
   newer: "This phone holds changes from a newer version of the app. Reload to update it.",
   reload: "Reload",
   workspace: "Workspace",

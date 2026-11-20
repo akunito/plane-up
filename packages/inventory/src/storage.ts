@@ -9,11 +9,14 @@ import { newUuid } from "./ops";
 export const STORAGE_VERSION = 1;
 
 /**
- * One queue per user on this install: another user signing in on the same phone gets their own key,
+ * One queue per user and workspace on this install: another user signing in on the same phone gets their own key,
  * and never loads or sends this one (brief: queue ownership).
  */
-export function storageKey(userId: string): string {
-  return `plane-inventory-queue:${userId}`;
+export function storageKey(userId: string, workspace: string): string {
+  // Per workspace too (phase 4 audit): an operation names an item, and the server looks it up only in
+  // the workspace of the URL it was sent to. One queue for two workspaces sent workspace A's waiting
+  // taps to B after a switch, where every one was refused as "gone" and lost.
+  return `plane-inventory-queue:${userId}:${workspace}`;
 }
 
 /** A new queue for a user on this install, with its own queue_id (a UUID, as the server requires). */

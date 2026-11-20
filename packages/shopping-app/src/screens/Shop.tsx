@@ -12,10 +12,7 @@ import { DoneSection, groupLabel, tickArgs } from "./ToBuy";
 export function Shop({ s }: { s: AppState }) {
   const { c, t } = useCtx();
   useTick(60_000);
-  const b = useMemo(
-    () => board(s.known, s.queue, s.orders, s.ordersFetchedAt),
-    [s.known, s.queue, s.orders, s.ordersFetchedAt]
-  );
+  const b = useMemo(() => board(s.known, s.queue, s.orders), [s.known, s.queue, s.orders]);
   const inStore = b.toBuy.filter((r) => !r.data.buy_online);
   const online = b.toBuy.filter((r) => r.data.buy_online);
   const grouping = s.preferences.default_grouping;

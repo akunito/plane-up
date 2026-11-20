@@ -2,10 +2,11 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createQueue, makeLock, newUuid } from "@plane/inventory";
+import { createQueue, makeLock, newUuid, tap } from "@plane/inventory";
 import { App } from "../src/app";
 import { Controller } from "../src/controller";
 import { memoryStore } from "../src/store";
+import type { AppStore } from "../src/store";
 import { BABY, FakeApi, GROCERIES, SUPPLEMENTS, state, uid } from "./fake-api";
 import type { Data } from "./fake-api";
 import type { ItemState } from "@plane/inventory";
@@ -391,6 +392,61 @@ describe("phases and failures", () => {
     await controller.start();
     render(<App controller={controller} locale="en" />);
     expect(screen.getByText("You have no access to the lists in this workspace.")).toBeTruthy();
+  });
+});
+
+describe("the queue belongs to its workspace", () => {
+  it("a workspace switch never sends one workspace's waiting taps to another", async () => {
+    window.location.hash = "#/";
+    api = new FakeApi(catalog());
+    const stores = new Map<string, AppStore>();
+    controller = new Controller({
+      base: "",
+      fetchImpl: (input, init) => api.fetch(input, init),
+      lock: makeLock(undefined),
+      openStore: async (userId, workspace) => {
+        const key = `${userId}:${workspace}`;
+        if (!stores.has(key)) stores.set(key, memoryStore(createQueue(userId, newUuid())));
+        return stores.get(key)!;
+      },
+    });
+    await controller.start();
+    render(<App controller={controller} locale="en" />);
+    api.fail = { status: 502 };
+    fireEvent.click(screen.getByRole("checkbox", { name: "Milk: bought" }));
+    await waitFor(() => expect(controller.get().queue.failure?.kind).toBe("server"));
+    api.fail = null;
+    await act(async () => controller.switchWorkspace("work"));
+    await act(async () => controller.flush());
+    // Nothing went to the other workspace, where the item does not exist and would be refused as gone.
+    expect(api.calls.filter((c) => c.path.includes("/workspaces/work/inventory/ops/"))).toHaveLength(0);
+    expect(controller.get().queue.entries).toHaveLength(0);
+    await act(async () => controller.switchWorkspace("home"));
+    await act(async () => controller.retry());
+    await settle();
+    expect(api.calls.filter((c) => c.path.includes("/workspaces/home/inventory/ops/")).length).toBeGreaterThan(0);
+    expect(api.server.items.get(MILK)!.needed).toBe(false);
+  });
+
+  it("a held entry at the head does not make the app retry in a loop", async () => {
+    await boot();
+    await act(async () => {
+      // A tap three hours old, never sent: held until the person approves it.
+      await (
+        controller as unknown as {
+          updateQueue: (fn: (s: ReturnType<typeof createQueue>) => ReturnType<typeof createQueue>) => Promise<unknown>;
+        }
+      ).updateQueue((s) => ({
+        ...tap(s, "buy", MILK, {}, { now: Date.now() - 3 * 3_600_000, newId: newUuid }),
+        failure: { kind: "server", attempts: 3, nextTryAt: Date.now() - 1 },
+      }));
+    });
+    const before = api.calls.length;
+    await act(async () => controller.flush());
+    await act(async () => new Promise((r) => setTimeout(r, 600)));
+    // One refresh after the flush, then quiet: before the fix a 50 ms timer refetched for ever.
+    expect(api.calls.length - before).toBeLessThanOrEqual(3);
+    expect(api.ops()).toHaveLength(0);
   });
 });
 

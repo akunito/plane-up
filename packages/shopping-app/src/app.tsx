@@ -88,7 +88,9 @@ function Root() {
                 ? t("no_workspace")
                 : s.phase === "newer"
                   ? t("newer")
-                  : t("error");
+                  : s.phase === "corrupt"
+                    ? t("corrupt")
+                    : t("error");
     return (
       <div className="screen center-screen" data-phase={s.phase}>
         <p className="message" role={s.phase === "loading" ? "status" : "alert"}>
@@ -103,6 +105,11 @@ function Root() {
         {s.phase === "error" ? (
           <button type="button" className="primary" onClick={() => void c.start()}>
             {t("try_again")}
+          </button>
+        ) : null}
+        {s.phase === "corrupt" ? (
+          <button type="button" className="primary" onClick={() => void c.discardStoredQueue()}>
+            {t("discard_stored")}
           </button>
         ) : null}
         {s.phase === "newer" ? (
