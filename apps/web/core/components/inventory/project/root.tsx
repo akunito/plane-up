@@ -96,10 +96,11 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
     setSelected((s) => (s && own.body.some((l) => l.id === s) ? s : (own.body[0]?.id ?? null)));
   }, [opts, projectId, t]);
 
+  /** `quiet`: keep the rows on screen while reloading (after a change), instead of showing "Loading". */
   const loadItems = useCallback(
-    async (listId: string) => {
+    async (listId: string, quiet = false) => {
       const seq = ++loadSeq.current;
-      setItems(null);
+      if (!quiet) setItems(null);
       const out = await fetchListItems(opts, projectId, listId);
       // A slower answer for a list no longer shown must not replace the shown one.
       if (seq !== loadSeq.current) return;
@@ -126,17 +127,24 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
   // The first list of a public project with one member: anyone in the workspace could join and see it (S21).
   const warnPublic = !!project && project.network !== 0 && project.members.length <= 1 && (lists?.length ?? 0) === 0;
 
-  const replace = (item: Item | null) => {
-    if (!item) return;
+  /**
+   * Puts an answer into its row. An operation answers with the item's STATE only (engine item_state: no
+   * name, list, category, to_buy…), so it is merged, never swapped in (phase 5 re-review: a swap blanked
+   * the row). A state older than the row's is dropped. The quiet reload that follows every change is the
+   * authority for the derived fields and for data answers arriving out of order (same revision).
+   */
+  const replace = (item: Partial<Item> & { id: string; rev: number }) => {
     setItems((rows) => {
       if (!rows) return rows;
       // Moved to another list: it leaves this table.
       const listId = (item.list as { id: string } | undefined)?.id;
       if (listId && listId !== selected) return rows.filter((r) => r.id !== item.id);
-      // A late answer older than what is shown is dropped (phase 5 audit); data edits keep the revision,
-      // so an equal one is newer data.
-      return rows.map((r) => (r.id === item.id && item.rev >= r.rev ? item : r));
+      return rows.map((r) => (r.id === item.id && item.rev >= r.rev ? ({ ...r, ...item } as Item) : r));
     });
+  };
+
+  const refreshQuietly = () => {
+    if (selected) void loadItems(selected, true);
   };
 
   /** Resolves to the item as the server now holds it (also after a stale refusal), or null. */
@@ -147,9 +155,10 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
   ): Promise<Item | null> => {
     setMessage(null);
     const out = await sendNow(opts, name, item, args, t);
-    replace(out.item);
+    if (out.item) replace(out.item);
     if (!out.ok) setMessage(out.message);
-    return out.item;
+    refreshQuietly();
+    return out.item ? ({ ...item, ...out.item } as Item) : null;
   };
 
   /** Resolves to the saved item, or null when nothing was saved (the field then shows the saved value). */
@@ -164,6 +173,7 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
     }
     replace(out.body as Item);
     notifyInventoryChanged();
+    refreshQuietly();
     return out.body as Item;
   };
 
@@ -406,7 +416,10 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
         item={sheetItem}
         lists={lists}
         onClose={() => setDialog(null)}
-        onSaved={replace}
+        onSaved={(saved) => {
+          replace(saved);
+          refreshQuietly();
+        }}
       />
       <AisleOrderDialog
         open={dialog?.kind === "aisles"}

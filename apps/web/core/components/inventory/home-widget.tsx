@@ -27,7 +27,8 @@ const norm = (s: unknown) => (typeof s === "string" ? s.split(/\s+/).filter(Bool
 // No client-side visibility check: the API lists this widget only for a viewer who can see inventory, and
 // a second check from the store could disagree with it (stale store) and leave an empty slot on Home.
 export const ShoppingListWidget = observer(function ShoppingListWidget({ workspaceSlug }: THomeWidgetProps) {
-  return <Widget workspaceSlug={workspaceSlug} />;
+  // Keyed: lists, the chosen list and pending ticks belong to one workspace (phase 5 re-review).
+  return <Widget key={workspaceSlug} workspaceSlug={workspaceSlug} />;
 });
 
 function Widget({ workspaceSlug }: THomeWidgetProps) {
@@ -108,21 +109,24 @@ function Widget({ workspaceSlug }: THomeWidgetProps) {
     return t("widget_quantity", { name: item.name, n: Math.max(fresh?.quantity ?? 0, 0) });
   };
 
-  const act = async (item: Item, name: OpName, args: Record<string, unknown>): Promise<Item | null> => {
+  const act = async (item: Item, name: OpName, args: Record<string, unknown>) => {
     setMessage(null);
     const out = await sendNow(opts, name, item, args, t);
     setMessage(out.ok ? done(item, name, args, out.item) : out.message);
-    if (out.item) setFound((f) => f?.map((i) => (i.id === out.item!.id ? out.item! : i)) ?? f);
+    // An operation answers with the item's state only: merged into the row, never swapped in.
+    const fresh = out.item ? ({ ...item, ...out.item } as Item) : null;
+    if (fresh) setFound((f) => f?.map((i) => (i.id === fresh.id ? fresh : i)) ?? f);
     // sendNow told the counter; the list reloads through the same event.
-    return out.item;
+    return { ok: out.ok, item: fresh };
   };
 
   const tick = async (item: Item, quantity: number) => {
     if (pending.has(item.id)) return;
     setPending((p) => new Set(p).add(item.id));
     const out = await act(item, "buy", item.mode === "units" ? { quantity } : {});
-    // Bought: off the list now, unless pinned (always on it); the reload confirms either way.
-    if (out && item.mode !== "pinned") setRows((r) => r?.filter((x) => x.id !== item.id) ?? r);
+    // Bought: off the list now, unless pinned (always on it); the reload confirms either way. Only when
+    // applied: a refused tick keeps its row even if the reload fails.
+    if (out.ok && item.mode !== "pinned") setRows((r) => r?.filter((x) => x.id !== item.id) ?? r);
     setPending((p) => {
       const next = new Set(p);
       next.delete(item.id);
@@ -194,7 +198,7 @@ function Widget({ workspaceSlug }: THomeWidgetProps) {
                 {item.name}
                 <span className="ml-2 text-11 text-tertiary">{(item.list as { name?: string } | undefined)?.name}</span>
               </span>
-              <StateControl item={item} t={t} onOp={(name, args) => act(item, name, args)} />
+              <StateControl item={item} t={t} onOp={async (name, args) => (await act(item, name, args)).item} />
             </li>
           ))}
           {query.trim() && !exact && lists && lists.lists.length > 0 && (

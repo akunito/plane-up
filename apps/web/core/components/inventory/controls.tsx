@@ -37,6 +37,10 @@ export function EditableField(
   const { value, onCommit, ...rest } = props;
   const [draft, setDraft] = useState(value);
   const editing = useRef(false);
+  // What the field showed when focus came in: blurring without typing commits nothing, even if a newer
+  // value arrived meanwhile (phase 5 re-review: a stale draft undid a +1 that landed during focus).
+  const base = useRef(value);
+  const cancelled = useRef(false);
   const latest = useRef(value);
   latest.current = value;
   useEffect(() => {
@@ -48,18 +52,26 @@ export function EditableField(
       value={draft}
       onFocus={() => {
         editing.current = true;
+        cancelled.current = false;
+        base.current = latest.current;
+        setDraft(latest.current);
       }}
       onChange={(e) => setDraft(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
         if (e.key === "Escape") {
-          setDraft(latest.current);
+          // The blur below runs with this render's draft: the flag, not the state, says "discard".
+          cancelled.current = true;
           e.currentTarget.blur();
         }
       }}
       onBlur={() => {
         editing.current = false;
-        if (draft === latest.current) return;
+        if (cancelled.current || draft === base.current) {
+          cancelled.current = false;
+          setDraft(latest.current);
+          return;
+        }
         const sent = draft;
         void onCommit(sent).then((saved) => {
           // A newer edit started meanwhile: leave it alone.

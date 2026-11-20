@@ -253,8 +253,9 @@ class InventoryCategoryRenameEndpoint(InventoryBaseView):
         source, target = " ".join(source.split()), " ".join(target.split())
         key = source.lower()
         items = visible_items(request.user, workspace.pk)
-        # Matched the way the app groups categories (case and every run of spaces aside, phase 5 audit), so
-        # every spelling shown as one group is renamed; a database comparison would miss inner spaces.
+        # Matched as the main app's aisle editor lists categories: case and every run of spaces aside (phase 5
+        # audit). The shopping app groups by the exact string, so this rename also merges spellings it shows
+        # apart. In Python: a database comparison would miss inner spaces.
         spellings = [
             c
             for c in items.exclude(category="").order_by("category").values_list("category", flat=True).distinct()
@@ -266,8 +267,9 @@ class InventoryCategoryRenameEndpoint(InventoryBaseView):
             order, seen = [], set()
             for entry in pref.category_order:
                 value = target if " ".join(entry.split()).lower() == key else entry
-                if value.lower() not in seen:
-                    seen.add(value.lower())
+                seen_key = " ".join(value.split()).lower()
+                if seen_key not in seen:
+                    seen.add(seen_key)
                     order.append(value)
             if order != pref.category_order:
                 pref.category_order = order

@@ -501,3 +501,23 @@ describe("accessibility", () => {
     /* oxlint-enable no-await-in-loop */
   });
 });
+
+describe("the workspace a link names (?ws=)", () => {
+  it("opens it when the person is in it, and falls through otherwise (phase 5 re-review)", async () => {
+    api = new FakeApi(catalog());
+    const make = (slug: string) =>
+      new Controller({
+        base: "",
+        slug,
+        fetchImpl: (input, init) => api.fetch(input, init),
+        lock: makeLock(undefined),
+        openStore: async (userId) => memoryStore(createQueue(userId, newUuid())),
+      });
+    controller = make("home");
+    await controller.start();
+    expect([controller.get().slug, controller.get().phase]).toEqual(["home", "ready"]);
+    controller = make("not-mine");
+    await controller.start();
+    expect([controller.get().slug, controller.get().phase]).toEqual(["home", "ready"]);
+  });
+});

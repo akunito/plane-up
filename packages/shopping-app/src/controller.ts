@@ -196,9 +196,13 @@ export class Controller {
         ? workspaces.body.map((w) => ({ slug: w.slug, name: w.name }))
         : [];
     const remembered = prefs.get("slug");
+    // A workspace named by a link (?ws=, main.tsx) or the remembered one counts only when the person is in
+    // it (phase 5 re-review: an unknown one ended on "no access" with a picker that could not change).
+    const listed = (slug: string | null | undefined) =>
+      slug && (all.length === 0 || all.some((w) => w.slug === slug)) ? slug : "";
     const slug =
-      this.state.slug ||
-      (remembered && (all.length === 0 || all.some((w) => w.slug === remembered)) ? remembered : "") ||
+      listed(this.state.slug) ||
+      listed(remembered) ||
       settings.body.workspace?.last_workspace_slug ||
       settings.body.workspace?.fallback_workspace_slug ||
       "";

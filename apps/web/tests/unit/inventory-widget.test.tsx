@@ -48,6 +48,20 @@ const item = (id: string, name: string, extra: Record<string, unknown> = {}) => 
   ...extra,
 });
 
+/** What the engine answers for an operation: the item's STATE only (engine item_state), no name or list. */
+const stateOnly = (i: ReturnType<typeof item>) => ({
+  id: i.id,
+  rev: i.rev,
+  mode: i.mode,
+  needed: i.needed,
+  level: i.level,
+  quantity: i.quantity,
+  min_quantity: i.min_quantity,
+  restock_to: i.restock_to,
+  last_bought_at: i.last_bought_at,
+  last_bought_by: i.last_bought_by,
+});
+
 type Call = { url: string; method: string; body: any };
 let calls: Call[] = [];
 let listItems: ReturnType<typeof item>[] = [];
@@ -151,7 +165,7 @@ describe("the Home widget", () => {
             client_op_id: body.ops[0].client_op_id,
             result: "stale",
             changed: { op: "set_needed", by: "u2", by_name: "Bo", at: null },
-            item: item("a", "Milk", { needed: false, rev: 5 }),
+            item: stateOnly(item("a", "Milk", { needed: false, rev: 5 })),
           },
         ],
       });
@@ -207,7 +221,13 @@ describe("the Home widget", () => {
           client_op_id: op.client_op_id,
           result: "applied",
           rev: 4,
-          item: op.target === "w" ? item("w", "Wipes", { mode: "units", quantity: 2, rev: 4 }) : undefined,
+          item: stateOnly(
+            op.target === "w"
+              ? item("w", "Wipes", { mode: "units", quantity: 2, rev: 4 })
+              : op.target === "a"
+                ? item("a", "Milk", { needed: false, rev: 4 })
+                : item("d", "Detergent", { mode: "level", level: "out", rev: 4 })
+          ),
         })),
       });
     render(<ShoppingListWidget workspaceSlug="home" />);
@@ -218,6 +238,9 @@ describe("the Home widget", () => {
     await screen.findByText("Detergent: Out.");
     fireEvent.click(screen.getByLabelText("Wipes: +1"));
     await screen.findByText("Wipes: 2 at home.");
+    // A state-only answer is merged: the rows keep their names (phase 5 re-review: they were blanked).
+    expect(screen.getByLabelText("Milk: Needed")).toBeTruthy();
+    expect(screen.getByLabelText("Wipes: +1")).toBeTruthy();
   });
 });
 
@@ -239,5 +262,21 @@ describe("EditableField", () => {
     fireEvent.focus(input);
     fireEvent.blur(input);
     expect(commit).toHaveBeenCalledTimes(2);
+  });
+
+  it("Escape discards the draft; blurring after a newer value arrived commits nothing (phase 5 re-review)", async () => {
+    const commit = vi.fn(async (d: string) => d);
+    const { rerender } = render(<EditableField aria-label="Qty" value="3" onCommit={commit} />);
+    const input = screen.getByLabelText("Qty") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "9" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.blur(input);
+    await waitFor(() => expect(input.value).toBe("3"));
+    fireEvent.focus(input);
+    rerender(<EditableField aria-label="Qty" value="4" onCommit={commit} />);
+    fireEvent.blur(input);
+    await waitFor(() => expect(input.value).toBe("4"));
+    expect(commit).not.toHaveBeenCalled();
   });
 });
