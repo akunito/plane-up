@@ -2,7 +2,7 @@
 // viewer can see a project with inventory on"), and the to-buy count shared by the sidebar counter and the
 // Home widget (S20: counter = widget count = list count).
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { fetchShoppingList } from "@plane/inventory";
 import { useProject } from "@/hooks/store/use-project";
 
@@ -30,35 +30,66 @@ export function useInventoryVisible(): boolean {
   return false;
 }
 
-/** The viewer's to-buy count, refreshed on focus, on becoming visible and after a change from this tab.
- * `null` until known or when it cannot be read: the counter is then simply not shown. */
-export function useShoppingCount(slug: string, enabled: boolean): number | null {
-  const [count, setCount] = useState<number | null>(null);
-  const seq = useRef(0);
-  const load = useCallback(async () => {
-    const mine = ++seq.current;
-    const out = await fetchShoppingList({ base: "", slug });
-    // An older answer landing last must not bring back an older count (phase 5 audit).
-    if (mine === seq.current) setCount(out.kind === "ok" ? out.list.count : null);
-  }, [slug]);
-  useEffect(() => {
-    if (!enabled || !slug) {
-      setCount(null);
-      return;
-    }
-    void load();
-    const onVisible = () => {
-      if (document.visibilityState === "visible") void load();
-    };
-    const onChange = () => void load();
+/**
+ * The viewer's to-buy count, refreshed on focus, on becoming visible and after a change from this tab.
+ * One count per tab, whatever the number of readers: the sidebar is rendered twice (main and "peek"),
+ * and each copy fetching on every focus doubled the requests. `null` until known or when it cannot be
+ * read: the counter is then simply not shown.
+ */
+const counter = {
+  slug: "",
+  value: null as number | null,
+  seq: 0,
+  readers: 0,
+  listeners: new Set<() => void>(),
+};
+
+function setCount(value: number | null) {
+  if (counter.value === value) return;
+  counter.value = value;
+  for (const l of counter.listeners) l();
+}
+
+async function loadCount() {
+  const mine = ++counter.seq;
+  const slug = counter.slug;
+  const out = await fetchShoppingList({ base: "", slug });
+  // An older answer landing last must not bring back an older count (phase 5 audit).
+  if (mine === counter.seq && slug === counter.slug) setCount(out.kind === "ok" ? out.list.count : null);
+}
+
+const onChange = () => void loadCount();
+const onVisible = () => {
+  if (document.visibilityState === "visible") void loadCount();
+};
+
+function subscribe(slug: string, listener: () => void): () => void {
+  counter.listeners.add(listener);
+  if (counter.readers++ === 0) {
     window.addEventListener("focus", onChange);
     window.addEventListener(INVENTORY_CHANGED, onChange);
     document.addEventListener("visibilitychange", onVisible);
-    return () => {
+  }
+  if (counter.slug !== slug) {
+    counter.slug = slug;
+    counter.value = null;
+    void loadCount();
+  } else if (counter.readers === 1) void loadCount();
+  return () => {
+    counter.listeners.delete(listener);
+    if (--counter.readers === 0) {
       window.removeEventListener("focus", onChange);
       window.removeEventListener(INVENTORY_CHANGED, onChange);
       document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [enabled, slug, load]);
-  return count;
+    }
+  };
+}
+
+export function useShoppingCount(slug: string, enabled: boolean): number | null {
+  const sub = useCallback(
+    (listener: () => void) => (enabled && slug ? subscribe(slug, listener) : () => {}),
+    [enabled, slug]
+  );
+  const value = useSyncExternalStore(sub, () => (enabled && slug && counter.slug === slug ? counter.value : null));
+  return value;
 }

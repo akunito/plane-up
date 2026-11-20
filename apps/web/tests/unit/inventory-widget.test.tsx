@@ -121,6 +121,27 @@ describe("who sees the widget and the sidebar entry", () => {
   });
 });
 
+describe("the sidebar counter", () => {
+  it("is fetched once per tab however many sidebars render it (main and peek)", async () => {
+    const lists = () => calls.filter((c) => c.url.endsWith("/inventory/shopping-list/")).length;
+    render(
+      <>
+        <InventorySidebarEntry />
+        <InventorySidebarEntry />
+      </>
+    );
+    await waitFor(() =>
+      expect(screen.getAllByTestId("sidebar-shopping-count").map((e) => e.textContent)).toEqual(["2", "2"])
+    );
+    expect(lists()).toBe(1);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(lists()).toBe(2);
+  });
+});
+
 describe("the Home widget", () => {
   it("lists the to-buy rows and ticks online: buy with the list's quantity, a fresh queue id each time", async () => {
     render(<ShoppingListWidget workspaceSlug="home" />);

@@ -250,6 +250,7 @@ function Widget({ workspaceSlug }: THomeWidgetProps) {
                 ) : (
                   <input
                     type="checkbox"
+                    className="size-4 shrink-0"
                     aria-label={t("tick_label", { name: item.name })}
                     onChange={(e) => {
                       e.target.checked = false;

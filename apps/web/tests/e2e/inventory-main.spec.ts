@@ -8,7 +8,7 @@
  * android project run against the same seed.
  */
 import type { Page } from "@playwright/test";
-import { apiDelete, apiPatch, apiPost, authFile, expect, isPhone, test } from "./helpers";
+import { apiDelete, apiPatch, apiPost, authFile, closeDrawer, expect, isPhone, test } from "./helpers";
 import { INV, contextFor, restoreSeed, server } from "./inventory-helpers";
 
 const projects = INV?.projects;
@@ -21,8 +21,17 @@ async function listCount(page: Page): Promise<number> {
   return ((await res.json()) as { count: number }).count;
 }
 
+/** A main-app page as a person sees it: on phones the nav drawer starts open over the content. */
+async function visit(page: Page, url: string) {
+  await page.goto(url);
+  await closeDrawer(page, test.info().project.name);
+}
+
+/** The main sidebar only: a second, hidden copy lives in the "peek" sidebar. */
+const sidebar = (page: Page) => page.getByRole("complementary", { name: "Main sidebar" });
+
 async function home(page: Page) {
-  await page.goto("/qa-inv/");
+  await visit(page, "/qa-inv/");
   await expect(page.getByTestId("shopping-widget")).toBeVisible();
   await expect(page.getByTestId("shopping-widget-count")).toBeVisible();
 }
@@ -36,14 +45,14 @@ const setInventory = (page: Page, projectId: string, on: boolean) =>
 /** Opens "New list" in a fresh one-member project (deleted afterwards) and says whether it warns. */
 async function firstListWarns(page: Page, network: 0 | 2): Promise<boolean> {
   const created = await apiPost(page, "/api/workspaces/qa-inv/projects/", {
-    name: `QA e2e ${network}`,
+    name: `QA e2e ${network} ${Date.now()}`,
     identifier: `QE${network}${Date.now() % 10000}`,
     network,
   });
   const pid = ((await created.json()) as { id: string }).id;
   try {
     await setInventory(page, pid, true);
-    await page.goto(`/qa-inv/projects/${pid}/inventory/`);
+    await visit(page, `/qa-inv/projects/${pid}/inventory/`);
     await page.getByTestId("project-inventory").getByRole("button", { name: "New list" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByLabel("Name")).toBeVisible();
@@ -61,6 +70,11 @@ test.describe("inventory in the main app @inventory-main", () => {
   test.skip(({ browserName }) => browserName === "webkit", "Chromium only, like the shopping app's spec");
   test.afterEach(async ({ page }) => {
     await page.goto("about:blank");
+    // A test stopped by its timeout skips its own finally's request: projects it made are removed here.
+    const all = await (await page.request.get("/api/workspaces/qa-inv/projects/")).json();
+    for (const p of all as { id: string; name: string }[])
+      // oxlint-disable-next-line no-await-in-loop -- rarely more than one
+      if (p.name.startsWith("QA e2e ")) await apiDelete(page, `/api/workspaces/qa-inv/projects/${p.id}/`);
     await setNavigationMode(page, "ACCORDION");
     await setInventory(page, projects!.OPEN.id, true);
     await restoreSeed(page);
@@ -77,7 +91,9 @@ test.describe("inventory in the main app @inventory-main", () => {
         await home(p);
         await expect(p.getByTestId("shopping-widget-count"), `${who}: widget`).toHaveText(`${expected} to buy`);
         if (!isPhone(info.project.name))
-          await expect(p.getByTestId("sidebar-shopping-count"), `${who}: counter`).toHaveText(String(expected));
+          await expect(sidebar(p).getByTestId("sidebar-shopping-count"), `${who}: counter`).toHaveText(
+            String(expected)
+          );
       };
       // Ana sees Home, Mine and Open; Bo sees Home only.
       await check("ana", page, 6);
@@ -106,8 +122,8 @@ test.describe("inventory in the main app @inventory-main", () => {
   }, info) => {
     test.skip(isPhone(info.project.name), "the sidebar is a drawer on phones; the widget link is covered below");
     await home(page);
-    await expect(page.getByTestId("sidebar-shopping")).toHaveAttribute("href", "/shopping/?ws=qa-inv");
-    await page.getByTestId("sidebar-shopping").click();
+    await expect(sidebar(page).getByTestId("sidebar-shopping")).toHaveAttribute("href", "/shopping/?ws=qa-inv");
+    await sidebar(page).getByTestId("sidebar-shopping").click();
     await expect(page.locator(MARKER)).toHaveCount(1);
     // The app read the workspace and dropped it from the address (a reload keeps its own choice).
     await expect(page).toHaveURL(/\/shopping\/$/);
@@ -175,10 +191,10 @@ test.describe("inventory in the main app @inventory-main", () => {
   });
 
   test("Project › Inventory: lists, a row edited inline, the item sheet, who can see it", async ({ page }) => {
-    await page.goto(`/qa-inv/projects/${projects!.HOME.id}/inventory/`);
+    await visit(page, `/qa-inv/projects/${projects!.HOME.id}/inventory/`);
     const table = page.getByTestId("project-inventory");
     await expect(table.getByRole("tab", { name: "Groceries" })).toHaveAttribute("aria-selected", "true");
-    await expect(table.getByText("Shared with Bo.")).toBeVisible();
+    await expect(table.getByText("Shared with qa-inv-bo.")).toBeVisible();
     await expect(table.locator('[data-testid="inventory-row"][data-item="Milk"]')).toBeVisible();
     // A state change from the table: Salt needed (a statement, compared on its revision).
     await table.getByRole("button", { name: "Salt: Needed" }).click();
