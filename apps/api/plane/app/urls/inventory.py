@@ -1,0 +1,55 @@
+# Copyright (c) 2023-present Plane Software, Inc. and contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+# See the LICENSE file for details.
+
+from django.urls import path
+
+from plane.app.views.inventory import (
+    InventoryOpsEndpoint,
+    InventoryPreferenceEndpoint,
+    InventoryShoppingListEndpoint,
+    InventorySuggestionsEndpoint,
+    ProjectInventoryItemDetailEndpoint,
+    ProjectInventoryItemsEndpoint,
+    ProjectInventoryListDetailEndpoint,
+    ProjectInventoryListsEndpoint,
+)
+
+urlpatterns = [
+    path(
+        "workspaces/<str:slug>/inventory/shopping-list/",
+        InventoryShoppingListEndpoint.as_view(),
+        name="inventory-shopping-list",
+    ),
+    path("workspaces/<str:slug>/inventory/ops/", InventoryOpsEndpoint.as_view(), name="inventory-ops"),
+    path(
+        "workspaces/<str:slug>/inventory/suggestions/",
+        InventorySuggestionsEndpoint.as_view(),
+        name="inventory-suggestions",
+    ),
+    path(
+        "workspaces/<str:slug>/inventory/preferences/",
+        InventoryPreferenceEndpoint.as_view(),
+        name="inventory-preferences",
+    ),
+    path(
+        "workspaces/<str:slug>/projects/<uuid:project_id>/inventory/lists/",
+        ProjectInventoryListsEndpoint.as_view(),
+        name="project-inventory-lists",
+    ),
+    path(
+        "workspaces/<str:slug>/projects/<uuid:project_id>/inventory/lists/<uuid:pk>/",
+        ProjectInventoryListDetailEndpoint.as_view(),
+        name="project-inventory-list-detail",
+    ),
+    path(
+        "workspaces/<str:slug>/projects/<uuid:project_id>/inventory/lists/<uuid:list_id>/items/",
+        ProjectInventoryItemsEndpoint.as_view(),
+        name="project-inventory-items",
+    ),
+    path(
+        "workspaces/<str:slug>/projects/<uuid:project_id>/inventory/items/<uuid:pk>/",
+        ProjectInventoryItemDetailEndpoint.as_view(),
+        name="project-inventory-item-detail",
+    ),
+]
