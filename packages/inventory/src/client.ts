@@ -76,7 +76,7 @@ async function classify(
 export async function sendOps(opts: ClientOptions, ops: Operation[], owner?: string): Promise<Delivery> {
   let response: Response;
   try {
-    response = await call(opts, "POST", "ops/", owner ? { ops, owner } : { ops });
+    response = await call(opts, "POST", "ops/", owner !== undefined ? { ops, owner } : { ops });
   } catch {
     return { kind: "failed", failure: "offline", status: 0 };
   }

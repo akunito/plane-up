@@ -312,7 +312,10 @@ export class Controller {
         throw error;
       }
     }
-    const queue = await this.store.read();
+    // A "wrong_user" refusal was about another person's session; this is the owner's: try at once.
+    let queue = await this.store.read();
+    if (queue.failure?.kind === "refused" && queue.failure.error === "wrong_user")
+      queue = await this.updateQueue(retryNow, this.store);
     this.set({ lists: lists.body, queue });
     // The store is now the confirmed person's: sending, refreshing and saving the snapshot are safe again.
     // Not earlier (phase 6 audit): a tap or poll while the start ran sent the snapshot's queue with the

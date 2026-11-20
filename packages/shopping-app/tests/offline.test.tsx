@@ -338,4 +338,22 @@ describe("offline start", () => {
     await waitFor(() => expect(c.get().lists?.me.id).toBe(OTHER.id));
     expect((await stores.get(`${ME.id}:home`)!.read()).entries).toHaveLength(1);
   });
+
+  it("the owner signing in again sends a queue the server had refused as someone else's at once", async () => {
+    const first = make();
+    await first.start();
+    await settle();
+    api.fail = { status: 409, json: { error: "wrong_user" } };
+    await act(async () => {
+      await first.act("buy", MILK, {}, { tick: true });
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    const stored = await stores.get(`${ME.id}:home`)!.read();
+    expect(stored.failure?.error).toBe("wrong_user");
+    expect(stored.failure!.nextTryAt).toBeGreaterThan(Date.now());
+    api.fail = null;
+    const c = make();
+    await c.start();
+    await waitFor(() => expect(c.get().queue.entries).toHaveLength(0));
+  });
 });
