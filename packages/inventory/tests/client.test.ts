@@ -29,6 +29,20 @@ const respond = (init: { status: number; json?: unknown; type?: ResponseType; ht
 const opts = (fetchImpl: typeof fetch) => ({ base: "", slug: "home", fetchImpl });
 
 describe("sendOps", () => {
+  it("names the queue's owner when given one, and a 409 wrong_user is a refusal (APLANE-64)", async () => {
+    const bodies: unknown[] = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return new Response(JSON.stringify({ error: "wrong_user" }), {
+        status: 409,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    expect(await sendOps(opts(fetchImpl), [], "u-1")).toEqual({ kind: "refused", status: 409, error: "wrong_user" });
+    await sendOps(opts(fetchImpl), []);
+    expect(bodies).toEqual([{ ops: [], owner: "u-1" }, { ops: [] }]);
+  });
+
   it("returns the results", async () => {
     const out = await sendOps(
       opts(respond({ status: 200, json: { results: [{ client_op_id: "a", result: "applied" }] } })),

@@ -210,6 +210,12 @@ class InventoryOpsEndpoint(InventoryBaseView):
             return _bad("ops")
         if len(ops) > engine.MAX_OPS:
             return _bad("ops", f"at most {engine.MAX_OPS} operations per request")
+        # A device queue names its owner: a batch sent with someone else's session (the device changed hands
+        # while the queue waited) is refused whole, never applied as the session's person (APLANE-64). The
+        # main app's online taps send no owner: the session is the person tapping.
+        owner = request.data.get("owner")
+        if owner is not None and str(owner) != str(request.user.id):
+            return Response({"error": "wrong_user"}, status=status.HTTP_409_CONFLICT)
         ctx = engine.Context(
             user=request.user, workspace_id=workspace.pk, source=self._source(request), now=timezone.now()
         )

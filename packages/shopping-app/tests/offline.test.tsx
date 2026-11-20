@@ -277,7 +277,8 @@ describe("offline start", () => {
       await act(async () => {
         await c.act("buy", MILK, {}, { tick: true });
       });
-      window.dispatchEvent(new StorageEvent("storage", { key: "plane-shopping:user", newValue: null }));
+      // Another tab confirmed someone else (a sign-out clears it: newValue null; same path).
+      window.dispatchEvent(new StorageEvent("storage", { key: "plane-shopping:user", newValue: OTHER.id }));
       offline = false;
       person = OTHER;
       await act(async () => {
@@ -289,5 +290,52 @@ describe("offline start", () => {
     } finally {
       stop();
     }
+  });
+
+  it("the sign-in screen after a sign-out shows and keeps nothing of the person who was open", async () => {
+    const c = make();
+    await c.start();
+    await settle();
+    expect(Object.keys(c.get().known).length).toBeGreaterThan(0);
+    api.fail = { status: 401, json: { detail: "no" } };
+    await act(async () => {
+      await c.refresh(); // a signed-out answer: the page is unconfirmed
+      await c.refresh(); // the probe: the sign-in screen
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    await waitFor(() => expect(c.get().phase).toBe("signed_out"));
+    expect(c.get().known).toEqual({});
+    expect(c.get().lists).toBeNull();
+    // Someone else signs in; a focus starts again by itself, as them.
+    api.fail = null;
+    person = OTHER;
+    await act(async () => {
+      await c.refresh();
+      await new Promise((r) => setTimeout(r, 100));
+    });
+    await waitFor(() => expect(c.get().phase).toBe("ready"));
+    expect(c.get().lists?.me.id).toBe(OTHER.id);
+  });
+
+  it("the server refusing the queue as someone else's (wrong_user): the page starts again as who is signed in", async () => {
+    const c = make();
+    await c.start();
+    await settle();
+    // The device changed hands without any sign-out the page saw: the ops answer says so.
+    api.fail = { status: 409, json: { error: "wrong_user" } };
+    await act(async () => {
+      await c.act("buy", MILK, {}, { tick: true });
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(c.get().queue.entries).toHaveLength(1);
+    expect(prefs.get("user")).toBeNull();
+    api.fail = null;
+    person = OTHER;
+    await act(async () => {
+      await c.flush();
+      await new Promise((r) => setTimeout(r, 100));
+    });
+    await waitFor(() => expect(c.get().lists?.me.id).toBe(OTHER.id));
+    expect((await stores.get(`${ME.id}:home`)!.read()).entries).toHaveLength(1);
   });
 });

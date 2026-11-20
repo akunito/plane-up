@@ -68,10 +68,15 @@ async function classify(
   return { kind: "json", body };
 }
 
-export async function sendOps(opts: ClientOptions, ops: Operation[]): Promise<Delivery> {
+/**
+ * `owner`: the device queue's person. The server refuses the whole batch (409 "wrong_user") when the
+ * session is someone else's, so a queue that waited while the device changed hands is never applied as the
+ * new person (APLANE-64). The main app's online taps send none.
+ */
+export async function sendOps(opts: ClientOptions, ops: Operation[], owner?: string): Promise<Delivery> {
   let response: Response;
   try {
-    response = await call(opts, "POST", "ops/", { ops });
+    response = await call(opts, "POST", "ops/", owner ? { ops, owner } : { ops });
   } catch {
     return { kind: "failed", failure: "offline", status: 0 };
   }

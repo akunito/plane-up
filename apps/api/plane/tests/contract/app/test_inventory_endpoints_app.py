@@ -500,3 +500,22 @@ def test_renaming_a_category_reaches_every_editable_item_and_only_the_renamers_a
 
     for body in ({"from": "", "to": "x"}, {"from": "x", "to": "  "}, {"from": "x"}, {"from": 1, "to": "y"}):
         assert alice.post(ws(workspace.slug, "categories/rename/"), body, format="json").status_code == 400, body
+
+
+def test_a_batch_naming_another_owner_is_refused_whole(workspace, people, home, groceries):
+    """APLANE-64: a device queue sent with someone else's session is never applied as them."""
+    item = _item(groceries, "Milk", "on_demand", needed=False)
+    op = {"v": 1, "client_op_id": str(uuid.uuid4()), "target": str(item.pk), "op": "set_needed"}
+    op.update(args={"needed": True}, base_rev=0)
+    bob = _client(people["bob"])
+    refused = bob.post(ws(workspace.slug, "ops/"), {"ops": [op], "owner": str(people["alice"].pk)}, format="json")
+    assert refused.status_code == 409 and refused.json() == {"error": "wrong_user"}
+    item.refresh_from_db()
+    assert item.needed is False
+    # Its own owner, or none (the main app's online taps): applied.
+    assert (
+        bob.post(ws(workspace.slug, "ops/"), {"ops": [op], "owner": str(people["bob"].pk)}, format="json").json()[
+            "results"
+        ][0]["result"]
+        == "applied"
+    )

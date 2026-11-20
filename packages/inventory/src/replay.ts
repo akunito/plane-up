@@ -68,7 +68,7 @@ export async function replay(
       if (!batch) return;
       let progressed = false;
       try {
-        const delivery = await sendOps(client, batch);
+        const delivery = await sendOps(client, batch, currentUserId);
         await store.update((s) => {
           if (delivery.kind === "failed") return onFailed(s, delivery.failure, now(), { status: delivery.status });
           if (delivery.kind === "refused")

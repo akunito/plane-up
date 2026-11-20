@@ -27,6 +27,7 @@ import {
   BACKOFF_MAX_MS,
   createItem,
   createQueue,
+  deviceLock,
   discard,
   discardHead,
   dismiss,
@@ -406,7 +407,21 @@ export class Controller {
   private leave(patch: Partial<AppState>): void {
     this.store = null;
     this.storeKey = "";
-    this.set(patch);
+    // Nothing of the person or workspace that was open may carry into the next start: with storeKey
+    // cleared, openWorkspace's switch reset does not run (phase 6 review: the previous person's items
+    // reached the next person's snapshot after a sign-out and another sign-in on an open page).
+    this.watched.clear();
+    if (this.toastTimer) clearTimeout(this.toastTimer);
+    this.set({
+      lists: null,
+      known: {},
+      orders: [],
+      covered: null,
+      preferences: EMPTY_PREFERENCES,
+      toast: null,
+      offlineSince: null,
+      ...patch,
+    });
   }
 
   /**
@@ -428,8 +443,9 @@ export class Controller {
         const probe = await requestJson(client, "GET", "users/me/settings/");
         if (probe.kind === "failed" && (probe.failure === "signed_out_app" || probe.failure === "signed_out_proxy")) {
           // The network is back but the session is gone (a proxy session expired meanwhile): ask to sign in
-          // rather than show "No connection" for ever while taps pile up (phase 6 audit).
-          this.openedOffline = false;
+          // rather than show "No connection" for ever while taps pile up (phase 6 audit). signedOut() leaves
+          // the page unconfirmed (forgetPerson), so the sign-in screen probes once per focus and starts
+          // again by itself when someone has signed in.
           this.signedOut(probe.failure);
           return;
         }
@@ -437,8 +453,8 @@ export class Controller {
         // openedOffline stays set until openWorkspace holds the confirmed person's store.
         await this.startOnce();
         // A start that ended on another screen (no access, no inventory, an error) is not offline any more;
-        // one that fell back to the snapshot again set the flag itself.
-        if (this.state.phase !== "ready") this.openedOffline = false;
+        // one that fell back to the snapshot again set the flag itself; the sign-in screen keeps it (above).
+        if (this.state.phase !== "ready" && this.state.phase !== "signed_out") this.openedOffline = false;
       } catch {
         this.set({ phase: "error" });
       } finally {
@@ -712,8 +728,17 @@ export class Controller {
     const userId = this.state.queue.userId;
     const before = this.state.queue.entries.length;
     const failureBefore = this.state.queue.failure;
+    // Checked again inside the device lock: a flush queued behind one that saw a sign-out must not send.
+    const outer = this.lock ?? deviceLock;
+    const lock: Lock = Object.assign(
+      <T>(fn: () => Promise<T>) =>
+        outer(() =>
+          this.openedOffline || !this.ownsStore() || this.store !== target ? Promise.resolve(undefined as T) : fn()
+        ),
+      outer.exclusive ? { exclusive: true } : {}
+    );
     try {
-      await replay(store, this.client(), userId, this.now, this.lock);
+      await replay(store, this.client(), userId, this.now, lock);
     } catch {
       // replay already marked the failure on the queue; the screen shows it.
     }
@@ -722,7 +747,11 @@ export class Controller {
     if (
       failure &&
       failure !== failureBefore &&
-      (failure.kind === "signed_out_app" || failure.kind === "signed_out_proxy")
+      (failure.kind === "signed_out_app" ||
+        failure.kind === "signed_out_proxy" ||
+        // The server: the session is not this queue's owner (the device changed hands without a sign-out
+        // this page saw). Start again as whoever is signed in.
+        (failure.kind === "refused" && failure.error === "wrong_user"))
     )
       this.forgetPerson();
     this.scheduleRetry();
@@ -848,7 +877,9 @@ export class Controller {
     };
     // The main app's sign-out clears the last user (same origin): this page is no longer sure whose it is.
     const onStorage = (e: StorageEvent) => {
-      if (e.key === "plane-shopping:user" && e.newValue === null && this.confirmedUser) this.forgetPerson();
+      // Cleared (a sign-out), or another tab confirmed someone else.
+      if (e.key === "plane-shopping:user" && this.confirmedUser && e.newValue !== this.confirmedUser)
+        this.forgetPerson();
     };
     win.addEventListener("focus", onFocus);
     win.addEventListener("online", onOnline);
