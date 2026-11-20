@@ -15,7 +15,8 @@
     "check:lint": "oxlint --max-warnings=0 .",
     "check:format": "oxfmt --check .",
     "fix:lint": "oxlint --fix .",
-    "fix:format": "oxfmt ."
+    "fix:format": "oxfmt .",
+    "mutations": "node tooling/mutations.mjs"
   },
   "devDependencies": {
     "@plane/typescript-config": "workspace:*",

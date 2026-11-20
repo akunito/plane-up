@@ -170,6 +170,30 @@ describe("a replay that gets no usable answer stops and backs off", () => {
     if (kind === "refused") expect(s.failure).toMatchObject({ status: 403, error: "forbidden" });
   });
 
+  it("a request with no answer is cut off and counts as offline", async () => {
+    // Answers only when aborted; without a signal it hangs and the test times out.
+    const hang = ((_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) =>
+        init.signal?.addEventListener("abort", () => reject(new Error("aborted")))
+      )) as unknown as typeof fetch;
+    const t = setup();
+    await t.add(1);
+    await replay(t.store, { ...t.client, fetchImpl: hang, timeoutMs: 20 }, "ana", () => 0, makeLock(undefined));
+    expect(t.store.get().failure?.kind).toBe("offline");
+    expect(t.store.get().sending).toBe(false);
+  });
+
+  it("inside an exclusive lock, a 'sending' left by a tab that died is cleared", async () => {
+    const t = setup();
+    await t.add(1);
+    await t.store.update((s) => ({ ...s, sending: true }));
+    await settle(
+      replay(t.store, t.client, "ana", () => 0, LOCKS["web locks"]),
+      t.release
+    );
+    expect(t.server.items.get("milk")!.quantity).toBe(1);
+  });
+
   it("an exception never leaves the queue marked as sending", async () => {
     const t = setup(
       () =>

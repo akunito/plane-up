@@ -16,6 +16,9 @@ export interface ClientOptions {
   base: string;
   slug: string;
   fetchImpl?: typeof fetch;
+  /** A request with no answer by then is "offline" and retried with the same ids (default 30 s): a hung
+   * request would hold the device lock and keep the queue "sending" (phase 3 re-review). */
+  timeoutMs?: number;
 }
 
 const HEADERS = {
@@ -34,6 +37,7 @@ async function call(opts: ClientOptions, method: string, path: string, body?: un
     cache: "no-store",
   };
   if (body !== undefined) init.body = JSON.stringify(body);
+  init.signal = AbortSignal.timeout(opts.timeoutMs ?? 30_000);
   return f(`${opts.base}/api/workspaces/${encodeURIComponent(opts.slug)}/inventory/${path}`, init);
 }
 
@@ -109,7 +113,14 @@ export async function fetchListItems(
   try {
     response = await f(
       `${opts.base}/api/workspaces/${encodeURIComponent(opts.slug)}/projects/${encodeURIComponent(projectId)}/inventory/lists/${encodeURIComponent(listId)}/items/`,
-      { method: "GET", headers: HEADERS, redirect: "manual", credentials: "same-origin", cache: "no-store" }
+      {
+        method: "GET",
+        headers: HEADERS,
+        redirect: "manual",
+        credentials: "same-origin",
+        cache: "no-store",
+        signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000),
+      }
     );
   } catch {
     return { kind: "failed", failure: "offline", status: 0 };

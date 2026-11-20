@@ -14,7 +14,10 @@ export interface QueueStore {
   update(fn: (state: QueueState) => QueueState): Promise<QueueState>;
 }
 
-export type Lock = <T>(fn: () => Promise<T>) => Promise<T>;
+export type Lock = (<T>(fn: () => Promise<T>) => Promise<T>) & {
+  /** Exclusive across every tab and the worker (Web Locks): a "sending" found inside it is stale. */
+  exclusive?: boolean;
+};
 
 interface LockManagerLike {
   request<T>(name: string, fn: () => Promise<T>): Promise<T>;
@@ -26,7 +29,11 @@ interface LockManagerLike {
  * across tabs and the worker; without them, a promise chain serialises within this JS context only.
  */
 export function makeLock(locks: LockManagerLike | undefined): Lock {
-  if (locks) return (fn) => locks.request("plane-inventory-replay", fn);
+  if (locks) {
+    const lock: Lock = (fn) => locks.request("plane-inventory-replay", fn);
+    lock.exclusive = true;
+    return lock;
+  }
   let tail: Promise<unknown> = Promise.resolve();
   return (fn) => {
     const run = tail.then(fn, fn);
@@ -48,6 +55,9 @@ export async function replay(
   await lock(async () => {
     // Sequential on purpose: strict FIFO, one batch on the wire at a time.
     /* oxlint-disable no-await-in-loop */
+    // Inside a device-wide lock nobody else is sending: a "sending" left by a tab that died mid-request
+    // would otherwise block every tab until a reload (phase 3 re-review).
+    if (lock.exclusive) await store.update((s) => (s.sending ? { ...s, sending: false } : s));
     for (;;) {
       let batch: Operation[] | null = null;
       await store.update((s) => {
@@ -64,7 +74,7 @@ export async function replay(
           if (delivery.kind === "refused")
             return onFailed(s, "refused", now(), { status: delivery.status, error: delivery.error });
           // An answer that matches none of the batch is no progress: back off instead of looping.
-          if (answeredCount(s, delivery.results) === 0) return onFailed(s, "server", now(), { status: 200 });
+          if (answeredCount(batch!, delivery.results) === 0) return onFailed(s, "server", now(), { status: 200 });
           progressed = true;
           return onDelivered(s, delivery.results);
         });

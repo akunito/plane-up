@@ -11,7 +11,9 @@
 //   held entry blocks everything behind it. Older than 60 days, sent or not: discard only (the server
 //   prunes its ledger at 90, after which a retry would apply twice).
 // - Only the user can unblock a failing queue, by discarding its first entry, and is told it may have
-//   been applied. A discard takes the reverts that name it, and a discarded or refused tick leaves "Done".
+//   been applied. A discard takes what depends on it, and a discarded, undone or refused tick leaves
+//   "Done"; a tick comes back only when its undo is refused or removed, and never from before the last
+//   "Finish shopping".
 // - The queue belongs to one user (stored under that user's key, see storage.ts); another user signed in
 //   on the same phone never sends it.
 // - What the device knows of an item only moves forward in revision: an older snapshot never replaces
@@ -19,12 +21,14 @@
 //
 // Accepted, not fixed (phase 3 audit): an entry whose answer was lost and whose effect a later refresh
 // already shows is previewed twice until its retry is answered (seconds when online). The device
-// cannot tell its own applied-but-unanswered step from someone else's. Likewise, an undo of a step whose
-// answer came back as a duplicate (after a lost one) is not previewed: a duplicate carries the item's
-// current state, so what the server will restore is unknown; it shows once the undo is answered.
+// cannot tell its own applied-but-unanswered step from someone else's. And an undo (other than of a ±n)
+// is previewed only when the device held the item's state right before that step (serverBefore), which
+// is what the server restores: not after someone else changed the item in between, nor after a
+// lost-then-duplicate answer. It shows once the undo is answered. Arrivals and cancels of an order the
+// device has seen no action on are previewed as applied.
 
 import type { Entry } from "./ops";
-import { applyLocal, buildOp, NOT_REVERTIBLE } from "./ops";
+import { applyLocal, buildOp, NOT_REVERTIBLE, predictRefused } from "./ops";
 import type { Tap } from "./ops";
 import type { ItemState, OpResult, Operation } from "./types";
 
@@ -70,6 +74,9 @@ export interface QueueState {
   known: Record<string, ItemState>;
   /** Item id -> client_op_id of the tick that put it under "Done" on this device. */
   done: Record<string, string>;
+  /** When "Done" was last emptied ("Finish shopping", or six hours without a tick): no tick from
+   * before it comes back. */
+  doneSince: number;
   notices: Notice[];
   sending: boolean;
   failure: Failure | null;
@@ -86,6 +93,7 @@ export function createQueue(userId: string, queueId: string): QueueState {
     entries: [],
     known: {},
     done: {},
+    doneSince: 0,
     notices: [],
     sending: false,
     failure: null,
@@ -138,6 +146,17 @@ export function tap(
   return enqueue(state, buildOp(name, known, args, { ...t, queueId: state.queueId }, { ...options, shown }));
 }
 
+/** "Finish shopping" (and the six-hour reset): empties "Done" on this device; nothing is sent. */
+export function finishShopping(state: QueueState, now: number): QueueState {
+  return { ...state, done: {}, doneSince: now };
+}
+
+/** A tick whose undo did not happen goes back under "Done", unless "Done" was emptied since. */
+function restoreTick(done: Record<string, string>, original: Entry | undefined, doneSince: number) {
+  if (!original?.tick || original.tappedAt < doneSince) return done;
+  return { ...done, [original.op.target]: original.op.client_op_id };
+}
+
 function withoutDone(done: Record<string, string>, ids: Set<string>): Record<string, string> {
   const out = { ...done };
   for (const [item, id] of Object.entries(out)) if (ids.has(id)) delete out[item];
@@ -159,10 +178,23 @@ function withDependents(entries: Entry[], entry: Entry): Set<string> {
   return ids;
 }
 
-/** Removing an undo makes its original undoable again. */
-function unmarkReverted(list: Entry[], removed: Entry[]): Entry[] {
-  const targets = new Set(removed.filter((e) => e.op.op === "revert").map((e) => e.op.args.reverts as string));
-  return targets.size ? list.map((e) => (targets.has(e.op.client_op_id) ? { ...e, undone: false } : e)) : list;
+/**
+ * Remove entries by the person's choice. An undo removed this way did not happen: its original (if it
+ * stays) is undoable again and its tick goes back under "Done".
+ */
+function removeEntries(state: QueueState, ids: Set<string>): Pick<QueueState, "entries" | "recent" | "done"> {
+  const removedUndos = state.entries.filter((e) => ids.has(e.op.client_op_id) && e.op.op === "revert");
+  const targets = new Set(removedUndos.map((e) => e.op.args.reverts as string));
+  for (const id of ids) targets.delete(id);
+  const unmark = (e: Entry) => (targets.has(e.op.client_op_id) ? { ...e, undone: false } : e);
+  const entries = state.entries.filter((e) => !ids.has(e.op.client_op_id)).map(unmark);
+  const recent = state.recent.map(unmark);
+  let done = withoutDone(state.done, ids);
+  for (const id of targets) {
+    const original = entries.find((e) => e.op.client_op_id === id) ?? recent.find((e) => e.op.client_op_id === id);
+    done = restoreTick(done, original, state.doneSince);
+  }
+  return { entries, recent, done };
 }
 
 /**
@@ -174,17 +206,7 @@ function unmarkReverted(list: Entry[], removed: Entry[]): Entry[] {
 export function undo(state: QueueState, clientOpId: string, t: Omit<Tap, "queueId">): QueueState {
   const queued = state.entries.find((e) => e.op.client_op_id === clientOpId);
   if (queued && queued.transmission === "never") {
-    const ids = withDependents(state.entries, queued);
-    const removed = state.entries.filter((e) => ids.has(e.op.client_op_id));
-    return {
-      ...state,
-      done: withoutDone(state.done, ids),
-      entries: unmarkReverted(
-        state.entries.filter((e) => !ids.has(e.op.client_op_id)),
-        removed
-      ),
-      recent: unmarkReverted(state.recent, removed),
-    };
+    return { ...state, ...removeEntries(state, withDependents(state.entries, queued)) };
   }
   const applied = queued ? undefined : state.recent.find((e) => e.op.client_op_id === clientOpId);
   const entry = queued ?? applied;
@@ -209,10 +231,6 @@ export function undo(state: QueueState, clientOpId: string, t: Omit<Tap, "queueI
   };
 }
 
-function findApplied(state: QueueState, clientOpId: string): Entry | undefined {
-  return state.recent.find((e) => e.op.client_op_id === clientOpId);
-}
-
 /** Approve held entries (never one older than 60 days, which can only be discarded). */
 export function approve(state: QueueState, clientOpIds: string[], now: number): QueueState {
   const ids = new Set(clientOpIds);
@@ -231,20 +249,12 @@ export function approve(state: QueueState, clientOpIds: string[], now: number): 
 export function discard(state: QueueState, clientOpId: string): QueueState {
   const entry = state.entries.find((e) => e.op.client_op_id === clientOpId);
   if (!entry) return state;
-  const ids = withDependents(state.entries, entry);
-  const removed = state.entries.filter((e) => ids.has(e.op.client_op_id));
-  const entries = unmarkReverted(
-    state.entries.filter((e) => !ids.has(e.op.client_op_id)),
-    removed
-  );
-  const recent = unmarkReverted(state.recent, removed);
+  const removed = removeEntries(state, withDependents(state.entries, entry));
   const transmitted = entry.transmission !== "never";
   const notice: Notice = { kind: "discarded", clientOpId, entry, mayHaveApplied: transmitted };
   return {
     ...state,
-    entries,
-    recent,
-    done: withoutDone(state.done, ids),
+    ...removed,
     notices: [...state.notices, notice],
     needsRefresh: transmitted ? [...new Set([...state.needsRefresh, entry.op.target])] : state.needsRefresh,
   };
@@ -302,11 +312,11 @@ export function nextBatch(
   return { state: { ...state, entries, sending: true }, batch };
 }
 
-/** How many entries of the queue a result list answers (0 = no progress: treat as a failed request). */
-export function answeredCount(state: QueueState, results: OpResult[]): number {
+/** How many operations of the batch a result list answers (0 = no progress: treat as a failed request). */
+export function answeredCount(batch: Operation[], results: OpResult[]): number {
   const ids = new Set(results.map((r) => (r.client_op_id ?? "").toLowerCase()));
   let n = 0;
-  for (const e of state.entries) if (ids.has(e.op.client_op_id.toLowerCase())) n++;
+  for (const o of batch) if (ids.has(o.client_op_id.toLowerCase())) n++;
   return n;
 }
 
@@ -347,13 +357,19 @@ export function onDelivered(state: QueueState, results: OpResult[]): QueueState 
     if (r.changed !== undefined) notice.changed = r.changed;
     notices.push(notice);
     if (entry.tick) done = withoutDone(done, new Set([entry.op.client_op_id]));
-    if (entry.op.op === "revert") {
-      // The undo did not happen: the original stands, may be undone again, and a tick goes back to Done.
+    // The undo did not happen, so the original stands: undoable again, and its tick back under Done.
+    // Not for already_done (an earlier copy of the undo DID happen), and only for an original that
+    // still stands here: applied (recent) or still waiting (entries) — not one refused in this batch.
+    if (entry.op.op === "revert" && r.reason !== "already_done") {
       const target = entry.op.args.reverts as string;
       const original =
-        findApplied({ ...state, recent }, target) ?? state.entries.find((e) => e.op.client_op_id === target);
-      recent = recent.map((e) => (e.op.client_op_id === target ? { ...e, undone: false } : e));
-      if (original?.tick) done = { ...done, [original.op.target]: original.op.client_op_id };
+        recent.find((e) => e.op.client_op_id === target) ?? entries.find((e) => e.op.client_op_id === target);
+      if (original) {
+        const unmark = (e: Entry) => (e.op.client_op_id === target ? { ...e, undone: false } : e);
+        recent = recent.map(unmark);
+        entries.splice(0, entries.length, ...entries.map(unmark));
+        done = restoreTick(done, original, state.doneSince);
+      }
     }
   }
   return { ...state, entries, known, done, notices, sending: false, failure: null, recent: recent.slice(-RECENT) };
@@ -428,27 +444,27 @@ export function view(state: QueueState): Record<string, ItemState> {
       // Refused by the server (changed_since) unless it names the last step; a refused revert changes
       // nothing, so the last step stays what it was.
       if (reverted === undefined || reverted.op.client_op_id !== entry.op.args.reverts) continue;
-      if (reverted.op.op !== "adjust" && !(reverted.op.op === "buy" && item.mode === "units") && !before) {
-        last[target] = undefined; // applies, but what it restores is unknown: shown when answered
-        continue;
-      }
+      // Without the server's prior state (other than for a ±n) applyLocal shows no change: the undo
+      // applies, and shows when answered.
       out[target] = applyLocal(item, entry, reverted, before);
       last[target] = undefined;
       continue;
     }
+    // Refused (already_done, gone, invalid, wrong mode): nothing changes and the revision stays, so the
+    // last step stays what it was. Everything else the server applies advances the revision, even when
+    // it changes no state (an order, a cancel, a buy of a pinned item).
     const status = orders.get(entry.op.args.order_id as string);
     if (
+      predictRefused(item, entry) ||
+      (entry.op.op === "mark_ordered" && status !== undefined) ||
       (entry.op.op === "arrived" && status === "received") ||
-      (entry.op.op === "cancel" && status && status !== "open")
+      (entry.op.op === "cancel" && status !== undefined && status !== "open")
     )
       continue;
     track(entry);
-    const next = applyLocal(item, entry);
-    out[target] = next;
-    if (next !== item || entry.op.op === "mark_ordered" || entry.op.op === "cancel") {
-      last[target] = entry;
-      beforeOf.set(entry.op.client_op_id, item);
-    }
+    out[target] = applyLocal(item, entry);
+    last[target] = entry;
+    beforeOf.set(entry.op.client_op_id, item);
   }
   return out;
 }

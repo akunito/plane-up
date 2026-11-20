@@ -7,9 +7,12 @@
 //   shows equals what the server would hold if the queue were delivered now (a copy of the model
 //   applies it). Left out: items where the copy answers stale (someone else's change is the one thing
 //   the device cannot foresee), and an undo after a lost-then-duplicate answer (accepted, queue.ts).
-// - Nothing is applied twice, and nothing tapped disappears unless the person discarded it.
-// - Once the queue is empty and the items are refreshed (the app reads each list's items through
-//   fetchListItems), the device shows exactly what the server holds.
+// - Retries never mint ids: every id the server received from this device is one the person tapped
+//   (the server's ledger makes a repeated id harmless, so "applied once" is the ledger's property).
+// - Nothing tapped disappears unless the person removed it, and a discard or undo removes only the
+//   entry and what depends on it (its undos; for a never-sent order, its arrivals and cancels).
+// - Once the queue is empty, the device shows exactly what the server holds for every item nobody
+//   else touched and that no discard made doubtful; after refreshing those (fetchListItems), for all.
 
 import { describe, expect, it } from "vitest";
 
@@ -31,6 +34,7 @@ import {
   view,
 } from "../src/queue";
 import type { QueueState } from "../src/queue";
+import type { Entry } from "../src/ops";
 import { load, serialize } from "../src/storage";
 import type { ItemState, Operation } from "../src/types";
 import { ModelServer } from "./model-server";
@@ -76,18 +80,33 @@ function run(seed: number) {
   // Orders the screen would offer: created here and not known to be refused, discarded or received.
   const myOrders = new Map<string, { item: string; quantity: number; markId: string }>();
 
-  // Whatever leaves the queue by the person's own action (a discard takes its queued undos with it).
-  const byHand = (change: () => void) => {
-    const before = state.entries.map((e) => e.op.client_op_id);
+  const bobTouched = new Set<string>();
+  const sentByMe = new Set<string>();
+  // Whatever leaves the queue by the person's own action, checked against what may leave with it.
+  const byHand = (target: string, change: () => void) => {
+    const before = state.entries;
+    const chosen = before.find((e) => e.op.client_op_id === target);
     change();
     const after = new Set(state.entries.map((e) => e.op.client_op_id));
-    for (const id of before) if (!after.has(id)) discardedByUser.add(id);
+    for (const e of before) {
+      if (after.has(e.op.client_op_id)) continue;
+      const allowed =
+        e.op.client_op_id === target ||
+        (e.op.op === "revert" && e.op.args.reverts === target) ||
+        (chosen?.op.op === "mark_ordered" &&
+          chosen.transmission === "never" &&
+          (e.op.op === "arrived" || e.op.op === "cancel") &&
+          e.op.args.order_id === chosen.op.args.order_id);
+      expect(allowed, `removed ${e.op.op} along with ${chosen?.op.op}`).toBe(true);
+      discardedByUser.add(e.op.client_op_id);
+    }
   };
 
   const send = (lose: boolean) => {
     const next = nextBatch(state, now, "me");
     if (!next) return;
     state = next.state;
+    for (const o of next.batch) sentByMe.add(o.client_op_id);
     const results = server.apply(next.batch, "me");
     state = lose ? onFailed(state, "offline", now) : onDelivered(state, results);
   };
@@ -100,23 +119,28 @@ function run(seed: number) {
       const [res] = copy.apply([e.op as Operation], "me");
       if (res!.result === "stale") stale.add(e.op.target);
     }
-    // Accepted (queue.ts header): an undo of a step whose answer came as a duplicate after a lost one is
-    // not previewed, because the server's state before that step is unknown to the device.
+    // Accepted (queue.ts header): an undo (other than of a ±n) of a step whose prior server state the
+    // device never held is not previewed until answered.
     const unknownUndo = new Set(
       state.entries
         .filter((e) => e.op.op === "revert")
         .map((e) => state.recent.find((x) => x.op.client_op_id === e.op.args.reverts))
-        .filter(
-          (x) =>
-            x &&
-            !x.serverBefore &&
-            x.op.op !== "adjust" &&
-            !(x.op.op === "buy" && state.known[x.op.target]?.mode === "units")
-        )
-        .map((x) => x!.op.target)
+        .filter((x): x is Entry => x !== undefined && !x.serverBefore && x.op.op !== "adjust")
+        .map((x) => x.op.target)
+    );
+    // Accepted too: an arrival or cancel of an order the device holds no record of (its order sent and
+    // then discarded, or older than the last 50 applied entries) is previewed as applied.
+    const seenOrders = new Set(
+      [...state.recent, ...state.entries].filter((e) => e.op.op === "mark_ordered").map((e) => e.op.args.order_id)
+    );
+    const unknownOrder = new Set(
+      state.entries
+        .filter((e) => (e.op.op === "arrived" || e.op.op === "cancel") && !seenOrders.has(e.op.args.order_id))
+        .map((e) => e.op.target)
     );
     for (const item of server.snapshot()) {
       if (state.known[item.id]?.rev !== item.rev || stale.has(item.id) || unknownUndo.has(item.id)) continue;
+      if (unknownOrder.has(item.id)) continue;
       const why = () =>
         JSON.stringify({
           known: pick(state.known[item.id]!),
@@ -165,10 +189,24 @@ function run(seed: number) {
             ? tap(state, "buy", item.id, {}, t, { tick: true })
             : tap(state, "set_level", item.id, { level: pickOf(["ok", "low", "out"]) }, t);
       } else {
-        state =
-          r() < 0.5
-            ? tap(state, "buy", item.id, {}, t, { tick: true })
-            : tap(state, "set_needed", item.id, { needed: r() < 0.5 }, t);
+        const kind = r();
+        if (kind < 0.4) state = tap(state, "buy", item.id, {}, t, { tick: true });
+        else if (kind < 0.8) state = tap(state, "set_needed", item.id, { needed: r() < 0.5 }, t);
+        else state = tap(state, "pin", item.id, { pinned: r() < 0.5 }, t);
+      }
+      if (state.entries.length > before) tapped.add(state.entries.at(-1)!.op.client_op_id);
+      if (r() < 0.06) {
+        // Mode changes, and arguments the engine refuses (the preview must predict the refusal).
+        const odd = pickOf([
+          ["change_mode", { mode: "units", quantity: pickOf([0, 2]) }],
+          ["change_mode", { mode: pickOf(["level", "on_demand", "pinned"]) }],
+          ["change_mode", { mode: "units" }],
+          ["adjust", { delta: pickOf([0, 1.5]) }],
+          ["buy", { quantity: 0 }],
+          ["set_needed", { needed: "yes" }],
+          ["recount", { quantity: -0.5 }],
+        ] as const);
+        state = tap(state, odd[0], item.id, odd[1] as Record<string, unknown>, t);
       }
       if (state.entries.length > before) tapped.add(state.entries.at(-1)!.op.client_op_id);
     } else if (roll < 0.5) {
@@ -176,7 +214,7 @@ function run(seed: number) {
       if (candidates.length) {
         const target = pickOf(candidates).op.client_op_id;
         const before = new Set(state.entries.map((e) => e.op.client_op_id));
-        byHand(() => (state = undo(state, target, { now, newId })));
+        byHand(target, () => (state = undo(state, target, { now, newId })));
         for (const e of state.entries) if (!before.has(e.op.client_op_id)) tapped.add(e.op.client_op_id);
       }
     } else if (roll < 0.62) send(false);
@@ -201,7 +239,7 @@ function run(seed: number) {
           );
         else {
           const victim = held[0]!.op.client_op_id;
-          byHand(() => (state = discard(state, victim)));
+          byHand(victim, () => (state = discard(state, victim)));
         }
       }
     } else if (roll < 0.91) {
@@ -221,6 +259,15 @@ function run(seed: number) {
         Object.assign(op, { op: "set_level", args: { level: "low" }, base_rev: item.rev });
       else if (item.mode === "on_demand" && r() < 0.5)
         Object.assign(op, { op: "set_needed", args: { needed: true }, base_rev: item.rev });
+      if (r() < 0.15) {
+        const mode = pickOf(["units", "level", "on_demand", "pinned"] as const);
+        Object.assign(op, {
+          op: "change_mode",
+          args: mode === "units" ? { mode, quantity: 1 } : { mode },
+          base_rev: item.rev,
+        });
+      }
+      bobTouched.add(item.id);
       server.apply([op], "bob");
     } else if (roll < 0.95) {
       const notice = state.notices.find((n) => n.kind === "stale");
@@ -230,7 +277,8 @@ function run(seed: number) {
         if (state.entries.length > before) tapped.add(state.entries.at(-1)!.op.client_op_id);
       }
     } else if (state.failure && state.failure.attempts > 2 && state.entries.length) {
-      byHand(() => (state = discardHead(state)));
+      const head = state.entries[0]!.op.client_op_id;
+      byHand(head, () => (state = discardHead(state)));
     }
     now += 500;
     for (const [id, o] of myOrders) {
@@ -251,16 +299,15 @@ function run(seed: number) {
     send(false);
   }
   expect(state.entries).toEqual([]);
-  state = refreshed(state, server.snapshot());
-
-  const shown = view(state);
+  const full = (i: ItemState | undefined) => i && { ...pick(i), rev: i.rev };
   for (const item of server.snapshot()) {
-    expect({ ...pick(shown[item.id]!), rev: shown[item.id]!.rev }, `item ${item.id} seed ${seed}`).toEqual({
-      ...pick(item),
-      rev: item.rev,
-    });
+    if (bobTouched.has(item.id) || state.needsRefresh.includes(item.id)) continue;
+    expect(full(view(state)[item.id]), `item ${item.id} seed ${seed}, before any refresh`).toEqual(full(item));
   }
-  for (const [id, n] of server.effects) expect(n, id).toBe(1);
+  state = refreshed(state, server.snapshot());
+  for (const item of server.snapshot())
+    expect(full(view(state)[item.id]), `item ${item.id} seed ${seed}`).toEqual(full(item));
+  for (const id of sentByMe) expect(tapped.has(id), `sent an id nobody tapped: ${id}`).toBe(true);
   for (const id of tapped) expect(server.ledger.has(id) || discardedByUser.has(id), id).toBe(true);
 }
 

@@ -26,7 +26,7 @@ export interface Entry {
   /** What the device showed for the item right before the tap (display only; an undo's preview uses
    * serverBefore or the preview chain, which is what the server restores). */
   before: ItemState | null;
-  /** A tick in shopping mode: its row sits under "Done" until the server refuses it or it is discarded. */
+  /** A tick in shopping mode: its row sits under "Done" until it is refused, discarded or undone. */
   tick: boolean;
   /** An arrival without a quantity applies the order's; the screen knows it, the operation does not. */
   orderQuantity?: number;
@@ -89,14 +89,67 @@ function bought(item: ItemState, quantity: number | null, at: number): ItemState
 
 const num = (value: unknown, fallback: number): number => (typeof value === "number" ? value : fallback);
 
+const MAX_QUANTITY = 1_000_000; // engine.MAX_QUANTITY
+const LEVELS = new Set(["ok", "low", "out"]);
+const MODES = new Set(["pinned", "on_demand", "level", "units"]);
+
+/** engine._int: an integer (not a boolean) within the bounds. */
+function isInt(value: unknown, minimum?: number): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    Math.abs(value) <= MAX_QUANTITY &&
+    (minimum === undefined || value >= minimum)
+  );
+}
+
+/**
+ * Whether the engine will refuse this operation on this item, as far as the device can tell from the
+ * item and the arguments alone (mode, types, bounds). A refused operation changes nothing and does not
+ * advance the revision. Order status and someone else's changes are not known here (see view()).
+ */
+export function predictRefused(item: ItemState, entry: Entry): boolean {
+  const a = entry.op.args;
+  switch (entry.op.op) {
+    case "adjust":
+      return item.mode !== "units" || !isInt(a.delta) || a.delta === 0;
+    case "buy":
+    case "mark_ordered":
+      return (
+        (a.quantity !== undefined && !isInt(a.quantity, 1)) ||
+        (entry.op.op === "mark_ordered" && typeof a.order_id !== "string")
+      );
+    case "arrived":
+      return (a.quantity !== undefined && !isInt(a.quantity, 1)) || typeof a.order_id !== "string";
+    case "cancel":
+      return typeof a.order_id !== "string";
+    case "set_level":
+      return item.mode !== "level" || !LEVELS.has(a.level as string);
+    case "set_needed":
+      return item.mode !== "on_demand" || typeof a.needed !== "boolean";
+    case "pin":
+      return typeof a.pinned !== "boolean" || (item.mode !== "pinned" && item.mode !== "on_demand");
+    case "recount":
+      return item.mode !== "units" || !isInt(a.quantity);
+    case "change_mode":
+      if (!MODES.has(a.mode as string) || a.mode === item.mode) return true;
+      if (a.mode === "level") return a.level !== undefined && !LEVELS.has(a.level as string);
+      if (a.mode === "units") return !isInt(a.quantity);
+      return false;
+    case "revert":
+      return false; // decided in view(), which knows what it names
+  }
+}
+
 /**
  * The local preview of one operation on the item as the device knows it. Refusals the device can
- * predict (wrong mode, a non-boolean flag, a mode change to the same mode) preview as no change and
- * return the SAME object. A revert is previewed only when view() (queue.ts) passes the reverted entry
- * and the state the server will restore, which it does only while both are known; otherwise no change.
+ * predict (predictRefused) preview as no change and return the SAME object. A revert is previewed only
+ * when view() (queue.ts) passes the reverted entry and, except for a ±n, the server's state right
+ * before that step; otherwise no change.
  */
 export function applyLocal(item: ItemState, entry: Entry, reverted?: Entry, before?: ItemState): ItemState {
   const { op: name, args } = entry.op;
+  if (predictRefused(item, entry)) return item;
   switch (name) {
     case "adjust":
       return item.mode === "units" ? { ...item, quantity: (item.quantity ?? 0) + num(args.delta, 0) } : item;
@@ -134,13 +187,13 @@ export function applyLocal(item: ItemState, entry: Entry, reverted?: Entry, befo
       const r = reverted.op;
       if (r.op === "adjust") return { ...item, quantity: (item.quantity ?? 0) - num(r.args.delta, 0) };
       const b = before;
+      if (!b) return item;
       if (r.op === "buy") {
-        const next = { ...item, last_bought_at: b?.last_bought_at ?? item.last_bought_at };
+        const next = { ...item, last_bought_at: b.last_bought_at, last_bought_by: b.last_bought_by };
         if (item.mode === "units") next.quantity = (item.quantity ?? 0) - num(r.args.quantity, 1);
-        else if (b) Object.assign(next, { needed: b.needed, level: b.level });
+        else Object.assign(next, { needed: b.needed, level: b.level });
         return next;
       }
-      if (!b) return item;
       // State only; thresholds are data and are never restored (brief).
       return { ...item, mode: b.mode, needed: b.needed, level: b.level, quantity: b.quantity };
     }

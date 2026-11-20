@@ -3,10 +3,13 @@
 // person or for another item is duplicate_id), the same-queue exemption proven step by step, a revert
 // compared against the revision its operation produced and refused as gone / not_yours /
 // not_revertible / already_done / changed_since, order actions (mark_ordered, arrived with the order's
-// quantity, cancel), refusals that never advance the revision, "gone" WITH the item for a missing
-// order or event and WITHOUT it for a missing item, and "rev" (the produced revision) on applied answers.
-// It does not model: parse errors (unrecorded, no item), forbidden, thresholds, last_bought_* beyond
-// the buy timestamp, or the age cut-off (the device's 60-day rule keeps operations far from it).
+// quantity, cancel; an existing order id is already_done), pin and change_mode, the argument checks
+// (integers within bounds, delta not 0, quantities ≥ 1, booleans, known levels and modes), refusals
+// that never advance the revision, "gone" WITH the item for a missing order or event and WITHOUT it
+// for a missing item, and "rev" (the produced revision) on applied answers.
+// It does not model: parse errors (unrecorded, no item), forbidden, thresholds (min_quantity is never
+// set by change_mode here), last_bought_*, or the age cut-off (the device's 60-day rule keeps
+// operations far from it).
 
 import type { ItemState, OpResult, Operation } from "../src/types";
 import { CAS } from "../src/types";
@@ -28,6 +31,10 @@ interface Order {
 }
 
 const NOT_REVERTIBLE = new Set(["revert", "mark_ordered", "arrived", "cancel"]);
+const LEVELS = new Set(["ok", "low", "out"]);
+const MODES = new Set(["pinned", "on_demand", "level", "units"]);
+const isInt = (v: unknown, min?: number) =>
+  typeof v === "number" && Number.isInteger(v) && Math.abs(v) <= 1_000_000 && (min === undefined || v >= min);
 
 export class ModelServer {
   items = new Map<string, ItemState>();
@@ -115,13 +122,16 @@ export class ModelServer {
     switch (op.op) {
       case "adjust":
         if (item.mode !== "units") return "invalid_for_mode";
+        if (!isInt(a.delta) || a.delta === 0) return "invalid";
         item.quantity = (item.quantity ?? 0) + (a.delta as number);
         return undefined;
       case "buy":
+        if (a.quantity !== undefined && !isInt(a.quantity, 1)) return "invalid";
         this.bought(item, (a.quantity as number) ?? 1);
         return undefined;
       case "mark_ordered":
-        if (this.orders.has(a.order_id as string)) return "invalid";
+        if (a.quantity !== undefined && !isInt(a.quantity, 1)) return "invalid";
+        if (this.orders.has(a.order_id as string)) return "already_done";
         this.orders.set(a.order_id as string, { item: item.id, quantity: (a.quantity as number) ?? 1, status: "open" });
         return undefined;
       case "arrived":
@@ -134,22 +144,43 @@ export class ModelServer {
           return undefined;
         }
         if (order.status === "received") return "already_done";
+        if (a.quantity !== undefined && !isInt(a.quantity, 1)) return "invalid";
         order.status = "received";
         this.bought(item, (a.quantity as number) ?? order.quantity);
         return undefined;
       }
       case "set_level":
         if (item.mode !== "level") return "invalid_for_mode";
+        if (!LEVELS.has(a.level as string)) return "invalid";
         item.level = a.level as ItemState["level"];
         return undefined;
       case "set_needed":
         if (item.mode !== "on_demand") return "invalid_for_mode";
-        item.needed = Boolean(a.needed);
+        if (typeof a.needed !== "boolean") return "invalid";
+        item.needed = a.needed;
         return undefined;
       case "recount":
         if (item.mode !== "units") return "invalid_for_mode";
+        if (!isInt(a.quantity)) return "invalid";
         item.quantity = a.quantity as number;
         return undefined;
+      case "pin":
+        if (typeof a.pinned !== "boolean") return "invalid";
+        if (item.mode !== "pinned" && item.mode !== "on_demand") return "invalid_for_mode";
+        item.mode = a.pinned ? "pinned" : "on_demand";
+        item.needed = false;
+        return undefined;
+      case "change_mode": {
+        if (!MODES.has(a.mode as string)) return "invalid";
+        if (a.mode === item.mode) return "invalid_for_mode";
+        const mode = a.mode as ItemState["mode"];
+        if (mode === "level" && a.level !== undefined && !LEVELS.has(a.level as string)) return "invalid";
+        if (mode === "units" && !isInt(a.quantity)) return "invalid";
+        Object.assign(item, { mode, needed: false, level: null, quantity: null });
+        if (mode === "level") item.level = (a.level as ItemState["level"]) ?? "ok";
+        if (mode === "units") item.quantity = a.quantity as number;
+        return undefined;
+      }
       case "revert": {
         const target = this.ledger.get(a.reverts as string);
         if (!target || target.target !== item.id) return "gone";

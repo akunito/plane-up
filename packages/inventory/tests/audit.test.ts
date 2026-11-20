@@ -9,6 +9,7 @@ import {
   createQueue,
   discard,
   DISCARD_ONLY_AFTER_MS,
+  finishShopping,
   heldEntries,
   nextBatch,
   onDelivered,
@@ -87,7 +88,7 @@ it("answers match ids whatever their case (the server canonicalises UUIDs)", () 
   let s = tap(start(), "adjust", "milk", { delta: 1 }, t());
   const sent = nextBatch(s, 1_000_000, "ana")!;
   const results = [{ client_op_id: sent.batch[0]!.client_op_id.toUpperCase(), result: "applied" as const }];
-  expect(answeredCount(sent.state, results)).toBe(1);
+  expect(answeredCount(sent.batch, results)).toBe(1);
   s = onDelivered(sent.state, results);
   expect(s.entries).toEqual([]);
 });
@@ -215,4 +216,66 @@ it("a queue per user on this install, with a UUID queue id", () => {
   expect(q.queueId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   expect(newQueue("ana").queueId).not.toBe(q.queueId);
   expect(storageKey("ana")).not.toBe(storageKey("bob"));
+});
+
+describe("phase 3 re-review", () => {
+  const tick = () => tap(start(), "buy", "milk", { quantity: 1 }, t(), { tick: true });
+
+  it("a tick refused together with its undo stays out of Done", () => {
+    let s = tick();
+    s = undo(onFailed(nextBatch(s, 1_000_000, "ana")!.state, "offline", 1_000_000), s.entries[0]!.op.client_op_id, t());
+    s = retryNow(s);
+    s = deliver(s, (_id, i) =>
+      i === 0 ? { result: "rejected", reason: "forbidden" } : { result: "rejected", reason: "gone", item: item() }
+    );
+    expect(s.done.milk).toBeUndefined();
+  });
+
+  it("an undo refused as already_done did happen: no tick back, still undone", () => {
+    let s = deliver(tick(), () => ({ item: item({ rev: 4, quantity: 3 }), rev: 4 }));
+    const buy = s.recent[0]!.op.client_op_id;
+    s = undo(s, buy, t());
+    s = deliver(s, () => ({ result: "rejected", reason: "already_done", item: item({ rev: 5 }) }));
+    expect(s.done.milk).toBeUndefined();
+    expect(s.recent[0]!.undone).toBe(true);
+  });
+
+  it("a refused undo brings back no tick from before the last Finish shopping", () => {
+    let s = deliver(tick(), () => ({ item: item({ rev: 4, quantity: 3 }), rev: 4 }));
+    s = undo(s, s.recent[0]!.op.client_op_id, t());
+    s = finishShopping(s, 2_000_000);
+    s = deliver(s, () => ({ result: "rejected", reason: "changed_since", item: item({ rev: 5 }) }));
+    expect(s.done).toEqual({});
+  });
+
+  it("removing a never-sent undo brings its tick back under Done", () => {
+    let s = deliver(tick(), () => ({ item: item({ rev: 4, quantity: 3 }), rev: 4 }));
+    const buy = s.recent[0]!.op.client_op_id;
+    s = undo(s, buy, t());
+    expect(s.done.milk).toBeUndefined();
+    s = undo(s, s.entries[0]!.op.client_op_id, t());
+    expect(s.done.milk).toBe(buy);
+  });
+
+  it("an undo is not previewed when someone else changed the item just before the step", () => {
+    let s = start([item({ mode: "level", level: "out", quantity: null })]);
+    s = tap(s, "buy", "milk", {}, t()); // the screen showed "out" before the tap
+    // Someone set it to low (rev 4) before the buy applied (rev 5): the device never held rev 4.
+    s = deliver(s, () => ({ item: item({ mode: "level", level: "ok", quantity: null, rev: 5 }), rev: 5 }));
+    s = undo(s, s.recent[0]!.op.client_op_id, t());
+    // The server will restore "low", not the "out" the screen showed: no preview until answered.
+    expect(view(s).milk!.level).toBe("ok");
+  });
+
+  it("a refusal the device can predict changes nothing and does not hide an undo behind it", () => {
+    let s = deliver(tap(start(), "adjust", "milk", { delta: -1 }, t()), () => ({
+      item: item({ rev: 4, quantity: 1 }),
+      rev: 4,
+    }));
+    const first = s.recent[0]!.op.client_op_id;
+    s = tap(s, "adjust", "milk", { delta: 0 }, t());
+    s = tap(s, "buy", "milk", { quantity: 1.5 }, t());
+    s = undo(s, first, t());
+    expect(view(s).milk!.quantity).toBe(2);
+  });
 });
