@@ -23,7 +23,11 @@ vi.mock("@plane/i18n", async (orig) => ({
   useTranslation: () => ({ t: (k: string) => `T(${k})`, currentLocale: state.locale }),
 }));
 vi.mock("@/hooks/store/use-app-theme", () => ({
-  useAppTheme: () => ({ isExtendedProjectSidebarOpened: false, toggleExtendedProjectSidebar: vi.fn(), toggleSidebar: vi.fn() }),
+  useAppTheme: () => ({
+    isExtendedProjectSidebarOpened: false,
+    toggleExtendedProjectSidebar: vi.fn(),
+    toggleSidebar: vi.fn(),
+  }),
 }));
 vi.mock("@/hooks/store/use-project", () => ({ useProject: () => ({ getPartialProjectById: () => state.project }) }));
 const allow = (access: number[]) => access.includes(state.role);
@@ -101,18 +105,20 @@ describe("the project's Inventory entry, sidebar (project-navigation)", () => {
   });
 });
 
+const tPlane = (k: string) => `T(${k})`;
+// oxlint-disable-next-line unicorn/no-array-sort -- a fresh array; the web lib is es2022 (no toSorted)
+const placeholders = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
+
 describe("labels", () => {
   it("navLabel uses the fork's dictionary for inventory keys only; other languages fall back to English", () => {
-    const t = (k: string) => `T(${k})`;
-    expect(navLabel("inventory", "sidebar.inventory", t, "pl")).toBe("Zapasy");
-    expect(navLabel("features_inventory", "x", t, "de")).toBe("Inventory");
-    expect(navLabel("pages", "sidebar.pages", t, "es")).toBe("T(sidebar.pages)");
+    expect(navLabel("inventory", "sidebar.inventory", tPlane, "pl")).toBe("Zapasy");
+    expect(navLabel("features_inventory", "x", tPlane, "de")).toBe("Inventory");
+    expect(navLabel("pages", "sidebar.pages", tPlane, "es")).toBe("T(sidebar.pages)");
     expect(inventoryLocale("es-ES")).toBe("es");
     expect(inventoryLocale(undefined)).toBe("en");
   });
 
   it("every language has every key, non-empty, with the same placeholders as English", () => {
-    const placeholders = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).toSorted();
     const en = INVENTORY_DICTIONARIES.en;
     for (const [lang, dict] of Object.entries(INVENTORY_DICTIONARIES))
       for (const key of Object.keys(en) as (keyof typeof en)[]) {
@@ -125,9 +131,12 @@ describe("labels", () => {
 
 describe("aisle order", () => {
   it("keeps the person's order, appends the rest by name, and merges case and spacing (S30)", () => {
-    expect(orderedCategories(["dairy", "Gone", "Bakery"], ["Bakery", "Baby", " Dairy ", "dairy", "Cleaning"])).toEqual(
-      ["Dairy", "Bakery", "Baby", "Cleaning"]
-    );
+    expect(orderedCategories(["dairy", "Gone", "Bakery"], ["Bakery", "Baby", " Dairy ", "dairy", "Cleaning"])).toEqual([
+      "Dairy",
+      "Bakery",
+      "Baby",
+      "Cleaning",
+    ]);
     expect(orderedCategories([], [])).toEqual([]);
   });
 });

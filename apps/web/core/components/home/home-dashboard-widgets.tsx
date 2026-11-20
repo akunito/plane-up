@@ -19,6 +19,7 @@ import { SimpleEmptyState } from "@/components/empty-state/simple-empty-state-ro
 import { useHome } from "@/hooks/store/use-home";
 import { useProject } from "@/hooks/store/use-project";
 // local imports
+import { ShoppingListWidget } from "../inventory/home-widget";
 import { StickiesWidget } from "../stickies/widget";
 import { HomeLoader, NoProjectsEmptyState, RecentActivityWidget } from "./widgets";
 import { DashboardQuickLinks } from "./widgets/links";
@@ -55,6 +56,12 @@ export const HOME_WIDGETS_LIST: {
     component: null,
     fullWidth: false,
     title: "home.quick_tutorial.title",
+  },
+  // Fork (APLANE-63): the title is the fork's own (navLabel), not a Plane key.
+  shopping_list: {
+    component: ShoppingListWidget,
+    fullWidth: false,
+    title: "shopping_list",
   },
 };
 

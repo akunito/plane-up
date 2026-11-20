@@ -8,6 +8,7 @@ from plane.db.models.workspace import WorkspaceHomePreference
 from plane.app.permissions import allow_permission, ROLE
 from plane.db.models import Workspace
 from plane.app.serializers.workspace import WorkspaceHomePreferenceSerializer
+from plane.app.inventory.access import visible_projects
 
 # Third party imports
 from rest_framework.response import Response
@@ -31,7 +32,7 @@ class WorkspaceHomePreferenceViewSet(BaseAPIView):
         keys = [
             key
             for key, _ in WorkspaceHomePreference.HomeWidgetKeys.choices
-            if key not in ["quick_tutorial", "new_at_plane"]
+            if key not in ["quick_tutorial", "new_at_plane", "shopping_list"]
         ]
 
         sort_order_counter = 1
@@ -58,6 +59,27 @@ class WorkspaceHomePreferenceViewSet(BaseAPIView):
                 sort_order_counter += 1
 
         preference = WorkspaceHomePreference.objects.filter(user=request.user, workspace_id=workspace.id)
+
+        # Fork (APLANE-63, plan phase 5): the shopping-list widget exists only for a viewer who can see a
+        # project with inventory on, so every other Home and manage dialog is unchanged. Its row is created
+        # above every existing one (Home orders by sort_order descending), so it is first for a new user and
+        # for one who had reordered widgets; after that the person's own order holds.
+        if visible_projects(request.user, workspace.id).filter(inventory_view=True).exists():
+            if not preference.filter(key=WorkspaceHomePreference.HomeWidgetKeys.SHOPPING_LIST).exists():
+                top = max((p.sort_order for p in preference), default=1000)
+                WorkspaceHomePreference.objects.bulk_create(
+                    [
+                        WorkspaceHomePreference(
+                            key=WorkspaceHomePreference.HomeWidgetKeys.SHOPPING_LIST,
+                            user=request.user,
+                            workspace=workspace,
+                            sort_order=top + 1000,
+                        )
+                    ],
+                    ignore_conflicts=True,
+                )
+        else:
+            preference = preference.exclude(key=WorkspaceHomePreference.HomeWidgetKeys.SHOPPING_LIST)
 
         return Response(
             preference.values("key", "is_enabled", "config", "sort_order"),

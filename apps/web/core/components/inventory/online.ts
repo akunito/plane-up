@@ -5,6 +5,7 @@
 import type { ClientOptions, ItemState, OpName, OpResult } from "@plane/inventory";
 import { buildOp, newUuid, sendOps } from "@plane/inventory";
 import type { InventoryT } from "./i18n";
+import { notifyInventoryChanged } from "./visibility";
 
 export type Item = ItemState & Record<string, unknown> & { name: string };
 
@@ -38,6 +39,8 @@ export async function sendNow(
   const result = delivery.results.find((r) => r.client_op_id === entry.op.client_op_id);
   if (!result) return { ok: false, message: t("err_server"), item: null };
   const fresh = (result.item as Item | undefined) ?? null;
+  // Applied, or refused with the current state: either way the counter and the widget may be out of date.
+  notifyInventoryChanged();
   if (result.result === "applied") return { ok: true, item: fresh, result };
   if (result.result === "stale")
     return {

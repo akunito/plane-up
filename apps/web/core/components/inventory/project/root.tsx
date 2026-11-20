@@ -31,6 +31,8 @@ import { clientOptions, failureMessage, sendNow } from "../online";
 import { AisleOrderDialog } from "./aisle-order";
 import { FIELD, ListDialog, MODES, PromptDialog, modeKey } from "./dialogs";
 import { ItemSheet } from "./item-sheet";
+import { StateControl } from "../controls";
+import { notifyInventoryChanged } from "../visibility";
 
 type Dialog =
   | { kind: "create_list" }
@@ -141,8 +143,10 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
   const saveData = async (item: Item, data: Record<string, unknown>) => {
     setMessage(null);
     const out = await updateItem(opts, projectId, item.id, data);
-    if (out.kind === "ok") replace(out.body as Item);
-    else setMessage(failureMessage(out, t));
+    if (out.kind === "ok") {
+      replace(out.body as Item);
+      notifyInventoryChanged();
+    } else setMessage(failureMessage(out, t));
   };
 
   const add = async () => {
@@ -153,6 +157,7 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
     if (out.kind === "ok") {
       setNewName("");
       setItems((rows) => [...(rows ?? []), out.body as Item]);
+      notifyInventoryChanged();
     } else if (out.kind === "conflict") setMessage(t("exists", { name }));
     else setMessage(failureMessage(out, t));
   };
@@ -347,13 +352,16 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
           if (d?.kind === "delete_list")
             void deleteList(opts, projectId, d.list.id).then(async (out) => {
               if (out.kind !== "ok") setMessage(failureMessage(out, t));
+              else notifyInventoryChanged();
               await loadLists();
               return undefined;
             });
           else if (d?.kind === "delete_item")
             void deleteItem(opts, projectId, d.item.id).then((out) => {
-              if (out.kind === "ok") setItems((rows) => rows?.filter((r) => r.id !== d.item.id) ?? rows);
-              else setMessage(failureMessage(out, t));
+              if (out.kind === "ok") {
+                setItems((rows) => rows?.filter((r) => r.id !== d.item.id) ?? rows);
+                notifyInventoryChanged();
+              } else setMessage(failureMessage(out, t));
               return undefined;
             });
         }}
@@ -455,72 +463,7 @@ function ItemRow(props: {
       </td>
       <td className={CELL}>
         <div className="flex flex-wrap items-center gap-1">
-          {item.mode === "pinned" && <span className="text-tertiary">{t("pinned_hint")}</span>}
-          {item.mode === "on_demand" && (
-            <button
-              type="button"
-              aria-pressed={item.needed}
-              className={`rounded-md border px-2 py-0.5 ${
-                item.needed
-                  ? "border-accent-strong bg-accent-subtle text-accent-primary"
-                  : "border-subtle text-secondary"
-              }`}
-              onClick={() => onOp("set_needed", { needed: !item.needed })}
-            >
-              {t("needed")}
-            </button>
-          )}
-          {item.mode === "level" &&
-            (["ok", "low", "out"] as const).map((level) => (
-              <button
-                key={level}
-                type="button"
-                aria-pressed={item.level === level}
-                className={`rounded-md border px-2 py-0.5 ${
-                  item.level === level
-                    ? "border-accent-strong bg-accent-subtle text-accent-primary"
-                    : "border-subtle text-secondary"
-                }`}
-                onClick={() => item.level !== level && onOp("set_level", { level })}
-              >
-                {t(`level_${level}`)}
-              </button>
-            ))}
-          {item.mode === "units" && (
-            <>
-              <button
-                type="button"
-                className="rounded-md border border-subtle px-2 text-secondary"
-                aria-label={`${item.name}: −1`}
-                onClick={() => onOp("adjust", { delta: -1 })}
-              >
-                −
-              </button>
-              <input
-                className={`${INLINE} w-16 text-center`}
-                inputMode="numeric"
-                defaultValue={num(item.quantity)}
-                aria-label={`${item.name}: ${t("col_state")}`}
-                onBlur={(e) => {
-                  const raw = e.target.value.trim();
-                  if (raw === num(item.quantity)) return;
-                  if (!/^-?\d{1,6}$/.test(raw)) {
-                    e.target.value = num(item.quantity);
-                    return;
-                  }
-                  onOp("recount", { quantity: Number(raw) });
-                }}
-              />
-              <button
-                type="button"
-                className="rounded-md border border-subtle px-2 text-secondary"
-                aria-label={`${item.name}: +1`}
-                onClick={() => onOp("adjust", { delta: 1 })}
-              >
-                +
-              </button>
-            </>
-          )}
+          <StateControl item={item} t={t} onOp={onOp} recount />
           {onOrder > 0 && <span className="text-11 text-accent-primary">{t("on_order", { n: onOrder })}</span>}
           {toBuy > 0 && item.mode !== "pinned" && (
             <span className="text-11 text-tertiary">{t("to_buy", { n: toBuy })}</span>

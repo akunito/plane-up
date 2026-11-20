@@ -22,6 +22,7 @@ import { Tooltip } from "@plane/propel/tooltip";
 import { cn } from "@plane/utils";
 // components
 import { CustomizeNavigationDialog } from "@/components/navigation/customize-navigation-dialog";
+import { InventorySidebarEntry } from "@/components/inventory/sidebar-entry";
 // store hooks
 import { useAppTheme } from "@/hooks/store/use-app-theme";
 import useLocalStorage from "@/hooks/use-local-storage";
@@ -102,6 +103,8 @@ export const SidebarMenuItems = observer(function SidebarMenuItems() {
     <>
       <CustomizeNavigationDialog isOpen={isManageOpen} onClose={() => setIsManageOpen(false)} section="workspace" />
       <div className="flex flex-col gap-0.5">
+        {/* Fork (APLANE-63): renders nothing unless the viewer can see a project with inventory on. */}
+        <InventorySidebarEntry />
         {filteredStaticNavigationItems.map((item, _index) => (
           // oxlint-disable-next-line react/no-array-index-key
           <SidebarItemBase key={`static_${_index}`} item={item} />

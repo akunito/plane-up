@@ -16,6 +16,7 @@ import type { InventoryKey, InventoryT } from "../i18n";
 import type { Item } from "../online";
 import { failureMessage } from "../online";
 import { FIELD, modeKey } from "./dialogs";
+import { notifyInventoryChanged } from "../visibility";
 
 const text = (_field: string, value: unknown) =>
   typeof value === "string" ? value : value == null ? "" : String(value);
@@ -57,6 +58,7 @@ export function ItemSheet(props: {
     const out = await updateItem(opts, projectId, item.id, data);
     if (out.kind === "ok") {
       onSaved(out.body as Item);
+      notifyInventoryChanged();
       setMessage(t("saved"));
     } else setMessage(failureMessage(out as { kind: string; error?: string }, t));
   };

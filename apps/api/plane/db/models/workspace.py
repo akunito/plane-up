@@ -380,6 +380,8 @@ class WorkspaceHomePreference(BaseModel):
         MY_STICKIES = "my_stickies", "My Stickies"
         NEW_AT_PLANE = "new_at_plane", "New at Plane"
         QUICK_TUTORIAL = "quick_tutorial", "Quick Tutorial"
+        # Fork (APLANE-63): created and listed only for a viewer who can see a project with inventory on.
+        SHOPPING_LIST = "shopping_list", "Shopping List"
 
     workspace = models.ForeignKey(
         "db.Workspace",

@@ -353,6 +353,7 @@ export const INVENTORY_DICTIONARIES: Readonly<Record<InventoryLocale, Readonly<D
 export const INVENTORY_NAV_LABELS: Readonly<Record<string, InventoryKey>> = {
   inventory: "nav_inventory",
   features_inventory: "feature_title",
+  shopping_list: "widget_title",
 };
 
 /** The label of a navigation entry: the fork's own for inventory, Plane's `t` for the rest. */
