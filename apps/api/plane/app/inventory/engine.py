@@ -493,6 +493,10 @@ def _answer(event, duplicate=False, item=None):
         out["duplicate"] = True
     if event.order_id:
         out["order_id"] = str(event.order_id)
+    if event.resulting_rev is not None:
+        # The revision this operation produced: a duplicate's item is the CURRENT state, and the device
+        # needs this to know whether an undo could still apply (phase 3 audit).
+        out["rev"] = event.resulting_rev
     if item is not None:
         out["item"] = item_state(item)
     return out

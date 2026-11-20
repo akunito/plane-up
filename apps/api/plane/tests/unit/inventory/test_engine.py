@@ -626,3 +626,13 @@ def test_an_older_purchase_delivered_late_does_not_pull_the_bought_time_back(mak
     apply(ctx(bob), op("buy", item, age_ms=86_400_000))
     item = fresh(item)
     assert item.last_bought_at == newer and item.last_bought_by_id == alice.id
+
+
+def test_an_applied_answer_names_the_revision_it_produced_even_when_replayed(make_item, ctx, alice, bob):
+    item = make_item(mode="units", quantity=0)
+    first = op("adjust", item, {"delta": 1})
+    out = apply(ctx(alice), first)
+    assert out["rev"] == out["item"]["rev"] == 1
+    apply(ctx(bob), op("adjust", item, {"delta": 1}))
+    again = apply(ctx(alice), first)
+    assert (again["duplicate"], again["rev"], again["item"]["rev"]) == (True, 1, 2)

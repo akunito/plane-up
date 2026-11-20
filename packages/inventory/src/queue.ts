@@ -3,18 +3,28 @@
 //
 // Rules this must keep (each was wrong in an earlier design or found by review):
 // - Strictly first-in, first-out. Nothing is reordered, dropped or set aside by itself.
-// - A failed request (no network, 5xx, sign-in page, redirect) is retried later with the SAME ids, so an
-//   operation the server applied is recognised and not applied twice.
+// - A failed request (no network, 5xx, sign-in page, redirect, a refusal of the whole request) is retried
+//   later with the SAME ids, so an operation the server applied is recognised and not applied twice.
 // - "Not yet answered" is not "not sent": undo removes only a never-transmitted entry; anything
 //   transmitted is undone by queueing a revert behind it.
 // - Entries tapped more than two hours ago and never sent are held until the person approves them, and a
-//   held entry blocks everything behind it. Older than 60 days: discard only (events are pruned at 90).
+//   held entry blocks everything behind it. Older than 60 days, sent or not: discard only (the server
+//   prunes its ledger at 90, after which a retry would apply twice).
 // - Only the user can unblock a failing queue, by discarding its first entry, and is told it may have
 //   been applied. A discard takes the reverts that name it, and a discarded or refused tick leaves "Done".
-// - The queue belongs to one user; another user signed in on the same phone never sends it.
+// - The queue belongs to one user (stored under that user's key, see storage.ts); another user signed in
+//   on the same phone never sends it.
+// - What the device knows of an item only moves forward in revision: an older snapshot never replaces
+//   a newer answer (phase 3 audit).
+//
+// Accepted, not fixed (phase 3 audit): an entry whose answer was lost and whose effect a later refresh
+// already shows is previewed twice until its retry is answered (seconds when online). The device
+// cannot tell its own applied-but-unanswered step from someone else's. Likewise, an undo of a step whose
+// answer came back as a duplicate (after a lost one) is not previewed: a duplicate carries the item's
+// current state, so what the server will restore is unknown; it shows once the undo is answered.
 
 import type { Entry } from "./ops";
-import { applyLocal, buildOp } from "./ops";
+import { applyLocal, buildOp, NOT_REVERTIBLE } from "./ops";
 import type { Tap } from "./ops";
 import type { ItemState, OpResult, Operation } from "./types";
 
@@ -22,9 +32,24 @@ export const HOLD_AFTER_MS = 2 * 60 * 60 * 1000;
 export const DISCARD_ONLY_AFTER_MS = 60 * 24 * 60 * 60 * 1000;
 export const MAX_BATCH = 100;
 const BACKOFF_BASE_MS = 1000;
-const BACKOFF_MAX_MS = 5 * 60 * 1000;
+export const BACKOFF_MAX_MS = 5 * 60 * 1000;
+const RECENT = 50;
 
-export type FailureKind = "offline" | "server" | "signed_out_app" | "signed_out_proxy";
+/**
+ * offline: no answer. server: 5xx, non-JSON, or an answer that matched none of the batch.
+ * signed_out_app / signed_out_proxy: M4. refused: the whole request was refused (403 when the person
+ * lost access to inventory, 400 for a malformed body) — retried like the others, but the screen must
+ * say so: discarding the head does not help.
+ */
+export type FailureKind = "offline" | "server" | "signed_out_app" | "signed_out_proxy" | "refused";
+
+export interface Failure {
+  kind: FailureKind;
+  attempts: number;
+  nextTryAt: number;
+  status?: number;
+  error?: string;
+}
 
 export interface Notice {
   kind: "stale" | "rejected" | "discarded";
@@ -41,20 +66,18 @@ export interface QueueState {
   userId: string;
   queueId: string;
   entries: Entry[];
-  /** Last item states the SERVER sent (answers or refreshes). The base for base_rev and for the view. */
+  /** Last item states the SERVER sent (answers or refreshes), never older than one already held. */
   known: Record<string, ItemState>;
   /** Item id -> client_op_id of the tick that put it under "Done" on this device. */
   done: Record<string, string>;
   notices: Notice[];
   sending: boolean;
-  failure: { kind: FailureKind; attempts: number; nextTryAt: number } | null;
+  failure: Failure | null;
   /** Items whose server state this device cannot vouch for (a transmitted entry was discarded). */
   needsRefresh: string[];
-  /** The last applied entries, so an undo toast can still revert one after its answer came back. */
+  /** The last applied entries, so an undo can still revert one after its answer came back. */
   recent: Entry[];
 }
-
-const RECENT = 50;
 
 export function createQueue(userId: string, queueId: string): QueueState {
   return {
@@ -73,13 +96,18 @@ export function createQueue(userId: string, queueId: string): QueueState {
 
 const ageOf = (entry: Entry, now: number) => now - entry.tappedAt;
 
+function keepNewer(known: Record<string, ItemState>, item: ItemState): void {
+  const current = known[item.id];
+  if (!current || item.rev >= current.rev) known[item.id] = item;
+}
+
 export function isDiscardOnly(entry: Entry, now: number): boolean {
-  return entry.transmission === "never" && ageOf(entry, now) > DISCARD_ONLY_AFTER_MS;
+  return ageOf(entry, now) > DISCARD_ONLY_AFTER_MS;
 }
 
 export function isHeld(entry: Entry, now: number): boolean {
-  if (entry.transmission !== "never") return false; // sent ones keep their ids and follow the normal rules
   if (isDiscardOnly(entry, now)) return true;
+  if (entry.transmission !== "never") return false; // sent ones keep their ids and follow the normal rules
   return !entry.approved && ageOf(entry, now) > HOLD_AFTER_MS;
 }
 
@@ -102,7 +130,7 @@ export function tap(
   itemId: string,
   args: Record<string, unknown>,
   t: Omit<Tap, "queueId">,
-  options: { tick?: boolean } = {}
+  options: { tick?: boolean; orderQuantity?: number } = {}
 ): QueueState {
   const known = state.known[itemId];
   if (!known) throw new Error(`unknown item ${itemId}`);
@@ -110,36 +138,79 @@ export function tap(
   return enqueue(state, buildOp(name, known, args, { ...t, queueId: state.queueId }, { ...options, shown }));
 }
 
-/** Undo: remove a never-transmitted entry; queue a revert for anything already transmitted. */
-export function undo(state: QueueState, clientOpId: string, t: Omit<Tap, "queueId">): QueueState {
-  const entry = state.entries.find((e) => e.op.client_op_id === clientOpId);
-  const done = { ...state.done };
-  for (const [item, id] of Object.entries(done)) if (id === clientOpId) delete done[item];
-  if (entry && entry.transmission === "never") {
-    return { ...state, done, entries: state.entries.filter((e) => e !== entry) };
+function withoutDone(done: Record<string, string>, ids: Set<string>): Record<string, string> {
+  const out = { ...done };
+  for (const [item, id] of Object.entries(out)) if (ids.has(id)) delete out[item];
+  return out;
+}
+
+/**
+ * An entry and what cannot stand without it: the undos that name it and, for an order that was never
+ * sent (so never exists on the server), the arrivals and cancels queued for that order.
+ */
+function withDependents(entries: Entry[], entry: Entry): Set<string> {
+  const ids = new Set([entry.op.client_op_id]);
+  const orderId = entry.op.op === "mark_ordered" && entry.transmission === "never" ? entry.op.args.order_id : undefined;
+  for (const e of entries) {
+    if (e.op.op === "revert" && e.op.args.reverts === entry.op.client_op_id) ids.add(e.op.client_op_id);
+    if (orderId !== undefined && (e.op.op === "arrived" || e.op.op === "cancel") && e.op.args.order_id === orderId)
+      ids.add(e.op.client_op_id);
   }
-  // Transmitted (answered or not), or already answered and gone from the queue: revert it on the server.
-  const target = entry?.op.target ?? findTarget(state, clientOpId);
-  if (!target) return { ...state, done };
+  return ids;
+}
+
+/** Removing an undo makes its original undoable again. */
+function unmarkReverted(list: Entry[], removed: Entry[]): Entry[] {
+  const targets = new Set(removed.filter((e) => e.op.op === "revert").map((e) => e.op.args.reverts as string));
+  return targets.size ? list.map((e) => (targets.has(e.op.client_op_id) ? { ...e, undone: false } : e)) : list;
+}
+
+/**
+ * Undo: remove a never-transmitted entry (with what depends on it); queue a revert for anything
+ * transmitted or applied. Returns the SAME state when there is nothing to undo (a sent order action or
+ * revert, a refused or unknown operation, one already undone, or one older than the last 50 applied):
+ * the screen must not say "undone" then.
+ */
+export function undo(state: QueueState, clientOpId: string, t: Omit<Tap, "queueId">): QueueState {
+  const queued = state.entries.find((e) => e.op.client_op_id === clientOpId);
+  if (queued && queued.transmission === "never") {
+    const ids = withDependents(state.entries, queued);
+    const removed = state.entries.filter((e) => ids.has(e.op.client_op_id));
+    return {
+      ...state,
+      done: withoutDone(state.done, ids),
+      entries: unmarkReverted(
+        state.entries.filter((e) => !ids.has(e.op.client_op_id)),
+        removed
+      ),
+      recent: unmarkReverted(state.recent, removed),
+    };
+  }
+  const applied = queued ? undefined : state.recent.find((e) => e.op.client_op_id === clientOpId);
+  const entry = queued ?? applied;
+  if (!entry || entry.undone || NOT_REVERTIBLE.has(entry.op.op)) return state;
+  const done = withoutDone(state.done, new Set([clientOpId]));
+  const target = entry.op.target;
   const known = state.known[target];
+  if (!known) return state;
   const revert = buildOp(
     "revert",
-    known ?? ({ id: target } as ItemState),
+    known,
     { reverts: clientOpId },
     { ...t, queueId: state.queueId },
     { shown: view(state)[target] ?? known }
   );
-  return { ...state, done, entries: [...state.entries, revert] };
+  const mark = (e: Entry) => (e.op.client_op_id === clientOpId ? { ...e, undone: true } : e);
+  return {
+    ...state,
+    done,
+    entries: [...state.entries.map(mark), revert],
+    recent: queued ? state.recent : state.recent.map(mark),
+  };
 }
 
-function findAnswered(state: QueueState, clientOpId: string): Entry | undefined {
-  for (const e of state.recent) if (e.op.client_op_id === clientOpId) return e;
-  for (const n of state.notices) if (n.clientOpId === clientOpId) return n.entry;
-  return undefined;
-}
-
-function findTarget(state: QueueState, clientOpId: string): string | undefined {
-  return findAnswered(state, clientOpId)?.op.target;
+function findApplied(state: QueueState, clientOpId: string): Entry | undefined {
+  return state.recent.find((e) => e.op.client_op_id === clientOpId);
 }
 
 /** Approve held entries (never one older than 60 days, which can only be discarded). */
@@ -153,21 +224,27 @@ export function approve(state: QueueState, clientOpIds: string[], now: number): 
   };
 }
 
-/** Discard an entry, the reverts that name it, and its tick; say so if it may have been applied. */
+/**
+ * Discard an entry with what depends on it (its undos; for a never-sent order, its arrivals and
+ * cancels) and their ticks; say so if it may have been applied.
+ */
 export function discard(state: QueueState, clientOpId: string): QueueState {
   const entry = state.entries.find((e) => e.op.client_op_id === clientOpId);
   if (!entry) return state;
-  const entries = state.entries.filter(
-    (e) => e !== entry && !(e.op.op === "revert" && e.op.args.reverts === clientOpId)
+  const ids = withDependents(state.entries, entry);
+  const removed = state.entries.filter((e) => ids.has(e.op.client_op_id));
+  const entries = unmarkReverted(
+    state.entries.filter((e) => !ids.has(e.op.client_op_id)),
+    removed
   );
-  const done = { ...state.done };
-  for (const [item, id] of Object.entries(done)) if (id === clientOpId) delete done[item];
+  const recent = unmarkReverted(state.recent, removed);
   const transmitted = entry.transmission !== "never";
   const notice: Notice = { kind: "discarded", clientOpId, entry, mayHaveApplied: transmitted };
   return {
     ...state,
     entries,
-    done,
+    recent,
+    done: withoutDone(state.done, ids),
     notices: [...state.notices, notice],
     needsRefresh: transmitted ? [...new Set([...state.needsRefresh, entry.op.target])] : state.needsRefresh,
   };
@@ -179,12 +256,15 @@ export function discardHead(state: QueueState): QueueState {
   return head ? discard(state, head.op.client_op_id) : state;
 }
 
-/** "Apply anyway": a NEW operation with a new id and the fresh revision. Exists only for stale. */
+/** "Apply anyway": a NEW operation with a new id and the freshest revision known. Only for stale. */
 export function applyAnyway(state: QueueState, notice: Notice, t: Omit<Tap, "queueId">): QueueState {
   if (notice.kind !== "stale" || !notice.item) throw new Error("apply anyway exists only for stale results");
-  const known = { ...state.known, [notice.item.id]: notice.item };
+  const known = { ...state.known };
+  keepNewer(known, notice.item);
   const next = { ...state, known, notices: state.notices.filter((n) => n !== notice) };
-  return tap(next, notice.entry.op.op, notice.item.id, notice.entry.op.args, t);
+  const options: { orderQuantity?: number } = {};
+  if (notice.entry.orderQuantity !== undefined) options.orderQuantity = notice.entry.orderQuantity;
+  return tap(next, notice.entry.op.op, notice.item.id, notice.entry.op.args, t, options);
 }
 
 export function dismiss(state: QueueState, notice: Notice): QueueState {
@@ -196,6 +276,7 @@ export function dismiss(state: QueueState, notice: Notice): QueueState {
 /**
  * The next batch to send, or null. Strict FIFO from the head; stops at the first held entry, which
  * blocks everything behind it. Only the queue's owner sends it, one replay at a time, after backoff.
+ * A backoff longer than its maximum means the clock moved back: it is over.
  */
 export function nextBatch(
   state: QueueState,
@@ -203,7 +284,8 @@ export function nextBatch(
   currentUserId: string
 ): { state: QueueState; batch: Operation[] } | null {
   if (state.userId !== currentUserId || state.sending) return null;
-  if (state.failure && now < state.failure.nextTryAt) return null;
+  const f = state.failure;
+  if (f && now < f.nextTryAt && f.nextTryAt - now <= BACKOFF_MAX_MS) return null;
   const batch: Operation[] = [];
   const entries = [...state.entries];
   for (let i = 0; i < entries.length && batch.length < MAX_BATCH; i++) {
@@ -220,77 +302,155 @@ export function nextBatch(
   return { state: { ...state, entries, sending: true }, batch };
 }
 
+/** How many entries of the queue a result list answers (0 = no progress: treat as a failed request). */
+export function answeredCount(state: QueueState, results: OpResult[]): number {
+  const ids = new Set(results.map((r) => (r.client_op_id ?? "").toLowerCase()));
+  let n = 0;
+  for (const e of state.entries) if (ids.has(e.op.client_op_id.toLowerCase())) n++;
+  return n;
+}
+
 /** The server answered. Answered entries leave the queue; anything without an answer stays to be retried. */
 export function onDelivered(state: QueueState, results: OpResult[]): QueueState {
-  const byId = new Map(results.filter((r) => r.client_op_id).map((r) => [r.client_op_id as string, r]));
+  const byId = new Map<string, OpResult>();
+  for (const r of results) if (r.client_op_id) byId.set(r.client_op_id.toLowerCase(), r);
   const known = { ...state.known };
-  const done = { ...state.done };
+  let done = { ...state.done };
   const notices = [...state.notices];
   const entries: Entry[] = [];
-  const recent = [...state.recent];
+  let recent = [...state.recent];
   for (const entry of state.entries) {
-    const r = byId.get(entry.op.client_op_id);
+    const r = byId.get(entry.op.client_op_id.toLowerCase());
     if (!r) {
       entries.push(entry);
       continue;
     }
-    if (r.result === "applied") recent.push({ ...entry, transmission: "answered" });
-    if (r.item) known[r.item.id] = r.item;
-    if (r.reason === "gone") delete known[entry.op.target];
-    if (r.result !== "applied") {
-      const notice: Notice = {
-        kind: r.result === "stale" ? "stale" : "rejected",
-        clientOpId: entry.op.client_op_id,
-        entry,
-      };
-      if (r.reason) notice.reason = r.reason;
-      if (r.item) notice.item = r.item;
-      if (r.changed !== undefined) notice.changed = r.changed;
-      notices.push(notice);
-      if (entry.tick && done[entry.op.target] === entry.op.client_op_id) delete done[entry.op.target];
+    const prior = known[entry.op.target];
+    if (r.item) keepNewer(known, r.item);
+    // "gone" with an item is a missing order or reverted event; only "gone" without one is the item.
+    else if (r.reason === "gone") delete known[entry.op.target];
+    if (r.result === "applied") {
+      const answered: Entry = { ...entry, transmission: "answered" };
+      const rev = r.rev ?? (r.duplicate ? undefined : r.item?.rev);
+      if (rev !== undefined) answered.resultRev = rev;
+      if (rev !== undefined && prior && prior.rev === rev - 1) answered.serverBefore = prior;
+      recent.push(answered);
+      continue;
+    }
+    const notice: Notice = {
+      kind: r.result === "stale" ? "stale" : "rejected",
+      clientOpId: entry.op.client_op_id,
+      entry,
+    };
+    if (r.reason) notice.reason = r.reason;
+    if (r.item) notice.item = r.item;
+    if (r.changed !== undefined) notice.changed = r.changed;
+    notices.push(notice);
+    if (entry.tick) done = withoutDone(done, new Set([entry.op.client_op_id]));
+    if (entry.op.op === "revert") {
+      // The undo did not happen: the original stands, may be undone again, and a tick goes back to Done.
+      const target = entry.op.args.reverts as string;
+      const original =
+        findApplied({ ...state, recent }, target) ?? state.entries.find((e) => e.op.client_op_id === target);
+      recent = recent.map((e) => (e.op.client_op_id === target ? { ...e, undone: false } : e));
+      if (original?.tick) done = { ...done, [original.op.target]: original.op.client_op_id };
     }
   }
   return { ...state, entries, known, done, notices, sending: false, failure: null, recent: recent.slice(-RECENT) };
 }
 
 /** The request failed as a whole: keep every entry, transmitted ones as transmitted, and back off. */
-export function onFailed(state: QueueState, kind: FailureKind, now: number): QueueState {
+export function onFailed(
+  state: QueueState,
+  kind: FailureKind,
+  now: number,
+  detail: { status?: number; error?: string } = {}
+): QueueState {
   const attempts = (state.failure?.attempts ?? 0) + 1;
   const wait = Math.min(BACKOFF_BASE_MS * 2 ** (attempts - 1), BACKOFF_MAX_MS);
-  return { ...state, sending: false, failure: { kind, attempts, nextTryAt: now + wait } };
+  return { ...state, sending: false, failure: { kind, attempts, nextTryAt: now + wait, ...detail } };
+}
+
+/** The app opened, came online or the person tapped "retry": try now, whatever the backoff said. */
+export function retryNow(state: QueueState): QueueState {
+  return state.failure ? { ...state, failure: { ...state.failure, nextTryAt: 0 } } : state;
 }
 
 /** After loading from storage: a replay that was running when the app died is not running any more. */
 export function onRestart(state: QueueState): QueueState {
-  return { ...state, sending: false };
+  return retryNow({ ...state, sending: false });
 }
 
-/** A fresh snapshot from the server (polling, reopening): replaces what the device knew. */
+/** A fresh snapshot from the server (polling, reopening, a list's items): newer states replace older. */
 export function refreshed(state: QueueState, items: ItemState[]): QueueState {
   const known = { ...state.known };
-  for (const item of items) known[item.id] = item;
+  for (const item of items) keepNewer(known, item);
   const fresh = new Set(items.map((i) => i.id));
   return { ...state, known, needsRefresh: state.needsRefresh.filter((id) => !fresh.has(id)) };
 }
 
 // ---------------------------------------------------------------- what the device shows
 
-/** Server state plus every entry still in the queue, applied in order. */
+/**
+ * Server state plus every entry still in the queue, applied in order. A revert is previewed only while
+ * the server would apply it: when the entry it names is the last step on the item (the last applied
+ * answer, at the item's known revision, or the last queued entry that changes something).
+ */
 export function view(state: QueueState): Record<string, ItemState> {
   const out: Record<string, ItemState> = { ...state.known };
-  const byId = new Map(state.entries.map((e) => [e.op.client_op_id, e]));
+  const last: Record<string, Entry | undefined> = {};
+  const beforeOf = new Map<string, ItemState | undefined>();
+  // Orders this device has seen acted on: a second arrival or a cancel of a closed order is refused
+  // (already_done) and must preview as no change. Older than the last 50 applied entries: unknown.
+  const orders = new Map<string, "open" | "received" | "cancelled">();
+  const track = (e: Entry) => {
+    const id = e.op.args.order_id as string;
+    if (e.op.op === "mark_ordered") orders.set(id, "open");
+    else if (e.op.op === "arrived") orders.set(id, "received");
+    else if (e.op.op === "cancel") orders.set(id, "cancelled");
+  };
+  for (const e of state.recent) {
+    track(e);
+    const known = state.known[e.op.target];
+    // An applied revert moved the revision past resultRev, so an undone entry drops out by itself.
+    if (known && e.resultRev === known.rev) {
+      last[e.op.target] = e;
+      beforeOf.set(e.op.client_op_id, e.serverBefore);
+    }
+  }
   for (const entry of state.entries) {
-    const item = out[entry.op.target];
+    const target = entry.op.target;
+    const item = out[target];
     if (!item) continue;
-    const reverted = entry.op.op === "revert" ? byId.get(entry.op.args.reverts as string) : undefined;
-    out[entry.op.target] = applyLocal(item, entry, reverted ?? revertSource(state, entry));
+    if (entry.op.op === "revert") {
+      const reverted = last[target];
+      const before = reverted ? beforeOf.get(reverted.op.client_op_id) : undefined;
+      // Refused by the server (changed_since) unless it names the last step; a refused revert changes
+      // nothing, so the last step stays what it was.
+      if (reverted === undefined || reverted.op.client_op_id !== entry.op.args.reverts) continue;
+      if (reverted.op.op !== "adjust" && !(reverted.op.op === "buy" && item.mode === "units") && !before) {
+        last[target] = undefined; // applies, but what it restores is unknown: shown when answered
+        continue;
+      }
+      out[target] = applyLocal(item, entry, reverted, before);
+      last[target] = undefined;
+      continue;
+    }
+    const status = orders.get(entry.op.args.order_id as string);
+    if (
+      (entry.op.op === "arrived" && status === "received") ||
+      (entry.op.op === "cancel" && status && status !== "open")
+    )
+      continue;
+    track(entry);
+    const next = applyLocal(item, entry);
+    out[target] = next;
+    if (next !== item || entry.op.op === "mark_ordered" || entry.op.op === "cancel") {
+      last[target] = entry;
+      beforeOf.set(entry.op.client_op_id, item);
+    }
   }
   return out;
-}
-
-function revertSource(state: QueueState, entry: Entry): Entry | undefined {
-  if (entry.op.op !== "revert") return undefined;
-  return findAnswered(state, entry.op.args.reverts as string);
 }
 
 /** How many changes are waiting: the app shows this at all times (phase 6, M10). */

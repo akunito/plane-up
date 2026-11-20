@@ -1,64 +1,80 @@
-// One replay at a time per device (plan, phase 3): two tabs, a background sync and a foreground flush
-// must never send the same operation concurrently. The Web Locks API serialises across tabs and the
-// worker where the browser has it; the in-memory flag covers the rest.
+// Sending the queue: one replay at a time per device (plan, phase 3), against a store whose every
+// change is one atomic read-modify-write (an IndexedDB transaction in the app). A read, an await and a
+// write would overwrite a tap made in between, or let an undo remove an entry already on the wire
+// (phase 3 audit).
 
 import type { ClientOptions } from "./client";
 import { sendOps } from "./client";
 import type { QueueState } from "./queue";
-import { nextBatch, onDelivered, onFailed } from "./queue";
+import { answeredCount, nextBatch, onDelivered, onFailed } from "./queue";
+import type { Operation } from "./types";
 
 export interface QueueStore {
-  read(): Promise<QueueState>;
-  write(state: QueueState): Promise<void>;
+  /** Atomically apply fn to the stored state and store the result. Taps and undos use it too. */
+  update(fn: (state: QueueState) => QueueState): Promise<QueueState>;
 }
 
-export type Lock = <T>(fn: () => Promise<T>) => Promise<T | undefined>;
+export type Lock = <T>(fn: () => Promise<T>) => Promise<T>;
 
-let running = false;
+interface LockManagerLike {
+  request<T>(name: string, fn: () => Promise<T>): Promise<T>;
+}
 
-/** The device lock: Web Locks when present (ifAvailable: a second caller skips instead of waiting). */
-export const deviceLock: Lock = async (fn) => {
-  const locks = (globalThis.navigator as Navigator | undefined)?.locks;
-  if (locks?.request) {
-    return locks.request("plane-inventory-replay", { ifAvailable: true }, async (lock) => (lock ? fn() : undefined));
-  }
-  if (running) return undefined;
-  running = true;
-  try {
-    return await fn();
-  } finally {
-    running = false;
-  }
-};
+/**
+ * The device lock. Callers WAIT for it rather than skip: a caller that skipped while a replay was
+ * finishing would leave its tap unsent until the next trigger (phase 3 audit). Web Locks serialise
+ * across tabs and the worker; without them, a promise chain serialises within this JS context only.
+ */
+export function makeLock(locks: LockManagerLike | undefined): Lock {
+  if (locks) return (fn) => locks.request("plane-inventory-replay", fn);
+  let tail: Promise<unknown> = Promise.resolve();
+  return (fn) => {
+    const run = tail.then(fn, fn);
+    tail = run.catch(() => undefined);
+    return run;
+  };
+}
 
-/** Send everything sendable, batch after batch, until the queue is empty, held, blocked or failing. */
+export const deviceLock: Lock = makeLock((globalThis.navigator as { locks?: LockManagerLike } | undefined)?.locks);
+
+/** Send everything sendable, batch after batch, until the queue is empty, held or failing. */
 export async function replay(
   store: QueueStore,
   client: ClientOptions,
   currentUserId: string,
   now: () => number,
   lock: Lock = deviceLock
-): Promise<"done" | "busy"> {
-  const out = await lock(async () => {
+): Promise<void> {
+  await lock(async () => {
     // Sequential on purpose: strict FIFO, one batch on the wire at a time.
     /* oxlint-disable no-await-in-loop */
     for (;;) {
-      const state = await store.read();
-      const next = nextBatch(state, now(), currentUserId);
-      if (!next) return "done" as const;
-      await store.write(next.state);
-      const delivery = await sendOps(client, next.batch);
-      const latest = await store.read();
-      if (delivery.kind === "ok") {
-        await store.write(onDelivered(latest, delivery.results));
-      } else {
-        // "refused" is the whole request (e.g. more than 100 operations): nothing was applied, so it is
-        // retried like a failure and the user sees the queue blocked.
-        await store.write(onFailed(latest, delivery.kind === "failed" ? delivery.failure : "server", now()));
-        return "done" as const;
+      let batch: Operation[] | null = null;
+      await store.update((s) => {
+        const next = nextBatch(s, now(), currentUserId);
+        batch = next ? next.batch : null;
+        return next ? next.state : s;
+      });
+      if (!batch) return;
+      let progressed = false;
+      try {
+        const delivery = await sendOps(client, batch);
+        await store.update((s) => {
+          if (delivery.kind === "failed") return onFailed(s, delivery.failure, now(), { status: delivery.status });
+          if (delivery.kind === "refused")
+            return onFailed(s, "refused", now(), { status: delivery.status, error: delivery.error });
+          // An answer that matches none of the batch is no progress: back off instead of looping.
+          if (answeredCount(s, delivery.results) === 0) return onFailed(s, "server", now(), { status: 200 });
+          progressed = true;
+          return onDelivered(s, delivery.results);
+        });
+      } catch (error) {
+        // Never leave the queue marked "sending": nothing else would clear it before a reload.
+        await store.update((s) => onFailed(s, "server", now()));
+        throw error;
       }
+      if (!progressed) return;
     }
     /* oxlint-enable no-await-in-loop */
   });
-  return out ?? "busy";
 }

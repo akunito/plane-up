@@ -46,7 +46,13 @@ async function classify(
   if (response.status === 401)
     return { kind: "failed", failure: isJson ? "signed_out_app" : "signed_out_proxy", status: 401 };
   if (response.status >= 500 || !isJson) return { kind: "failed", failure: "server", status: response.status };
-  const body = (await response.json()) as unknown;
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    // Labelled JSON but not JSON (truncated, a proxy's page): a failed request, retried.
+    return { kind: "failed", failure: "server", status: response.status };
+  }
   if (response.status >= 400) {
     const error = (body as { error?: string })?.error ?? `HTTP ${response.status}`;
     return { kind: "refused", status: response.status, error };
@@ -87,4 +93,28 @@ export async function fetchShoppingList(
   const out = await classify(response);
   if (out.kind !== "json") return out;
   return { kind: "ok", list: out.body as ShoppingList };
+}
+
+/**
+ * Every item of one list (the project endpoint). The to-buy list leaves out items not on it, so this
+ * is how the app refreshes those (an item a discarded entry made doubtful, or one viewed in stock).
+ */
+export async function fetchListItems(
+  opts: ClientOptions,
+  projectId: string,
+  listId: string
+): Promise<{ kind: "ok"; items: ItemState[] } | Exclude<Delivery, { kind: "ok" }>> {
+  const f = opts.fetchImpl ?? fetch;
+  let response: Response;
+  try {
+    response = await f(
+      `${opts.base}/api/workspaces/${encodeURIComponent(opts.slug)}/projects/${encodeURIComponent(projectId)}/inventory/lists/${encodeURIComponent(listId)}/items/`,
+      { method: "GET", headers: HEADERS, redirect: "manual", credentials: "same-origin", cache: "no-store" }
+    );
+  } catch {
+    return { kind: "failed", failure: "offline", status: 0 };
+  }
+  const out = await classify(response);
+  if (out.kind !== "json") return out;
+  return { kind: "ok", items: ((out.body as { items?: ItemState[] })?.items ?? []) as ItemState[] };
 }

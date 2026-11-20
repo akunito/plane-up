@@ -32,6 +32,9 @@ export interface ItemState {
   restock_to: number | null;
   last_bought_at: string | null;
   last_bought_by: string | null;
+  /** In every item payload; lets the app refresh an item that is not on the to-buy list. */
+  list?: { id: string };
+  project?: { id: string };
 }
 
 export interface Operation {
@@ -53,6 +56,8 @@ export interface OpResult {
   reason?: string;
   duplicate?: boolean;
   order_id?: string;
+  /** For an applied operation: the revision it produced (a duplicate's item is the current state). */
+  rev?: number;
   item?: ItemState;
   changed?: { op: string; by: string | null; by_name: string | null; at: string | null } | null;
 }

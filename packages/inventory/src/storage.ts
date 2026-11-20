@@ -2,9 +2,24 @@
 // readable by the next ones (plan, phase 3): every format change adds a migration from n to n+1 here,
 // and the tests read a stored queue of every past version.
 
+import { createQueue, onRestart } from "./queue";
 import type { QueueState } from "./queue";
+import { newUuid } from "./ops";
 
 export const STORAGE_VERSION = 1;
+
+/**
+ * One queue per user on this install: another user signing in on the same phone gets their own key,
+ * and never loads or sends this one (brief: queue ownership).
+ */
+export function storageKey(userId: string): string {
+  return `plane-inventory-queue:${userId}`;
+}
+
+/** A new queue for a user on this install, with its own queue_id (a UUID, as the server requires). */
+export function newQueue(userId: string): QueueState {
+  return createQueue(userId, newUuid());
+}
 
 export interface Stored {
   version: number;
@@ -24,7 +39,8 @@ export type Loaded = { ok: true; state: QueueState } | { ok: false; reason: "new
 
 /**
  * Read a stored queue. A queue from a NEWER app is kept as it is and the app asks to be updated,
- * never discarded (brief: queue ownership).
+ * never discarded (brief: queue ownership). Loading counts as a restart: no replay is running, and
+ * the backoff is over.
  */
 export function load(
   raw: string,
@@ -46,5 +62,5 @@ export function load(
     if (!step) return { ok: false, reason: "corrupt", raw };
     state = step(state);
   }
-  return { ok: true, state: { ...(state as QueueState), sending: false } };
+  return { ok: true, state: onRestart(state as QueueState) };
 }
