@@ -6,9 +6,13 @@ import uuid
 from unittest.mock import patch
 
 import pytest
+from django.core.cache import cache
 from django.test import Client
+from rest_framework.test import APIRequestFactory
+from rest_framework.throttling import AnonRateThrottle
 from django.utils import timezone
 
+from plane.license.api.views.instance import InstanceEndpoint
 from plane.license.models import Instance
 from plane.throttles.instance import InstanceReadThrottle
 
@@ -41,3 +45,23 @@ def test_the_instance_read_still_has_a_budget(instance):
     with patch.dict(InstanceReadThrottle.THROTTLE_RATES, {"instance_read": "2/minute"}):
         codes = [client.get("/api/instances/").status_code for _ in range(3)]
     assert codes == [200, 200, 429]
+
+
+@pytest.mark.django_db
+def test_a_query_string_reuses_the_one_cached_answer(instance):
+    client = Client()
+    assert client.get("/api/instances/?x=1").status_code == 200
+    # One key, the bare path every invalidation deletes; none per query string.
+    assert cache.get("/api/instances/") is not None
+    assert cache.get("/api/instances/?x=1") is None
+
+
+def test_only_the_get_has_its_own_budget():
+    factory = APIRequestFactory()
+    for method, own in (("get", True), ("patch", False), ("head", False)):
+        view = InstanceEndpoint()
+        view.request = view.initialize_request(getattr(factory, method)("/api/instances/"))
+        kinds = [type(t) for t in view.get_throttles()]
+        assert (kinds == [InstanceReadThrottle]) is own, (method, kinds)
+        if not own:
+            assert kinds == [AnonRateThrottle], (method, kinds)
