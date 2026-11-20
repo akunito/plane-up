@@ -19,6 +19,8 @@ let person: { id: string; display_name: string } | null = null;
 let listsGate: Promise<void> | null = null;
 let listsOffline = false;
 let listsAsked = 0;
+/** How the workspace lists answer for `person`: refused (a guest) or with no lists. */
+let listsAs: "403" | "empty" | null = null;
 const OTHER = { id: "00000000-0000-4000-8000-0000000000ff", display_name: "Other" };
 
 const json = (body: unknown) =>
@@ -34,6 +36,14 @@ const fetchImpl: typeof fetch = async (input, init) => {
   }
   const res = await api.fetch(input, init);
   if (!person) return res;
+  if (listsAs && path.endsWith("/inventory/lists/") && !path.includes("/projects/")) {
+    if (listsAs === "403")
+      return new Response(JSON.stringify({ error: "forbidden" }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      });
+    return json({ ...(await res.json()), me: person, lists: [] });
+  }
   if (path.endsWith("/api/users/me/settings/")) return json({ ...(await res.json()), id: person.id });
   if (path.endsWith("/inventory/lists/") && !path.includes("/projects/"))
     return json({ ...(await res.json()), me: person });
@@ -66,6 +76,7 @@ beforeEach(() => {
   listsGate = null;
   listsOffline = false;
   listsAsked = 0;
+  listsAs = null;
   snapshots = memorySnapshots();
   stores = new Map();
   api = new FakeApi([{ state: state(MILK, "on_demand", { needed: true }), data: { name: "Milk", list: GROCERIES } }]);
@@ -189,5 +200,37 @@ describe("offline start", () => {
     expect(prefs.get("user")).toBeNull();
     // Her tap stays stored for when she signs in again.
     expect((await stores.get(`${ME.id}:home`)!.read()).entries).toHaveLength(1);
+  });
+
+  for (const as of ["403", "empty"] as const) {
+    it(`another person whose start ends on ${as === "403" ? "no access" : "no inventory"}: a focus afterwards sends nothing`, async () => {
+      const c = await offlineWithTap();
+      offline = false;
+      person = OTHER;
+      listsAs = as;
+      await act(async () => {
+        await c.refresh();
+        await new Promise((r) => setTimeout(r, 100));
+      });
+      await waitFor(() => expect(c.get().phase).toBe(as === "403" ? "no_access" : "no_inventory"));
+      await act(async () => {
+        await c.flush();
+        await c.refresh();
+      });
+      expect(opsSent()).toBe(0);
+      expect((await stores.get(`${ME.id}:home`)!.read()).entries).toHaveLength(1);
+    });
+  }
+
+  it("a signed-out answer to a refresh, not only at the start, makes the device forget who used it", async () => {
+    const c = make();
+    await c.start();
+    await settle();
+    expect(prefs.get("user")).toBe(ME.id);
+    api.fail = { status: 401, json: { detail: "no" } };
+    await act(async () => {
+      await c.refresh();
+    });
+    expect(prefs.get("user")).toBeNull();
   });
 });

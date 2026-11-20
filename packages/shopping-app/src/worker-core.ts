@@ -68,6 +68,10 @@ export interface PrecacheDeps {
  * this install created is removed if storing fails half way. Throws, failing the install, on any problem.
  */
 export async function precacheInto(deps: PrecacheDeps): Promise<void> {
+  // Without the shell nothing opens offline; the gate cannot see a dropped shell (the scope string is in the
+  // bundle anyway), so the install refuses it and the dev E2E (worker controls the page) goes red.
+  if (!deps.assets.some((u) => new URL(u, "https://x").pathname === deps.scope))
+    throw new Error(`precache refused: the shell ${deps.scope} is not in the list`);
   const fetched = await Promise.all(
     deps.assets.map(async (url) => {
       const res = await deps.fetchImpl(

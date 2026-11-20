@@ -100,6 +100,20 @@ describe("precacheInto (the install)", () => {
     expect(f.names.has("plane-shopping-v1")).toBe(true);
   });
 
+  it("refuses a list without the shell: nothing would open offline", async () => {
+    const f = fakeCaches([]);
+    await expect(
+      precacheInto({
+        fetchImpl: fetchFrom(good),
+        caches: f.caches,
+        cacheName: "plane-shopping-v4",
+        assets: ASSETS.slice(1),
+        scope: SCOPE,
+      })
+    ).rejects.toThrow(/shell/);
+    expect(f.puts).toEqual([]);
+  });
+
   it("stores every file when all are right", async () => {
     const f = fakeCaches([]);
     await precacheInto({

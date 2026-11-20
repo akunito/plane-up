@@ -179,6 +179,11 @@ export class Controller {
   get = (): AppState => this.state;
 
   private set(patch: Partial<AppState>): void {
+    // Any answer saying nobody is signed in (a start, a refresh, a list, a replay) makes the device forget
+    // who used it last: an offline start then never shows that person's lists to whoever holds it next
+    // (design: a shared device; the main app's sign-out clears it too). Their queue stays stored.
+    const c = patch.connection ?? patch.queue?.failure?.kind;
+    if (c === "signed_out_app" || c === "signed_out_proxy") prefs.set("user", null);
     this.state = { ...this.state, ...patch };
     for (const l of this.listeners) l();
   }
@@ -214,7 +219,7 @@ export class Controller {
       return this.signedOut(settings.failure);
     if (settings.kind !== "ok") {
       if (settings.kind === "failed" && (await this.openOffline(settings.failure))) return;
-      return this.set({ phase: "error", connection: settings.kind === "failed" ? settings.failure : "refused" });
+      return this.leave({ phase: "error", connection: settings.kind === "failed" ? settings.failure : "refused" });
     }
     // From here an offline fallback may open only this person's snapshot (phase 6 audit: a person who had
     // just signed in, then lost the network, was shown the previous person's lists and queue).
@@ -235,7 +240,7 @@ export class Controller {
       settings.body.workspace?.last_workspace_slug ||
       settings.body.workspace?.fallback_workspace_slug ||
       "";
-    if (!slug) return this.set({ phase: "no_workspace", workspaces: all });
+    if (!slug) return this.leave({ phase: "no_workspace", workspaces: all });
     this.set({ slug, workspaces: all });
     await this.openWorkspace();
   }
@@ -264,12 +269,12 @@ export class Controller {
   private async openWorkspace(): Promise<void> {
     const lists = await fetchLists(this.client());
     // 403: a workspace guest, or not a member (guests have no access to inventory, brief).
-    if (lists.kind === "refused" && lists.status === 403) return this.set({ phase: "no_access" });
+    if (lists.kind === "refused" && lists.status === 403) return this.leave({ phase: "no_access" });
     if (lists.kind === "failed" && (lists.failure === "signed_out_app" || lists.failure === "signed_out_proxy"))
       return this.signedOut(lists.failure);
     if (lists.kind !== "ok") {
       if (lists.kind === "failed" && (await this.openOffline(lists.failure))) return;
-      return this.set({ phase: "error", connection: lists.kind === "failed" ? lists.failure : "refused" });
+      return this.leave({ phase: "error", connection: lists.kind === "failed" ? lists.failure : "refused" });
     }
     prefs.set("slug", this.state.slug);
     // Who used this device last: an offline start opens their snapshot and queue (and only theirs).
@@ -277,7 +282,7 @@ export class Controller {
     this.confirmedUser = lists.body.me.id;
     if (lists.body.lists.length === 0) {
       this.openedOffline = false;
-      return this.set({ phase: "no_inventory", lists: lists.body });
+      return this.leave({ phase: "no_inventory", lists: lists.body });
     }
     const key = `${lists.body.me.id}:${this.state.slug}`;
     if (this.storeKey && this.storeKey !== key) {
@@ -286,7 +291,9 @@ export class Controller {
       // switchWorkspace.
       this.watched.clear();
       if (this.toastTimer) clearTimeout(this.toastTimer);
-      this.set({ known: {}, orders: [], covered: null, preferences: EMPTY_PREFERENCES, toast: null });
+      // "loading" while the other store opens: a tap on the old screen would find no store and be lost,
+      // and the emptied list would flash (phase 6 re-review).
+      this.set({ phase: "loading", known: {}, orders: [], covered: null, preferences: EMPTY_PREFERENCES, toast: null });
     }
     if (!this.store || this.storeKey !== key) {
       this.store = null;
@@ -371,13 +378,30 @@ export class Controller {
   }
 
   /**
+   * Whether the open store is the confirmed person's, for the workspace on screen. Sending and writing
+   * server answers into the queue happen only then (phase 6 re-review: a start that ended on "no access",
+   * "no inventory" or an error kept the snapshot's store, and the next focus sent its queue with the
+   * session of whoever is signed in now).
+   */
+  private ownsStore(): boolean {
+    return !!this.store && !!this.confirmedUser && this.storeKey === `${this.confirmedUser}:${this.state.slug}`;
+  }
+
+  /** A start or switch that ended on another screen: no queue is open for it (see ownsStore). */
+  private leave(patch: Partial<AppState>): void {
+    this.store = null;
+    this.storeKey = "";
+    this.set(patch);
+  }
+
+  /**
    * The server says nobody is signed in. The device forgets who used it last, so an offline start never
    * shows that person's lists to whoever holds the device next (design: a shared device). Their queue
    * stays stored and is sent after they sign in again.
    */
   private signedOut(failure: FailureKind): void {
-    prefs.set("user", null);
-    this.set({ phase: "signed_out", connection: failure });
+    this.confirmedUser = null;
+    this.leave({ phase: "signed_out", connection: failure });
   }
 
   /** Opened offline and a connection may be back: start again in full (once at a time). */
@@ -466,6 +490,7 @@ export class Controller {
       void this.reconnect();
       return;
     }
+    if (!this.ownsStore()) return;
     const target = this.store;
     if (!target) return; // a focus event while the app is still opening
     const startedAt = this.now();
@@ -657,8 +682,8 @@ export class Controller {
     // Opened offline, nobody has confirmed who is signed in: sending now could apply this queue as
     // someone else. The full start after reconnecting opens the signed-in person's queue and sends it.
     if (this.openedOffline) return this.reconnect();
-    if (!this.store || this.state.phase === "loading") return;
-    const target = this.store;
+    if (!this.ownsStore() || this.state.phase === "loading") return;
+    const target = this.store!;
     const store: AppStore = {
       update: (fn) => this.updateQueue(fn, target),
       read: () => target.read(),

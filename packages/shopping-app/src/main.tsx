@@ -37,7 +37,11 @@ function requestSync(): void {
     });
 }
 
-/** Unsaved work on screen: an open dialog, a toast (its Undo), or text typed in a field. */
+/**
+ * Unsaved work on screen: an open dialog, a toast (its Undo), or text typed in a field. The item page's
+ * fields always hold a value, so a hide from there waits for the next hide elsewhere or a cold start;
+ * accepted (phase 6 re-review): they save on blur, and nothing is lost meanwhile.
+ */
 function busy(): boolean {
   return (
     !!document.querySelector('[role="dialog"], .toast') ||
