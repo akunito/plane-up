@@ -124,6 +124,8 @@ Exit: every row answered with evidence; the brief updated; decision 8 confirmed 
 - Gate: the `/shopping/` asset check and the "expect the feature" mechanism (see "Gate changes").
 - Exit: a dev-only deploy built the image with the app in it; online scenarios pass in desktop Brave and on the phone.
 
+Built 2026-11-20 (APLANE-62), branch `akunito/inventory-phase4`, on phase 3; the exit (desktop Brave and the phone) is recorded in the ticket. What the build added to the design: the two endpoints above (lists with who sees them, item history) and the item payload's `needed_by`; one queue per user and workspace; a 403 on the lists is its own "no access" screen (guests); a corrupt stored queue gets a screen that offers to discard it. The gate: `/shopping/` checked after every swap and in the smoke (L7-02d) from the image tag, its self-test, the `qa-inv` seed workspace with users of its own and contract C09–C16, the throttle reset after the contract (the extra sign-ins pushed the E2E setup past 10 per minute). Visual baselines VS-01…08 create themselves when missing; the first set showed an inline name and sub-line in online and "On the way" rows, fixed before they were kept. **Phase 9 must merge with a squash**: one commit (the app's mutation harness) touches fork code and no `tests/` directory, and the tests-with-change rule would stop the prod deploy on it.
+
 ## Phase 5 — surfaces inside the main app
 
 - Flag plumbing on the web side: the lite project type, both navigation lists, the features list and its settings page, the routes file.
