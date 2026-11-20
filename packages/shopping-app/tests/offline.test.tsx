@@ -233,4 +233,61 @@ describe("offline start", () => {
     });
     expect(prefs.get("user")).toBeNull();
   });
+
+  it("a queue still carrying an old 'signed out' failure does not make the device forget a person signed in again", async () => {
+    const q = createQueue(ME.id, newUuid());
+    stores.set(`${ME.id}:home`, memoryStore({ ...q, failure: { kind: "signed_out_app", attempts: 1, nextTryAt: 0 } }));
+    const c = make();
+    await c.start();
+    await settle();
+    expect(c.get().phase).toBe("ready");
+    expect(prefs.get("user")).toBe(ME.id);
+  });
+
+  it("a page kept open across a sign-out and another person's sign-in never sends the first one's queue", async () => {
+    const c = make();
+    await c.start();
+    await settle();
+    api.fail = { status: 401, json: { detail: "no" } };
+    await act(async () => {
+      await c.act("buy", MILK, {}, { tick: true });
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(c.get().queue.entries).toHaveLength(1);
+    expect(prefs.get("user")).toBeNull();
+    const refusedAttempts = opsSent(); // the attempt that got the 401
+    api.fail = null;
+    person = OTHER;
+    await act(async () => {
+      await c.flush();
+      await new Promise((r) => setTimeout(r, 100));
+    });
+    await waitFor(() => expect(c.get().lists?.me.id).toBe(OTHER.id));
+    expect(opsSent()).toBe(refusedAttempts);
+    expect((await stores.get(`${ME.id}:home`)!.read()).entries).toHaveLength(1);
+  });
+
+  it("the main app's sign-out in another tab: the page re-checks who is signed in before sending", async () => {
+    const c = make();
+    await c.start();
+    await settle();
+    const stop = c.attach(window);
+    try {
+      offline = true; // the tap waits
+      await act(async () => {
+        await c.act("buy", MILK, {}, { tick: true });
+      });
+      window.dispatchEvent(new StorageEvent("storage", { key: "plane-shopping:user", newValue: null }));
+      offline = false;
+      person = OTHER;
+      await act(async () => {
+        await c.flush();
+        await new Promise((r) => setTimeout(r, 100));
+      });
+      await waitFor(() => expect(c.get().lists?.me.id).toBe(OTHER.id));
+      expect(opsSent()).toBe(0);
+    } finally {
+      stop();
+    }
+  });
 });

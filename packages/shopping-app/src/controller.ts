@@ -179,11 +179,10 @@ export class Controller {
   get = (): AppState => this.state;
 
   private set(patch: Partial<AppState>): void {
-    // Any answer saying nobody is signed in (a start, a refresh, a list, a replay) makes the device forget
-    // who used it last: an offline start then never shows that person's lists to whoever holds it next
-    // (design: a shared device; the main app's sign-out clears it too). Their queue stays stored.
-    const c = patch.connection ?? patch.queue?.failure?.kind;
-    if (c === "signed_out_app" || c === "signed_out_proxy") prefs.set("user", null);
+    // Any answer saying nobody is signed in (a start, a refresh, a list) makes the device forget who used
+    // it last (a replay's: flush). Not from patch.queue: a queue keeps its last failure until something is
+    // delivered, so a stale "signed out" re-cleared the user of a person signed in again (phase 6 review).
+    if (patch.connection === "signed_out_app" || patch.connection === "signed_out_proxy") this.forgetPerson();
     this.state = { ...this.state, ...patch };
     for (const l of this.listeners) l();
   }
@@ -341,6 +340,9 @@ export class Controller {
     const snap = await this.snapshots.load(userId, slug);
     if (!snap) return false;
     const key = `${userId}:${slug}`;
+    // Closed first: a StoredQueueError below must not leave the previous workspace's store open.
+    this.store = null;
+    this.storeKey = "";
     try {
       let store = this.stores.get(key);
       if (!store) {
@@ -385,6 +387,19 @@ export class Controller {
    */
   private ownsStore(): boolean {
     return !!this.store && !!this.confirmedUser && this.storeKey === `${this.confirmedUser}:${this.state.slug}`;
+  }
+
+  /**
+   * Nobody is signed in any more, or not the person this page started as: forget the device's last user
+   * (design: a shared device; the main app's sign-out clears it too; their queue stays stored), and treat
+   * the page as unconfirmed, so the next send or refresh first probes the server and starts again in full,
+   * opening the store of whoever is signed in then (phase 6 review: a page kept open across a sign-out and
+   * another person's sign-in sent the first one's queue with the second one's session).
+   */
+  private forgetPerson(): void {
+    prefs.set("user", null);
+    this.confirmedUser = null;
+    this.openedOffline = true;
   }
 
   /** A start or switch that ended on another screen: no queue is open for it (see ownsStore). */
@@ -522,6 +537,8 @@ export class Controller {
 
   /** Every item of one list, for the inventory screen. */
   async loadList(listId: string): Promise<void> {
+    // Server answers go into the queue only when the page knows whose it is (see ownsStore).
+    if (this.openedOffline || !this.ownsStore()) return;
     const list = this.state.lists?.lists.find((l) => l.id === listId);
     if (!list) return;
     const target = this.store;
@@ -547,6 +564,10 @@ export class Controller {
 
   /** Quick capture's search. The items it returns become known, so a tap on one can be queued. */
   async search(query: string): Promise<{ ids: string[]; categories: string[]; stores: string[] } | null> {
+    if (this.openedOffline || !this.ownsStore()) {
+      void this.reconnect();
+      return null;
+    }
     const target = this.store;
     const startedAt = this.now();
     const out = await fetchSuggestions(this.client(), query);
@@ -690,11 +711,20 @@ export class Controller {
     };
     const userId = this.state.queue.userId;
     const before = this.state.queue.entries.length;
+    const failureBefore = this.state.queue.failure;
     try {
       await replay(store, this.client(), userId, this.now, this.lock);
     } catch {
       // replay already marked the failure on the queue; the screen shows it.
     }
+    // onFailed always makes a new failure object; the other queue changes carry the old one forward.
+    const failure = this.state.queue.failure;
+    if (
+      failure &&
+      failure !== failureBefore &&
+      (failure.kind === "signed_out_app" || failure.kind === "signed_out_proxy")
+    )
+      this.forgetPerson();
     this.scheduleRetry();
     if (before > 0 || this.state.queue.entries.length > 0) await this.refresh();
   }
@@ -722,6 +752,11 @@ export class Controller {
     name: string,
     mode?: string
   ): Promise<{ kind: "created"; id: string } | { kind: "exists"; id: string | null } | { kind: "failed" }> {
+    // Not before the page knows who is signed in: the item would be created as whoever holds the session.
+    if (this.openedOffline || !this.ownsStore()) {
+      void this.reconnect();
+      return { kind: "failed" };
+    }
     const list = this.state.lists?.lists.find((l) => l.id === listId);
     if (!list) return { kind: "failed" };
     const target = this.store;
@@ -747,6 +782,10 @@ export class Controller {
     itemId: string,
     data: Record<string, unknown>
   ): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (this.openedOffline || !this.ownsStore()) {
+      void this.reconnect();
+      return { ok: false, error: "offline" };
+    }
     const item = this.state.known[itemId]?.data;
     if (!item) return { ok: false, error: "gone" };
     const target = this.store;
@@ -770,7 +809,7 @@ export class Controller {
   }
 
   private async learn(payloads: ItemData[], startedAt: number, target: AppStore | null): Promise<void> {
-    if (!target || this.store !== target) return; // answered after a workspace switch
+    if (!target || this.store !== target || this.openedOffline || !this.ownsStore()) return; // a switch meanwhile
     await this.updateQueue((s) => refreshed(s, payloads), target);
     if (this.store !== target) return;
     this.set({ known: mergeFetched(this.state.known, payloads, startedAt) });
@@ -807,8 +846,13 @@ export class Controller {
     const onVisible = () => {
       if (win.document.visibilityState === "visible") onFocus();
     };
+    // The main app's sign-out clears the last user (same origin): this page is no longer sure whose it is.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "plane-shopping:user" && e.newValue === null && this.confirmedUser) this.forgetPerson();
+    };
     win.addEventListener("focus", onFocus);
     win.addEventListener("online", onOnline);
+    win.addEventListener("storage", onStorage);
     win.document.addEventListener("visibilitychange", onVisible);
     const timer = win.setInterval(() => {
       if (win.document.visibilityState === "visible" && this.state.phase === "ready") void this.refresh();
@@ -816,6 +860,7 @@ export class Controller {
     return () => {
       win.removeEventListener("focus", onFocus);
       win.removeEventListener("online", onOnline);
+      win.removeEventListener("storage", onStorage);
       win.document.removeEventListener("visibilitychange", onVisible);
       win.clearInterval(timer);
     };
