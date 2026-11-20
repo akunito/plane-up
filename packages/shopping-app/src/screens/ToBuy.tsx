@@ -83,11 +83,11 @@ export function ToBuy({ s }: { s: AppState }) {
                 <div className="row" key={row.id} data-item={row.id}>
                   <span className="lead muted">{Icon.external()}</span>
                   <div className="grow">
-                    <a href={`#/item/${row.id}`} className="name">
+                    <a href={`#/item/${row.id}`} className="name block">
                       {row.data.name}
                       {row.quantity > 1 ? <span className="muted"> ×{row.quantity}</span> : null}
                     </a>
-                    <span className="sub">
+                    <span className="sub block">
                       {row.data.list.name}
                       {row.state.mode === "units"
                         ? ` · ${t("badge_below", { have: Math.max(row.state.quantity ?? 0, 0), min: row.state.min_quantity ?? 0 })}`
@@ -119,11 +119,11 @@ export function ToBuy({ s }: { s: AppState }) {
                 <div className={`row${order.overdue ? " overdue" : ""}`} key={order.id} data-order={order.id}>
                   <span className="lead accent">{Icon.truck()}</span>
                   <div className="grow">
-                    <span className="name">
+                    <span className="name block">
                       {name}
                       <span className="muted"> ×{order.quantity}</span>
                     </span>
-                    <span className="sub">
+                    <span className="sub block">
                       {[row?.data.list.name, order.reference].filter(Boolean).map((part) => `${part} · `)}
                       <Rich k="ordered_ago" vars={{ when: <Ago at={order.ordered_at} /> }} />
                       {order.expected_on ? ` · ${t("expected", { date: shortDate(locale, order.expected_on) })}` : ""}

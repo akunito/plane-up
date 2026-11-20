@@ -14,7 +14,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import type { Browser, Page, TestInfo } from "@playwright/test";
+import type { Browser, Locator, Page, TestInfo } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { apiDelete, apiPatch, apiPost, authFile, expect, expectNoHorizontalOverflow, manifest, test } from "./helpers";
 
@@ -250,7 +250,8 @@ test.describe("shopping app @shopping", () => {
   test("item sheet: data saves online when the field is left; history shows applied steps", async ({ page }) => {
     await open(page, `#/item/${items.Salt}`);
     await expect(page.getByRole("heading", { level: 1, name: "Salt" })).toBeVisible();
-    await expect(page.getByText(/took it off the list/)).toBeVisible();
+    // Earlier workflows toggle Salt too, so the history holds several such steps.
+    await expect(page.getByText(/took it off the list/).first()).toBeVisible();
     const category = page.getByLabel("Category / aisle");
     await expect(category).toHaveValue("Pantry");
     await category.fill("Spices");
@@ -303,25 +304,27 @@ test.describe("shopping app @shopping", () => {
 
 // ---------------------------------------------------------------- visual baselines
 
-const shot = async (page: Page, name: string) => {
+/** `target`: capture only that element (a dialog), so the masks of what lies behind it are not drawn over it. */
+const shot = async (page: Page, name: string, target?: Locator) => {
   await page.waitForLoadState("networkidle");
   const options = {
     animations: "disabled" as const,
     caret: "hide" as const,
     scale: "css" as const,
     // Relative times change from run to run; every one of them is a <time> element in this app.
-    mask: [page.locator("time")],
+    // Only those inside the target: a mask behind a dialog would be drawn over the dialog.
+    mask: [(target ?? page).locator("time")],
   };
   const file = test.info().snapshotPath(`${name}.png`, { kind: "screenshot" });
   if (!fs.existsSync(file)) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     // Two identical captures in a row, as toHaveScreenshot waits for, so a frame mid-render is never
     // taken as the reference (phase 4 audit).
-    let previous = await page.screenshot(options);
+    let previous = await (target ?? page).screenshot(options);
     let stable = false;
     for (let i = 0; i < 10 && !stable; i++) {
       // oxlint-disable-next-line no-await-in-loop -- each capture is compared with the one before it
-      const next = await page.screenshot(options);
+      const next = await (target ?? page).screenshot(options);
       stable = next.equals(previous);
       previous = next;
     }
@@ -331,7 +334,7 @@ const shot = async (page: Page, name: string) => {
     test.info().annotations.push({ type: "baseline-created", description: file });
     return;
   }
-  await expect(page).toHaveScreenshot(`${name}.png`, { ...options, maxDiffPixelRatio: 0.01 });
+  await expect(target ?? page).toHaveScreenshot(`${name}.png`, { ...options, maxDiffPixelRatio: 0.01 });
 };
 
 test.describe("@visual-shopping", () => {
@@ -379,14 +382,14 @@ test.describe("@visual-shopping", () => {
     await open(page);
     await page.getByRole("button", { name: "Mark Protein as ordered" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    await shot(page, "vs-06-order");
+    await shot(page, "vs-06-order", page.getByRole("dialog"));
   });
 
   test("VS-07 arrival dialog", async ({ page }) => {
     await open(page);
     await page.getByRole("button", { name: "Magnesium: the order arrived" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    await shot(page, "vs-07-arrival");
+    await shot(page, "vs-07-arrival", page.getByRole("dialog"));
   });
 
   test("VS-08 waiting and unapplied", async ({ page }) => {
