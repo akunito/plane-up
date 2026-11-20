@@ -257,6 +257,7 @@ Each new check gets a self-test for three cases — feature expected and app mis
 Under `/api/workspaces/<slug>/inventory/`, session or API key:
 
 - `shopping-list/` — the to-buy list, the counter, "on the way", and the state of items fully covered by an order (off the list, but "Arrived" and "Cancel" are operations on them).
+- `categories/rename/` — renames a category on every item the requester may edit, and in their own aisle order (phase 5).
 - `lists/` — every list the viewer can see, its project, who can see it (active project Members and Admins who are workspace Members or Admins) and how many workspace admins outside the project could add themselves (phase 4).
 - Project-level item history: applied steps only, newest first (phase 4).
 - `ops/` — a batch of operations.
