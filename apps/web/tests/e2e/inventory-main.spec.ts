@@ -64,6 +64,46 @@ async function firstListWarns(page: Page, network: 0 | 2): Promise<boolean> {
   }
 }
 
+/** One crawled route, as shell.spec's crawl does it; the guard fixture fails the test on an error screen. */
+async function crawl(page: Page, route: string) {
+  await page.goto(route);
+  await page.waitForLoadState("networkidle");
+  await expect(page).not.toHaveURL(/\/sign-in|\/login|\/accounts/);
+}
+
+// Gate additions (plan, phase 6): the inventory routes crawled as a member and as a guest. A guest has no
+// access to inventory: each screen must say so, never break (the guard fixture fails on an error boundary).
+test.describe("inventory crawl, member and guest @inventory-main", () => {
+  test.skip(!INV, "the image under test has no inventory (seed-qa.sh decides from the image tag)");
+  test.skip(({ browserName }) => browserName === "webkit", "Chromium only, like the shopping app's spec");
+
+  test("a member: Home, the project page, the feature settings, the shopping app", async ({ browser }, info) => {
+    const ana = await contextFor(browser, info, "qa-inv-ana");
+    try {
+      await crawl(ana.page, "/qa-inv/");
+      await crawl(ana.page, `/qa-inv/projects/${projects!.HOME.id}/inventory/`);
+      await crawl(ana.page, `/qa-inv/settings/projects/${projects!.HOME.id}/features/inventory/`);
+      await ana.page.goto("/shopping/");
+      await expect(ana.page.locator(MARKER)).toHaveCount(1);
+      await expect(ana.page.locator("[data-phase]")).toHaveCount(0);
+    } finally {
+      await ana.context.close();
+    }
+  });
+
+  test("a guest: the project page and the shopping app say there is no access", async ({ browser }, info) => {
+    const gus = await contextFor(browser, info, "qa-inv-gus");
+    try {
+      await gus.page.goto(`/qa-inv/projects/${projects!.HOME.id}/inventory/`);
+      await expect(gus.page.getByText("You have no access to this project's inventory.")).toBeVisible();
+      await gus.page.goto("/shopping/");
+      await expect(gus.page.locator('[data-phase="no_access"]')).toBeVisible();
+    } finally {
+      await gus.context.close();
+    }
+  });
+});
+
 test.describe("inventory in the main app @inventory-main", () => {
   test.skip(!INV, "the image under test has no inventory (seed-qa.sh decides from the image tag)");
   test.use({ storageState: authFile("qa-inv-ana") });

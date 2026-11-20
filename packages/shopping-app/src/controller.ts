@@ -5,8 +5,12 @@
 // Polling (brief, Designer defaults): on focus, on reconnect, after the device's own operations and every
 // 20 s while a screen is visible. The queue is per user AND workspace (storage.ts storageKey): a workspace
 // switch opens the other workspace's queue, and a replay already running keeps writing to the queue it
-// started with. Phase 4 is online: the queue still holds every tap until it is
-// answered, so nothing is lost when a request fails, but the offline screens are phase 6.
+// started with. The queue holds every tap until it is answered, so nothing is lost when a request fails.
+//
+// Offline (phase 6): every successful read is saved as a snapshot per user and workspace (store.ts), and a
+// start that cannot reach the server opens from the last one, with the queue, and says so. When the
+// connection returns, the app starts again in full, which also notices another person signed in on this
+// device (their queue and snapshot are another key).
 
 import type {
   ClientOptions,
@@ -45,8 +49,8 @@ import {
   updateItem,
 } from "@plane/inventory";
 import type { Lock } from "@plane/inventory";
-import type { AppStore } from "./store";
-import { discardStored, idbStore, memoryStore, prefs, StoredQueueError } from "./store";
+import type { AppStore, Snapshot, SnapshotStore } from "./store";
+import { discardStored, idbSnapshots, idbStore, memoryStore, prefs, StoredQueueError } from "./store";
 import type { Grouping, ItemData, Known, Order } from "./model";
 import { dropMissingFromList, mergeFetched, mergeSnapshot } from "./model";
 
@@ -89,6 +93,8 @@ export interface AppState {
   connection: FailureKind | null;
   toast: Toast | null;
   lastTickAt: number;
+  /** When what is shown was read from the server; set when the app opened from a saved snapshot. */
+  offlineSince: number | null;
 }
 
 export interface Deps {
@@ -100,6 +106,13 @@ export interface Deps {
   lock?: Lock;
   /** The workspace in the address, if any. */
   slug?: string | null;
+  /** Where the last server answer is kept for an offline start; defaults to IndexedDB. */
+  snapshots?: SnapshotStore;
+  /**
+   * Called after every change that leaves something to send (a tap, an undo, an approval): main.tsx
+   * asks the worker for a one-off background sync, which the browser fires once it sees a network.
+   */
+  onQueued?: () => void;
 }
 
 type Listener = () => void;
@@ -127,10 +140,16 @@ export class Controller {
   /** Lists an inventory screen is showing: reloaded with every refresh. */
   private watched = new Set<string>();
   private toastSeq = 0;
+  private readonly snapshots: SnapshotStore;
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Opened from a snapshot: the next sign of a connection starts the app again in full. */
+  private openedOffline = false;
+  private restarting: Promise<void> | null = null;
 
   constructor(private readonly deps: Deps) {
     this.now = deps.now ?? Date.now;
     this.lock = deps.lock;
+    this.snapshots = deps.snapshots ?? safeSnapshots();
     this.state = {
       phase: "loading",
       slug: deps.slug ?? "",
@@ -144,6 +163,7 @@ export class Controller {
       connection: null,
       toast: null,
       lastTickAt: Number(prefs.get("lastTickAt") ?? 0),
+      offlineSince: null,
     };
   }
 
@@ -188,8 +208,10 @@ export class Controller {
       (settings.failure === "signed_out_app" || settings.failure === "signed_out_proxy")
     )
       return this.set({ phase: "signed_out", connection: settings.failure });
-    if (settings.kind !== "ok")
+    if (settings.kind !== "ok") {
+      if (settings.kind === "failed" && (await this.openOffline(settings.failure))) return;
       return this.set({ phase: "error", connection: settings.kind === "failed" ? settings.failure : "refused" });
+    }
     const workspaces = await requestJson<{ slug: string; name: string }[]>(client, "GET", "users/me/workspaces/");
     const all =
       workspaces.kind === "ok" && Array.isArray(workspaces.body)
@@ -238,9 +260,13 @@ export class Controller {
     if (lists.kind === "refused" && lists.status === 403) return this.set({ phase: "no_access" });
     if (lists.kind === "failed" && (lists.failure === "signed_out_app" || lists.failure === "signed_out_proxy"))
       return this.set({ phase: "signed_out", connection: lists.failure });
-    if (lists.kind !== "ok")
+    if (lists.kind !== "ok") {
+      if (lists.kind === "failed" && (await this.openOffline(lists.failure))) return;
       return this.set({ phase: "error", connection: lists.kind === "failed" ? lists.failure : "refused" });
+    }
     prefs.set("slug", this.state.slug);
+    // Who used this device last: an offline start opens their snapshot and queue (and only theirs).
+    prefs.set("user", lists.body.me.id);
     if (lists.body.lists.length === 0) return this.set({ phase: "no_inventory", lists: lists.body });
     const key = `${lists.body.me.id}:${this.state.slug}`;
     if (!this.store || this.storeKey !== key) {
@@ -266,8 +292,105 @@ export class Controller {
     if (prefsOut.kind === "ok") this.set({ preferences: prefsOut.body });
     await this.refresh();
     this.expireDone();
+    this.openedOffline = false;
+    this.set({ phase: "ready", offlineSince: null });
+    this.saveSnapshot();
+    void this.flush();
+  }
+
+  /**
+   * Opens from the last snapshot when the server cannot be reached (no network, or a server or proxy
+   * failure): the list, the queue and "Done" as they were, with a line saying so. Not for a sign-out:
+   * the person must sign in again, and showing their list is no help then. False when there is nothing
+   * saved for the last user and workspace.
+   */
+  private async openOffline(failure: FailureKind): Promise<boolean> {
+    if (failure !== "offline" && failure !== "server") return false;
+    const userId = prefs.get("user");
+    const slug = this.state.slug || prefs.get("slug") || "";
+    if (!userId || !slug) return false;
+    const snap = await this.snapshots.load(userId, slug);
+    if (!snap) return false;
+    const key = `${userId}:${slug}`;
+    try {
+      let store = this.stores.get(key);
+      if (!store) {
+        const open = this.deps.openStore ?? defaultStore;
+        store = await open(userId, slug);
+        this.stores.set(key, store);
+      }
+      this.store = store;
+      this.storeKey = key;
+    } catch (error) {
+      if (error instanceof StoredQueueError) {
+        this.set({ phase: error.reason === "newer" ? "newer" : "corrupt", lists: snap.lists as Lists });
+        return true;
+      }
+      throw error;
+    }
+    const queue = await this.store.read();
+    this.openedOffline = true;
+    this.set({
+      slug,
+      workspaces: snap.workspaces,
+      lists: snap.lists as Lists,
+      known: snap.known as Record<string, Known>,
+      orders: snap.orders as Order[],
+      covered: snap.covered ? new Set(snap.covered) : null,
+      preferences: (snap.preferences as Preferences) ?? EMPTY_PREFERENCES,
+      queue,
+      connection: failure,
+      offlineSince: snap.savedAt,
+    });
+    this.expireDone();
     this.set({ phase: "ready" });
     void this.flush();
+    return true;
+  }
+
+  /** Opened offline and a connection may be back: start again in full (once at a time). */
+  private reconnect(): Promise<void> {
+    if (!this.openedOffline) return Promise.resolve();
+    this.restarting ??= (async () => {
+      try {
+        const client = this.client();
+        const probe = await requestJson(client, "GET", "users/me/settings/");
+        if (probe.kind !== "ok") return; // still offline: stay on the snapshot
+        this.openedOffline = false;
+        this.watched.clear();
+        await this.startOnce();
+      } catch {
+        this.set({ phase: "error" });
+      } finally {
+        this.restarting = null;
+      }
+    })();
+    return this.restarting;
+  }
+
+  /** Saves what is on screen for an offline start. Debounced: a refresh and its list loads write once. */
+  private saveSnapshot(): void {
+    if (this.openedOffline) return; // nothing new to save; and never overwrite with an older copy
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      const s = this.state;
+      const userId = s.lists?.me.id;
+      if (s.phase !== "ready" || !userId || !s.slug || this.storeKey !== `${userId}:${s.slug}`) return;
+      const snap: Snapshot = {
+        v: 1,
+        savedAt: this.now(),
+        userId,
+        slug: s.slug,
+        workspaces: s.workspaces,
+        lists: s.lists,
+        known: s.known,
+        orders: s.orders,
+        covered: s.covered ? [...s.covered] : null,
+        preferences: s.preferences,
+      };
+      void this.snapshots.save(snap);
+    }, 300);
   }
 
   // ---------------------------------------------------------------- reading
@@ -296,6 +419,12 @@ export class Controller {
   }
 
   private async refreshOnce(): Promise<void> {
+    if (this.openedOffline) {
+      // Not awaited: the full start it may run calls refresh() itself, which would wait for this very
+      // refresh (a deadlock, found by the offline tests).
+      void this.reconnect();
+      return;
+    }
     const target = this.store;
     if (!target) return; // a focus event while the app is still opening
     const startedAt = this.now();
@@ -317,6 +446,7 @@ export class Controller {
       connection: null,
     });
     await Promise.all([...this.watched].map((id) => this.loadList(id)));
+    this.saveSnapshot();
   }
 
   watch(listId: string, on: boolean): void {
@@ -346,6 +476,7 @@ export class Controller {
       orders: [...orders.values()],
       connection: null,
     });
+    this.saveSnapshot();
   }
 
   /** Quick capture's search. The items it returns become known, so a tap on one can be queued. */
@@ -471,7 +602,20 @@ export class Controller {
   }
 
   /** Send what can be sent, then read the lists again (polling after one's own operations). */
+  /** The worker sent (part of) a queue: show what is stored now, then read the lists again. */
+  async reloadQueue(): Promise<void> {
+    const target = this.store;
+    if (!target) return;
+    const queue = await target.read();
+    if (this.store === target) this.set({ queue });
+    await this.refresh();
+  }
+
   async flush(): Promise<void> {
+    if (this.state.queue.entries.length > 0) this.deps.onQueued?.();
+    // Opened offline, nobody has confirmed who is signed in: sending now could apply this queue as
+    // someone else. The full start after reconnecting opens the signed-in person's queue and sends it.
+    if (this.openedOffline) return this.reconnect();
     if (!this.store || this.state.phase === "loading") return;
     const target = this.store;
     const store: AppStore = {
@@ -564,6 +708,7 @@ export class Controller {
     await this.updateQueue((s) => refreshed(s, payloads), target);
     if (this.store !== target) return;
     this.set({ known: mergeFetched(this.state.known, payloads, startedAt) });
+    this.saveSnapshot();
   }
 
   // ---------------------------------------------------------------- toasts
@@ -609,6 +754,11 @@ export class Controller {
       win.clearInterval(timer);
     };
   }
+}
+
+function safeSnapshots(): SnapshotStore {
+  // No IndexedDB (a private window, tests): no offline start, nothing else changes.
+  return typeof indexedDB === "undefined" ? { load: async () => null, save: async () => {} } : idbSnapshots();
 }
 
 async function defaultStore(userId: string, workspace: string): Promise<AppStore> {

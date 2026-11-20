@@ -218,6 +218,8 @@ export const en = {
   workspace: "Workspace",
   open_main_app: "Open Plane",
   refresh_failed: "Could not refresh. The list may be out of date.",
+  offline_now: "No connection. Changes are kept and sent when it returns.",
+  offline_since: "No connection: this is the list from {when}. Changes are kept and sent when it returns.",
   item_missing: "This item no longer exists, or you cannot see it.",
   unknown_item: "an item",
 } as const;

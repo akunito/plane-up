@@ -218,6 +218,8 @@ export const pl: Dictionary = {
   workspace: "Przestrzeń robocza",
   open_main_app: "Otwórz Plane",
   refresh_failed: "Nie udało się odświeżyć. Lista może być nieaktualna.",
+  offline_now: "Brak połączenia. Zmiany są zachowane i zostaną wysłane po jego powrocie.",
+  offline_since: "Brak połączenia: to lista z {when}. Zmiany są zachowane i zostaną wysłane po jego powrocie.",
   item_missing: "Ten produkt już nie istnieje albo nie masz do niego dostępu.",
   unknown_item: "produkt",
 };

@@ -6,7 +6,7 @@ import { newUuid, waiting, heldEntries } from "@plane/inventory";
 import type { AppState } from "../controller";
 import type { Order, Row } from "../model";
 import { audience, projectOf } from "../model";
-import { listNames } from "../i18n";
+import { ago, listNames } from "../i18n";
 import { Ago, Dialog, Icon, NumberField, Rich, parseIntStrict, useCtx } from "../ui";
 
 export function Tabs({ active, summary }: { active: "shopping" | "inventory"; summary?: string }) {
@@ -34,14 +34,19 @@ export function Tabs({ active, summary }: { active: "shopping" | "inventory"; su
 
 /** How many changes wait, at all times, and why sending fails when it does (plan, phase 6 / M10). */
 export function QueueStatus({ s }: { s: AppState }) {
-  const { t, now } = useCtx();
+  const { t, now, locale } = useCtx();
   const n = waiting(s.queue);
   const held = heldEntries(s.queue, now()).length;
   const failure = s.queue.failure;
   const notices = s.queue.notices.length;
   if (n === 0 && notices === 0 && !failure && !s.connection) return null;
   let text: string | null = null;
-  if (failure && n > 0) text = t(`failure_${failure.kind}`, { error: failure.error ?? String(failure.status ?? "") });
+  // No network is said plainly, with the age of what is shown when the app opened from its snapshot.
+  if (s.connection === "offline" || (s.offlineSince !== null && s.connection))
+    text =
+      s.offlineSince !== null ? t("offline_since", { when: ago(locale, s.offlineSince, now()) }) : t("offline_now");
+  else if (failure && n > 0)
+    text = t(`failure_${failure.kind}`, { error: failure.error ?? String(failure.status ?? "") });
   else if (s.connection) text = t("refresh_failed");
   return (
     <div className={`status${failure || s.connection ? " warn" : ""}`} role="status">

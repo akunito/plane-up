@@ -43,11 +43,14 @@ export async function restoreSeed(page: Page) {
   // their operations and make them stale (phase 4 re-review).
   await page.goto("about:blank");
   const ops: Record<string, unknown>[] = [];
-  const want: [string, { needed?: boolean; quantity?: number }][] = [
+  const want: [string, { needed?: boolean; quantity?: number; level?: string }][] = [
     ["Milk", { needed: true }],
     ["Salt", { needed: false }],
     ["Wipes", { quantity: 1 }],
     ["Protein", { quantity: 0 }],
+    // Ticked by the offline spec (a buy sets a level item to "ok"); seeded "out".
+    ["Detergent", { level: "out" }],
+    ["Nappies", { level: "low" }],
   ];
   for (const [name, state] of want) {
     // Sequential: each read gives the revision its own operation names.
@@ -57,6 +60,8 @@ export async function restoreSeed(page: Page) {
       ops.push({ target: now.id, op: "set_needed", args: { needed: state.needed }, base_rev: now.rev });
     if (state.quantity !== undefined && now.quantity !== state.quantity)
       ops.push({ target: now.id, op: "recount", args: { quantity: state.quantity }, base_rev: now.rev });
+    if (state.level !== undefined && now.level !== state.level)
+      ops.push({ target: now.id, op: "set_level", args: { level: state.level }, base_rev: now.rev });
   }
   const list = await (await page.request.get("/api/workspaces/qa-inv/inventory/shopping-list/")).json();
   const seeded = new Set([INV!.inventory.orders.open, INV!.inventory.orders.overdue]);

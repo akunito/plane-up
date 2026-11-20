@@ -125,3 +125,110 @@ export const prefs = {
     }
   },
 };
+
+/**
+ * The last thing the server said, per user and workspace, so the app opens offline with the list it last
+ * showed (plan, phase 6: cold start from the icon with no network). Separate from the queue on purpose:
+ * the queue is the device's truth and must be read atomically; the snapshot is a cache that may be lost.
+ * A missing or unreadable snapshot is simply "nothing to show offline".
+ */
+export interface Snapshot {
+  v: 1;
+  savedAt: number;
+  userId: string;
+  slug: string;
+  workspaces: { slug: string; name: string }[];
+  lists: unknown;
+  known: unknown;
+  orders: unknown;
+  /** client_op_ids the last to-buy snapshot covered (null before any). */
+  covered: string[] | null;
+  preferences: unknown;
+}
+
+const snapshotKey = (userId: string, workspace: string) => `plane-shopping-snapshot:${userId}:${workspace}`;
+
+export interface SnapshotStore {
+  load(userId: string, workspace: string): Promise<Snapshot | null>;
+  save(snapshot: Snapshot): Promise<void>;
+}
+
+export function idbSnapshots(factory: IDBFactory = indexedDB): SnapshotStore {
+  let db: Promise<IDBDatabase> | null = null;
+  const open = () => (db ??= openDb(factory));
+  return {
+    async load(userId, workspace) {
+      try {
+        const d = await open();
+        const raw = await new Promise<unknown>((resolve, reject) => {
+          const get = d.transaction(STORE, "readonly").objectStore(STORE).get(snapshotKey(userId, workspace));
+          get.addEventListener("success", () => resolve(get.result));
+          get.addEventListener("error", () => reject(get.error));
+        });
+        if (typeof raw !== "string") return null;
+        const parsed = JSON.parse(raw) as Snapshot;
+        return parsed?.v === 1 && parsed.userId === userId && parsed.slug === workspace ? parsed : null;
+      } catch {
+        return null;
+      }
+    },
+    async save(snapshot) {
+      try {
+        const d = await open();
+        await new Promise<void>((resolve, reject) => {
+          const tx = d.transaction(STORE, "readwrite");
+          tx.objectStore(STORE).put(JSON.stringify(snapshot), snapshotKey(snapshot.userId, snapshot.slug));
+          tx.addEventListener("complete", () => resolve());
+          tx.addEventListener("abort", () => reject(tx.error));
+          tx.addEventListener("error", () => reject(tx.error));
+        });
+      } catch {
+        // A cache: losing a write only means an older list offline.
+      }
+    },
+  };
+}
+
+export function memorySnapshots(): SnapshotStore {
+  const all = new Map<string, Snapshot>();
+  return {
+    load: async (userId, workspace) => all.get(snapshotKey(userId, workspace)) ?? null,
+    save: async (s) => void all.set(snapshotKey(s.userId, s.slug), s),
+  };
+}
+
+/** Every stored queue on this device (the worker sends them for whoever is signed in). */
+export async function storedQueues(factory: IDBFactory = indexedDB): Promise<{ userId: string; workspace: string }[]> {
+  const db = await openDb(factory);
+  const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
+    const req = db.transaction(STORE, "readonly").objectStore(STORE).getAllKeys();
+    req.addEventListener("success", () => resolve(req.result));
+    req.addEventListener("error", () => reject(req.error));
+  });
+  const out: { userId: string; workspace: string }[] = [];
+  const prefix = storageKey("", "").split(":")[0] + ":";
+  for (const k of keys) {
+    if (typeof k !== "string" || !k.startsWith(prefix)) continue;
+    const [userId, ...rest] = k.slice(prefix.length).split(":");
+    if (userId && rest.length > 0) out.push({ userId, workspace: rest.join(":") });
+  }
+  return out;
+}
+
+/**
+ * The queue for the worker: never counts as a restart (idbStore's first open clears "sending" flags,
+ * which is safe in a page only because its replay runs under the device lock; the worker may open it
+ * while a page is replaying).
+ */
+export async function idbStoreQuiet(
+  userId: string,
+  workspace: string,
+  factory: IDBFactory = indexedDB
+): Promise<AppStore> {
+  const db = await openDb(factory);
+  const key = storageKey(userId, workspace);
+  return {
+    update: (fn) => transact(db, key, userId, fn, false),
+    read: () => transact(db, key, userId, (s) => s, false),
+  };
+}

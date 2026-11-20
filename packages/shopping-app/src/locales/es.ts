@@ -219,6 +219,8 @@ export const es: Dictionary = {
   workspace: "Espacio de trabajo",
   open_main_app: "Abrir Plane",
   refresh_failed: "No se pudo actualizar. La lista puede estar desfasada.",
+  offline_now: "Sin conexión. Los cambios se guardan y se envían cuando vuelva.",
+  offline_since: "Sin conexión: es la lista de {when}. Los cambios se guardan y se envían cuando vuelva.",
   item_missing: "Este artículo ya no existe o no puedes verlo.",
   unknown_item: "un artículo",
 };
