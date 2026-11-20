@@ -20,6 +20,7 @@ from plane.license.api.permissions import InstanceAdminPermission
 from plane.license.api.serializers import InstanceSerializer
 from plane.license.models import Instance
 from plane.license.utils.instance_value import get_configuration_value
+from plane.throttles.instance import InstanceReadThrottle
 from plane.utils.cache import cache_response, invalidate_cache
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
@@ -30,6 +31,12 @@ class InstanceEndpoint(BaseAPIView):
         if self.request.method == "PATCH":
             return [InstanceAdminPermission()]
         return [AllowAny()]
+
+    def get_throttles(self):
+        # Every page load reads this as anonymous (plane/throttles/instance.py); PATCH keeps the default.
+        if self.request.method == "GET":
+            return [InstanceReadThrottle()]
+        return super().get_throttles()
 
     @cache_response(60 * 60 * 2, user=False)
     @method_decorator(cache_control(private=True, max_age=12))
