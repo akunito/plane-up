@@ -16,11 +16,12 @@
 # The event row is written in the same transaction as the state it records: its unique client_op_id
 # then rolls back a racing duplicate, which is answered from the ledger.
 
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from django.db import IntegrityError, transaction
+from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import F
 from django.db.models.functions import Coalesce
 
@@ -37,12 +38,17 @@ from plane.db.models import (
 OP_VERSION = 1
 MAX_OPS = 100
 MAX_AGE = timedelta(days=60)
+# Bounds that keep every value inside its column, so a typo is answered "invalid" for that operation
+# instead of a database error that fails the whole request and blocks the device queue (phase 2 audit).
+MAX_QUANTITY = 1_000_000
+MAX_REV = 2**62
 ALWAYS = frozenset({"adjust", "buy", "mark_ordered", "arrived", "cancel"})
 CAS = frozenset({"set_level", "set_needed", "pin", "change_mode", "recount"})
 REVERTIBLE = frozenset({"adjust", "buy"}) | CAS
 ALL_OPS = ALWAYS | CAS | {"revert"}
 
-# Fields a statement or a purchase may change, snapshotted into the event for revert.
+# Snapshotted into the event. A revert restores only the state ones (REVERT_FIELDS): min_quantity is
+# item data, which a data edit may have changed since without a revision step (phase 2 audit).
 STATE_FIELDS = (
     "mode",
     "needed",
@@ -54,6 +60,7 @@ STATE_FIELDS = (
     "last_bought_at",
     "last_bought_by_id",
 )
+REVERT_FIELDS = ("mode", "needed", "needed_by_id", "needed_at", "level", "quantity")
 _DATETIME_FIELDS = frozenset({"needed_at", "last_bought_at"})
 _UUID_FIELDS = frozenset({"needed_by_id", "last_bought_by_id"})
 
@@ -83,10 +90,10 @@ def _uuid(value, field):
         raise _Invalid(field) from None
 
 
-def _int(value, field, minimum=None):
+def _int(value, field, minimum=None, maximum=MAX_QUANTITY):
     if isinstance(value, bool) or not isinstance(value, int):
         raise _Invalid(field)
-    if minimum is not None and value < minimum:
+    if (minimum is not None and value < minimum) or value > maximum or value < -maximum:
         raise _Invalid(field)
     return value
 
@@ -102,16 +109,19 @@ def _parse(raw, ctx):
     args = raw.get("args") or {}
     if not isinstance(args, dict):
         raise _Invalid("args")
+    if "\x00" in json.dumps(args, ensure_ascii=False):
+        raise _Invalid("args")  # jsonb refuses NUL; it would fail every insert of this operation
     queue_id = raw.get("queue_id")
     base_rev = raw.get("base_rev")
     if op in CAS:
-        base_rev = _int(base_rev, "base_rev", 0)
+        base_rev = _int(base_rev, "base_rev", 0, MAX_REV)
     elif base_rev is not None:
-        base_rev = _int(base_rev, "base_rev", 0)
+        base_rev = _int(base_rev, "base_rev", 0, MAX_REV)
     age_ms = raw.get("age_ms", 0)
     age_ms = age_ms if isinstance(age_ms, int) and not isinstance(age_ms, bool) else 0
-    # Time is display-only (brief). Clamped to [0, 60 days]; no rule depends on it.
-    age = min(max(timedelta(milliseconds=age_ms), timedelta(0)), MAX_AGE)
+    # Time is display-only (brief). Clamped to [0, 60 days] before timedelta(), which overflows on a
+    # large enough integer; no rule depends on it.
+    age = timedelta(milliseconds=min(max(age_ms, 0), int(MAX_AGE.total_seconds() * 1000)))
     return {
         "op": op,
         "target": _uuid(raw.get("target"), "target"),
@@ -169,7 +179,7 @@ def _require_mode(item, *modes):
         raise _Rejected("invalid_for_mode")
 
 
-def _buy_effect(item, quantity, ctx, occurred_at, exclude_order=None):
+def _buy_effect(item, quantity, ctx, occurred_at, stamp_orders=True):
     """A purchase, applied according to the item's mode at the moment it is applied (brief)."""
     changed = ["last_bought_at", "last_bought_by"]
     extra = {"quantity_delta": 0, "stamped_orders": []}
@@ -187,12 +197,15 @@ def _buy_effect(item, quantity, ctx, occurred_at, exclude_order=None):
     if item.last_bought_at is None or occurred_at > item.last_bought_at:
         item.last_bought_at, item.last_bought_by = occurred_at, ctx.user
     # "Bought since it was ordered": the first purchase while an order is open stamps it (brief, Orders).
-    open_orders = InventoryOrder.objects.filter(
-        item=item, status=InventoryOrderStatus.OPEN, bought_since_at__isnull=True
-    ).exclude(pk=exclude_order)
-    stamped = [str(pk) for pk in open_orders.values_list("pk", flat=True)]
-    if stamped:
-        open_orders.update(bought_since_at=ctx.now, bought_since_by=ctx.user)
+    # An arrival is an order being fulfilled, not a purchase: it stamps nothing (phase 2 audit, S15).
+    stamped = []
+    if stamp_orders:
+        open_orders = InventoryOrder.objects.filter(
+            item=item, status=InventoryOrderStatus.OPEN, bought_since_at__isnull=True
+        )
+        stamped = [str(pk) for pk in open_orders.values_list("pk", flat=True)]
+        if stamped:
+            open_orders.update(bought_since_at=ctx.now, bought_since_by=ctx.user)
     extra["stamped_orders"] = stamped
     extra["stamped_at"] = ctx.now.isoformat()
     return changed, extra
@@ -258,7 +271,7 @@ def _op_arrived(item, args, ctx, parsed):
     order.status, order.received_quantity = InventoryOrderStatus.RECEIVED, quantity
     order.received_by, order.received_at = ctx.user, ctx.now
     order.save(update_fields=["status", "received_quantity", "received_by", "received_at", "updated_at"])
-    changed, extra = _buy_effect(item, quantity, ctx, parsed["occurred_at"], exclude_order=order.pk)
+    changed, extra = _buy_effect(item, quantity, ctx, parsed["occurred_at"], stamp_orders=False)
     return changed, extra, order
 
 
@@ -340,14 +353,15 @@ def _op_revert(item, args, ctx, parsed):
     if event is None:
         raise _Rejected("gone")
     if event.actor_id != ctx.user.id:
-        raise _Rejected("forbidden")
+        raise _Rejected("not_yours")  # undo belongs to the device that tapped (brief)
     if event.result != "applied" or event.op not in REVERTIBLE:
         raise _Rejected("not_revertible")
     if event.reverted_at is not None:
         raise _Rejected("already_done")
     # "Only if the item has not changed since that operation, whatever revision the device holds."
+    # Refused, not stale: "apply anyway" exists only for stale, and a revert never could (brief).
     if item.state_rev != event.resulting_rev:
-        raise _Stale()
+        raise _Rejected("changed_since")
     previous = event.previous or {}
     delta = previous.get("quantity_delta") or 0
     changed = []
@@ -364,8 +378,8 @@ def _op_revert(item, args, ctx, parsed):
                 pk__in=previous["stamped_orders"], bought_since_at=datetime.fromisoformat(previous["stamped_at"])
             ).update(bought_since_at=None, bought_since_by=None)
     elif event.op in CAS:
-        _restore(item, previous["state"], STATE_FIELDS[:7])
-        changed += ["mode", "needed", "needed_by", "needed_at", "level", "quantity", "min_quantity"]
+        _restore(item, previous["state"], REVERT_FIELDS)
+        changed += ["mode", "needed", "needed_by", "needed_at", "level", "quantity"]
     event.reverted_at = ctx.now
     event.save(update_fields=["reverted_at"])
     return changed, {}, None
@@ -546,8 +560,14 @@ def apply_operation(raw, ctx):
             )
             return _answer(event, item=locked)
     except _Stale:
-        with transaction.atomic():
-            event = _record(ctx, parsed, raw, "stale", item=item)
+        try:
+            with transaction.atomic():
+                event = _record(ctx, parsed, raw, "stale", item=item)
+        except IntegrityError:
+            # A racing duplicate recorded first (always so for a queueless one: the first copy applied,
+            # the second sees it as someone else's change). Answer from the ledger, as for applied.
+            item.refresh_from_db()
+            return _answer(InventoryEvent.objects.get(client_op_id=client_op_id), duplicate=True, item=item)
         item.refresh_from_db()
         out = _answer(event, item=item)
         out["changed"] = _last_change(item)
@@ -557,16 +577,25 @@ def apply_operation(raw, ctx):
             with transaction.atomic():
                 event = _record(ctx, parsed, raw, "rejected", e.reason, item=item)
         except IntegrityError:
-            return _answer(InventoryEvent.objects.get(client_op_id=client_op_id), duplicate=True)
+            item.refresh_from_db()
+            return _answer(InventoryEvent.objects.get(client_op_id=client_op_id), duplicate=True, item=item)
         item.refresh_from_db()
         return _answer(event, item=item)
     except IntegrityError:
         # A racing delivery of the same client_op_id committed first; answer from the ledger.
         existing = InventoryEvent.objects.filter(client_op_id=client_op_id).first()
-        if existing is None:
-            raise
-        item.refresh_from_db()
-        return _answer(existing, duplicate=True, item=item)
+        if existing is not None:
+            item.refresh_from_db()
+            return _answer(existing, duplicate=True, item=item)
+        return _db_refused(client_op_id)
+    except DatabaseError:
+        return _db_refused(client_op_id)
+
+
+def _db_refused(client_op_id):
+    # Anything the database refuses (a CHECK, a dangling user, a racing order id) is this operation's
+    # problem, not the batch's: answered on its own, nothing written, the rest of the batch goes on.
+    return {"client_op_id": str(client_op_id), "result": "rejected", "reason": "invalid"}
 
 
 def apply_batch(ops, ctx):

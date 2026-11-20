@@ -12,7 +12,7 @@ import pytest
 
 from plane.app.inventory import engine
 from plane.app.inventory.derive import to_buy
-from plane.db.models import InventoryOrder
+from plane.db.models import InventoryItem, InventoryList, InventoryOrder, Project, ProjectMember
 
 from .conftest import fresh, op
 
@@ -73,7 +73,8 @@ def test_S06_an_untick_after_someone_else_changed_the_item_is_refused(make_item,
     tick = go(ctx, alice, op("buy", item))
     go(ctx, bob, op("set_level", item, {"level": "out"}, base_rev=fresh(item).state_rev))
     for _ in range(2):  # stale screen, then refreshed: the revert compares against the item, not the screen
-        assert go(ctx, alice, op("revert", item, {"reverts": tick["client_op_id"]}))["result"] == "stale"
+        out = go(ctx, alice, op("revert", item, {"reverts": tick["client_op_id"]}))
+        assert (out["result"], out["reason"]) == ("rejected", "changed_since")
 
 
 def test_S07_tick_and_untick_a_units_item(make_item, ctx, alice, bob):
@@ -83,7 +84,7 @@ def test_S07_tick_and_untick_a_units_item(make_item, ctx, alice, bob):
     assert fresh(item).quantity == 1
     tick = go(ctx, alice, op("buy", item, {"quantity": 2}))
     go(ctx, bob, op("adjust", item, {"delta": -1}))
-    assert go(ctx, alice, op("revert", item, {"reverts": tick["client_op_id"]}))["result"] == "stale"
+    assert go(ctx, alice, op("revert", item, {"reverts": tick["client_op_id"]}))["reason"] == "changed_since"
     assert fresh(item).quantity == 2
 
 
@@ -198,12 +199,23 @@ def test_S45_recount_fresh_stale_and_with_a_purchase_in_transit(make_item, ctx, 
     assert fresh(item).quantity == 7, "accepted behaviour 3: the purchase is added when it arrives"
 
 
-def test_S46_a_queued_purchase_survives_a_mode_change_and_a_move(make_item, ctx, alice, bob, groceries):
+def test_S46_a_queued_purchase_survives_a_mode_change_and_a_move(make_item, ctx, alice, bob, groceries, workspace):
     item = make_item(mode="on_demand")
     queued = op("buy", item, {"quantity": 1})
     go(ctx, bob, op("change_mode", item, {"mode": "units", "quantity": 0}, base_rev=0))
     assert go(ctx, alice, queued)["result"] == "applied"
     assert fresh(item).quantity == 1, "one added: the purchase applies in the mode it finds"
+    # Moved to another list of the same project: still applies.
+    pantry = InventoryList.objects.create(name="Pantry", project=groceries.project)
+    InventoryItem.objects.filter(pk=item.pk).update(inventory_list=pantry)
+    assert go(ctx, alice, op("buy", item))["result"] == "applied"
+    # Moved to a project the buyer is not in: refused and shown.
+    hers = Project.objects.create(name="Hers", identifier="HERS", workspace=workspace, inventory_view=True)
+    ProjectMember.objects.create(project=hers, member=bob, role=15)
+    InventoryItem.objects.filter(pk=item.pk).update(
+        project=hers, inventory_list=InventoryList.objects.create(name="Hers", project=hers)
+    )
+    assert go(ctx, alice, op("buy", item))["reason"] == "forbidden"
 
 
 def test_S54_needed_flagged_while_on_order_is_cleared_by_the_arrival(make_item, ctx, alice, bob):

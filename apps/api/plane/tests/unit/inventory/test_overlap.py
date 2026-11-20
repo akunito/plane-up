@@ -91,3 +91,19 @@ def test_two_batches_touching_two_items_in_opposite_order_do_not_deadlock(make_i
 
 def test_overlap_tests_use_real_transactions():
     assert not connection.in_atomic_block, "with transaction=False the threads would share nothing real"
+
+
+@pytest.mark.parametrize("queue", ["queueless", "queued"])
+def test_the_same_statement_twice_at_once_is_answered_twice_and_applied_once(queue, make_item, ctx, alice):
+    """Phase 2 audit: a racing duplicate of a queueless statement used to see its twin's step as someone
+    else's change, go stale, collide on client_op_id and fail the whole request with a 400."""
+    item = make_item(mode="level")
+    raw = op("set_level", item, {"level": "out"}, base_rev=0, queue=uuid.uuid4() if queue == "queued" else None)
+    results = run_together(
+        lambda: engine.apply_operation(dict(raw), ctx(alice)),
+        lambda: engine.apply_operation(dict(raw), ctx(alice)),
+    )
+    assert all(r["result"] == "applied" for r in results), results
+    assert sorted(bool(r.get("duplicate")) for r in results) == [False, True]
+    assert fresh(item).state_rev == 1
+    assert InventoryEvent.objects.filter(client_op_id=raw["client_op_id"]).count() == 1

@@ -135,6 +135,42 @@ def test_the_to_buy_list_and_suggestions_show_only_projects_the_viewer_is_in(wor
     assert names("alice", "shopping-list/") == ["Magnesium", "Milk", "Mulch"]
     assert names("bob", "shopping-list/") == ["Milk"], "a secret project and a public one bob has not joined"
     assert names("bob", "suggestions/?q=m") == ["Milk"]
+    InventoryItem.objects.filter(name="Magnesium").update(category="Vitamins", store="Pharmacy")
+    InventoryItem.objects.filter(name="Milk").update(category="Dairy", store="Market")
+    body = _client(people["bob"]).get(ws(workspace.slug, "suggestions/")).json()
+    assert (body["categories"], body["stores"]) == (["Dairy"], ["Market"]), "S48: no categories or stores leak"
+
+
+def test_suggestions_list_every_distinct_category_past_200_items(workspace, people, home, groceries):
+    InventoryItem.objects.bulk_create(
+        InventoryItem(
+            name=f"Item {i}",
+            name_normalised=f"item {i}",
+            mode="pinned",
+            category=("A", "B", "C")[i % 3],
+            inventory_list=groceries,
+            project=home,
+            workspace=home.workspace,
+        )
+        for i in range(450)
+    )
+    assert _client(people["bob"]).get(ws(workspace.slug, "suggestions/")).json()["categories"] == ["A", "B", "C"]
+
+
+@pytest.mark.parametrize("setup", ["deactivated", "archived", "deleted", "flag_off"])
+def test_a_member_who_lost_access_sees_nothing_and_may_change_nothing(setup, workspace, people, home, groceries):
+    _item(groceries, "Milk", "on_demand", needed=True)
+    if setup == "deactivated":
+        ProjectMember.objects.filter(project=home, member=people["bob"]).update(is_active=False)
+    elif setup == "archived":
+        Project.objects.filter(pk=home.pk).update(archived_at=timezone.now())
+    elif setup == "deleted":
+        Project.all_objects.filter(pk=home.pk).update(deleted_at=timezone.now())
+    else:
+        Project.objects.filter(pk=home.pk).update(inventory_view=False)
+    client = _client(people["bob"])
+    assert client.get(ws(workspace.slug, "shopping-list/")).json()["items"] == []
+    assert client.get(proj(workspace.slug, home, "lists/")).status_code == 403
 
 
 # ---------------------------------------------------------------- the to-buy list

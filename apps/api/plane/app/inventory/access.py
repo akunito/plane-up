@@ -31,7 +31,12 @@ def visible_projects(user, workspace_id):
         Exists(
             ProjectMember.objects.filter(project=OuterRef("pk"), member=user, is_active=True, role__in=MEMBER_ROLES)
         ),
-        Exists(WorkspaceMember.objects.filter(workspace_id=workspace_id, member=user, is_active=True)),
+        # The role here too: a workspace guest is not let in even with a member role in the project.
+        Exists(
+            WorkspaceMember.objects.filter(
+                workspace_id=workspace_id, member=user, is_active=True, role__in=MEMBER_ROLES
+            )
+        ),
         workspace_id=workspace_id,
         inventory_view=True,
         archived_at__isnull=True,

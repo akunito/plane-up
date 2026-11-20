@@ -250,20 +250,33 @@ def test_reverting_a_mode_change_restores_the_old_mode_and_state(make_item, ctx,
     first = apply(ctx(alice), op("change_mode", item, {"mode": "units", "quantity": 3}, base_rev=0))
     apply(ctx(alice), op("revert", item, {"reverts": first["client_op_id"]}))
     item = fresh(item)
-    assert (item.mode, item.needed, item.quantity, item.min_quantity) == ("on_demand", True, None, None)
+    # The minimum the switch filled in stays: it is data, and only matters in units mode (brief).
+    assert (item.mode, item.needed, item.quantity, item.min_quantity) == ("on_demand", True, None, 1)
 
 
-def test_a_revert_after_any_later_change_is_stale(make_item, ctx, alice, bob):
+def test_a_revert_after_any_later_change_is_refused_not_stale(make_item, ctx, alice, bob):
+    """Refused rather than stale: "apply anyway" exists only for stale, and a revert never could."""
     item = make_item(mode="units", quantity=0)
     first = apply(ctx(alice), op("adjust", item, {"delta": 1}))
     apply(ctx(bob), op("adjust", item, {"delta": 1}))
     out = apply(ctx(alice), op("revert", item, {"reverts": first["client_op_id"]}))
-    assert out["result"] == "stale" and fresh(item).quantity == 2
+    assert (out["result"], out["reason"]) == ("rejected", "changed_since") and fresh(item).quantity == 2
+
+
+def test_a_revert_restores_state_but_never_the_minimum(make_item, ctx, home, alice, bob):
+    """min_quantity is data: a data edit between the statement and its undo must survive the undo, and
+    the restock rule must not break (phase 2 audit: it used to raise and fail the whole batch)."""
+    item = make_item(mode="units", quantity=0, min_quantity=None)
+    first = apply(ctx(alice), op("recount", item, {"quantity": 2}, base_rev=0))
+    type(item).objects.filter(pk=item.pk).update(min_quantity=2, restock_to=3)
+    out = apply(ctx(alice), op("revert", item, {"reverts": first["client_op_id"]}))
+    item = fresh(item)
+    assert out["result"] == "applied" and (item.quantity, item.min_quantity, item.restock_to) == (0, 2, 3)
 
 
 @pytest.mark.parametrize(
     "case,reason",
-    [("twice", "already_done"), ("order_action", "not_revertible"), ("someone_else", "forbidden"), ("unknown", "gone")],
+    [("twice", "already_done"), ("order_action", "not_revertible"), ("someone_else", "not_yours"), ("unknown", "gone")],
 )
 def test_reverts_that_cannot_apply(case, reason, make_item, ctx, alice, bob):
     item = make_item(mode="units", quantity=0)
@@ -385,7 +398,47 @@ def test_a_purchase_while_an_order_is_open_stamps_it_once(make_item, ctx, alice,
     apply(ctx(bob), op("buy", item))
     assert InventoryOrder.objects.get(pk=order_id).bought_since_at == stamp, "the first purchase keeps the stamp"
     # Reverting the purchase that set a stamp needs nothing to have changed since; bob's buy did.
-    assert apply(ctx(alice), op("revert", item, {"reverts": first["client_op_id"]}))["result"] == "stale"
+    assert apply(ctx(alice), op("revert", item, {"reverts": first["client_op_id"]}))["reason"] == "changed_since"
+
+
+def test_an_arrival_does_not_stamp_the_items_other_open_orders(make_item, ctx, alice):
+    """S15: two deliberate orders; the first arriving is not "bought since" for the second."""
+    item = make_item(mode="units", quantity=0, min_quantity=4)
+    a, b = str(uuid.uuid4()), str(uuid.uuid4())
+    for order_id in (a, b):
+        apply(ctx(alice), op("mark_ordered", item, {"order_id": order_id, "quantity": 2}))
+    apply(ctx(alice), op("arrived", item, {"order_id": a}))
+    assert InventoryOrder.objects.get(pk=b).bought_since_at is None
+
+
+@pytest.mark.parametrize(
+    "name,args,cas",
+    [
+        ("recount", {"quantity": 99_999_999_999}, True),
+        ("adjust", {"delta": -(10**12)}, False),
+        ("mark_ordered", {"order_id": "ORDER", "quantity": 10**10}, False),
+        ("mark_ordered", {"order_id": "ORDER", "reference": "bad\x00byte"}, False),
+    ],
+)
+def test_out_of_range_input_is_invalid_for_that_operation_only(name, args, cas, make_item, ctx, alice):
+    item = make_item(mode="units", quantity=0)
+    args = {k: (str(uuid.uuid4()) if v == "ORDER" else v) for k, v in args.items()}
+    results = engine.apply_batch(
+        [op(name, item, args, base_rev=0 if cas else None), op("adjust", item, {"delta": 1})], ctx(alice)
+    )
+    assert [(r["result"], r.get("reason")) for r in results] == [("rejected", "invalid"), ("applied", None)]
+    assert fresh(item).quantity == 1
+
+
+def test_an_absurd_age_is_clamped_not_an_overflow(make_item, ctx, alice):
+    item = make_item(mode="pinned")
+    assert apply(ctx(alice), op("buy", item, age_ms=10**20))["result"] == "applied"
+
+
+def test_a_workspace_guest_with_a_member_role_in_the_project_is_still_refused(make_item, ctx, home, gus):
+    ProjectMember.objects.filter(project=home, member=gus).update(role=15)
+    item = make_item(mode="units")
+    assert apply(ctx(gus), op("adjust", item, {"delta": 1}))["reason"] == "forbidden"
 
 
 def test_reverting_the_purchase_that_stamped_an_order_clears_the_stamp(make_item, ctx, alice, bob):

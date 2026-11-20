@@ -201,8 +201,12 @@ class InventorySuggestionsEndpoint(InventoryBaseView):
         if query:
             found = with_orders(items.filter(name_normalised__contains=query)).order_by("name_normalised")[:20]
             matches = [item_payload(i, i.on_order, i.open_count > 0) for i in found]
-        categories = sorted({c for c in items.exclude(category="").values_list("category", flat=True).distinct()[:200]})
-        stores = sorted({s for s in items.exclude(store="").values_list("store", flat=True).distinct()[:200]})
+        # order_by() on the field itself: Meta.ordering would join the DISTINCT and the cap would count
+        # items, not values (measured against Django 5.2.15 by the phase 2 audit).
+        categories = list(
+            items.exclude(category="").order_by("category").values_list("category", flat=True).distinct()[:200]
+        )
+        stores = list(items.exclude(store="").order_by("store").values_list("store", flat=True).distinct()[:200])
         return Response({"items": matches, "categories": categories, "stores": stores})
 
 
@@ -452,37 +456,44 @@ class ProjectInventoryItemDetailEndpoint(ProjectInventoryBaseView):
         project = self._project(request, slug, project_id)
         if project is None:
             return _forbidden()
-        item = InventoryItem.objects.filter(pk=pk, project=project, inventory_list__deleted_at__isnull=True).first()
-        if item is None:
-            return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
-        data = dict(request.data) if isinstance(request.data, dict) else None
-        target_list_id = data.pop("inventory_list", None) if data is not None else None
-        cleaned, error = _clean_item_data(data, current=item)
-        if error is not None:
-            return error
-        target = item.inventory_list
-        if target_list_id is not None and str(target_list_id) != str(item.inventory_list_id):
+        if not isinstance(request.data, dict):
+            return _bad("body")
+        data = dict(request.data)
+        target_list_id = data.pop("inventory_list", None)
+        target = None
+        if target_list_id is not None:
             # The target must be a list the requester may use, in any project of this workspace.
-            target = visible_lists(request.user, item.workspace_id).filter(pk=target_list_id).first()
+            target = visible_lists(request.user, project.workspace_id).filter(pk=target_list_id).first()
             if target is None:
                 return _forbidden()
         try:
             with transaction.atomic():
-                locked = InventoryItem.objects.select_for_update().get(pk=item.pk)
+                # Everything is read and checked under the row lock: an unlocked read could save back a
+                # project or list someone changed in between (phase 2 audit).
+                locked = (
+                    InventoryItem.objects.select_for_update()
+                    .filter(pk=pk, project=project, inventory_list__deleted_at__isnull=True)
+                    .first()
+                )
+                if locked is None:
+                    return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
+                cleaned, error = _clean_item_data(data, current=locked)
+                if error is not None:
+                    return error
                 for field, value in cleaned.items():
                     setattr(locked, field, value)
-                moved_project = target.project_id != locked.project_id
-                locked.inventory_list = target
-                if moved_project:
-                    # Orders and events are CASCADE copies of the project: they move with the item, or the
-                    # old project's deletion would take them. update() skips save(), so both columns are set.
-                    locked.project = target.project
-                    InventoryOrder.all_objects.filter(item=locked).update(
-                        project_id=target.project_id, workspace_id=target.workspace_id
-                    )
-                    InventoryEvent.objects.filter(item=locked).update(
-                        project_id=target.project_id, workspace_id=target.workspace_id
-                    )
+                if target is not None and target.pk != locked.inventory_list_id:
+                    if target.project_id != locked.project_id:
+                        # Orders and events are CASCADE copies of the project: they move with the item, or
+                        # the old project's deletion would take them. update() skips save(), so both are set.
+                        locked.project = target.project
+                        InventoryOrder.all_objects.filter(item=locked).update(
+                            project_id=target.project_id, workspace_id=target.workspace_id
+                        )
+                        InventoryEvent.objects.filter(item=locked).update(
+                            project_id=target.project_id, workspace_id=target.workspace_id
+                        )
+                    locked.inventory_list = target
                 # Data edits do not advance state_rev (brief).
                 locked.save()
         except IntegrityError:
@@ -494,8 +505,10 @@ class ProjectInventoryItemDetailEndpoint(ProjectInventoryBaseView):
         project = self._project(request, slug, project_id)
         if project is None:
             return _forbidden()
-        item = InventoryItem.objects.filter(pk=pk, project=project).first()
-        if item is None:
-            return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
-        item.delete()
+        with transaction.atomic():
+            # Soft delete is a full save(): under the lock it writes the current state, not a stale read.
+            item = InventoryItem.objects.select_for_update().filter(pk=pk, project=project).first()
+            if item is None:
+                return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
+            item.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

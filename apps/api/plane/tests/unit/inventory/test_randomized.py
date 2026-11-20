@@ -9,11 +9,13 @@ and some are delivered twice (a retry after a lost answer).
 
 Invariants checked after every history:
 - no operation takes effect twice: one ledger row per client_op_id, duplicates flagged;
-- `units` totals equal the sum of the applied deltas and purchases, whatever the delivery order;
-- a delivered purchase is never lost (always applied on a live, visible item);
-- a statement never overwrites a change its author had not seen: every step between its base_rev and
-  its own revision was made by the same person on the same queue.
-"""
+- the item's total is what this run's applied operations add up to, replayed from the ledger;
+- a delivered purchase or delta is never lost (always applied on a live, visible item);
+- every applied statement's base_rev..rev steps are its author's own on its own queue. This re-checks the
+  engine's rule from its own ledger, so it guards the ledger's consistency, not the rule itself (the rule
+  has named tests in test_engine.py).
+Independence of delivery order is a separate test below: the same deltas and purchases delivered in two
+different orders give the same total."""
 
 import random
 import uuid
@@ -131,3 +133,22 @@ def test_random_histories_keep_the_invariants(seed, make_item, ctx, alice, bob):
         )
         for step in between:
             assert (step.actor_id, step.queue_id) == (event.actor_id, event.queue_id), (event.op, step.op)
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_deltas_and_purchases_give_the_same_total_in_any_delivery_order(seed, make_item, ctx, alice, bob):
+    rng = random.Random(1000 + seed)
+    plan = [
+        (rng.choice([alice, bob]), rng.choice(["adjust", "buy"]), rng.choice([-2, -1, 1, 2, 3]))
+        for _ in range(rng.randint(4, 10))
+    ]
+    totals = []
+    for attempt in range(2):
+        item = make_item(name=f"Item {seed}-{attempt}", mode="units", quantity=1)
+        order = list(plan)
+        rng.shuffle(order)
+        for person, kind, n in order:
+            args = {"delta": n} if kind == "adjust" else {"quantity": abs(n)}
+            assert engine.apply_operation(op(kind, item, args), ctx(person))["result"] == "applied"
+        totals.append(fresh(item).quantity)
+    assert totals[0] == totals[1]
