@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 import { test as base, expect, type Page } from "@playwright/test";
 
 export const QA_USERS = ["qa-alice", "qa-bob", "qa-carol", "qa-guest"] as const;
-export type QaUser = (typeof QA_USERS)[number];
+/** The inventory QA workspace's users (APLANE-62); seeded only when the image has the shopping app. */
+export const INV_USERS = ["qa-inv-ana", "qa-inv-bo", "qa-inv-gus"] as const;
+export type QaUser = (typeof QA_USERS)[number] | (typeof INV_USERS)[number];
 const HERE = path.dirname(fileURLToPath(import.meta.url)); // ES module: no __dirname
 export const authFile = (user: QaUser) => path.join(HERE, ".auth", `${user}.json`);
 
@@ -29,6 +31,16 @@ export type Manifest = {
   workspaces: {
     qa: { projects: Record<"QAA" | "QAB" | "QAG", Project>; views: Record<string, string> };
     "qa-2": { projects: Record<"QTW", Project> };
+    /** Present exactly when the image under test has the shopping app (seed-qa.sh, from the image tag). */
+    "qa-inv"?: {
+      projects: Record<"HOME" | "MINE" | "OPEN", Project>;
+      inventory: {
+        lists: Record<string, string>;
+        items: Record<string, string>;
+        orders: { open: string; overdue: string };
+        generated_at: string;
+      };
+    };
   };
 };
 export const manifest: Manifest = JSON.parse(fs.readFileSync(process.env.PT_MANIFEST ?? "qa-manifest.json", "utf8"));

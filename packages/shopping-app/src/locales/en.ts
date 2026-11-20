@@ -207,6 +207,7 @@ export const en = {
   loading: "Loading…",
   signed_out_title: "You are signed out.",
   no_inventory: "No list here yet. Turn on Inventory in a project's features and create a list there.",
+  no_access: "You have no access to the lists in this workspace.",
   no_workspace: "You are not in any workspace yet.",
   error: "Could not load. Check the connection and try again.",
   try_again: "Try again",

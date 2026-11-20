@@ -52,7 +52,15 @@ export const POLL_MS = 20_000;
 export const DONE_RESET_MS = 6 * 60 * 60 * 1000;
 const TOAST_MS = 6_000;
 
-export type Phase = "loading" | "ready" | "signed_out" | "no_workspace" | "no_inventory" | "error" | "newer";
+export type Phase =
+  | "loading"
+  | "ready"
+  | "signed_out"
+  | "no_workspace"
+  | "no_access"
+  | "no_inventory"
+  | "error"
+  | "newer";
 
 export interface Toast {
   id: number;
@@ -185,7 +193,8 @@ export class Controller {
 
   private async openWorkspace(): Promise<void> {
     const lists = await fetchLists(this.client());
-    if (lists.kind === "refused" && lists.status === 403) return this.set({ phase: "no_inventory" });
+    // 403: a workspace guest, or not a member (guests have no access to inventory, brief).
+    if (lists.kind === "refused" && lists.status === 403) return this.set({ phase: "no_access" });
     if (lists.kind === "failed" && (lists.failure === "signed_out_app" || lists.failure === "signed_out_proxy"))
       return this.set({ phase: "signed_out", connection: lists.failure });
     if (lists.kind !== "ok")

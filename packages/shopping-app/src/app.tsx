@@ -80,13 +80,15 @@ function Root() {
         ? t("loading")
         : s.phase === "signed_out"
           ? t("signed_out_title")
-          : s.phase === "no_inventory"
-            ? t("no_inventory")
-            : s.phase === "no_workspace"
-              ? t("no_workspace")
-              : s.phase === "newer"
-                ? t("newer")
-                : t("error");
+          : s.phase === "no_access"
+            ? t("no_access")
+            : s.phase === "no_inventory"
+              ? t("no_inventory")
+              : s.phase === "no_workspace"
+                ? t("no_workspace")
+                : s.phase === "newer"
+                  ? t("newer")
+                  : t("error");
     return (
       <div className="screen center-screen" data-phase={s.phase}>
         <p className="message" role={s.phase === "loading" ? "status" : "alert"}>
@@ -108,7 +110,7 @@ function Root() {
             {t("reload")}
           </button>
         ) : null}
-        {s.phase === "no_inventory" || s.phase === "no_workspace" ? (
+        {s.phase === "no_inventory" || s.phase === "no_workspace" || s.phase === "no_access" ? (
           <a href="/" className="secondary">
             {t("open_main_app")}
           </a>

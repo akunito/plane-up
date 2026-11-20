@@ -206,6 +206,7 @@ export const pl: Dictionary = {
   loading: "Wczytywanie…",
   signed_out_title: "Wylogowano.",
   no_inventory: "Nie ma tu jeszcze list. Włącz Zapasy w funkcjach projektu i utwórz tam listę.",
+  no_access: "Nie masz dostępu do list w tej przestrzeni roboczej.",
   no_workspace: "Nie należysz jeszcze do żadnej przestrzeni roboczej.",
   error: "Nie udało się wczytać. Sprawdź połączenie i spróbuj ponownie.",
   try_again: "Spróbuj ponownie",

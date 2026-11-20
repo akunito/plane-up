@@ -1,8 +1,9 @@
 /** Logs every QA user in once (real password sign-in) and stores the session per user. */
 import { test as setup, expect } from "@playwright/test";
-import { authFile, QA_USERS } from "./helpers";
+import { authFile, INV_USERS, manifest, QA_USERS } from "./helpers";
 
-for (const user of QA_USERS) {
+// The inventory users exist only when the seed made the qa-inv workspace (APLANE-62).
+for (const user of [...QA_USERS, ...(manifest.workspaces["qa-inv"] ? INV_USERS : [])]) {
   setup(`sign in as ${user}`, async ({ request, baseURL }) => {
     const { csrf_token } = await (await request.get("/auth/get-csrf-token/")).json();
     const res = await request.post("/auth/sign-in/", {

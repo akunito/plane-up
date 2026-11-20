@@ -207,6 +207,7 @@ export const es: Dictionary = {
   loading: "Cargando…",
   signed_out_title: "Has cerrado sesión.",
   no_inventory: "Aún no hay listas aquí. Activa Inventario en las funciones de un proyecto y crea una lista allí.",
+  no_access: "No tienes acceso a las listas de este espacio de trabajo.",
   no_workspace: "Todavía no estás en ningún espacio de trabajo.",
   error: "No se pudo cargar. Comprueba la conexión y vuelve a intentarlo.",
   try_again: "Reintentar",

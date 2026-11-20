@@ -378,7 +378,7 @@ describe("phases and failures", () => {
     expect(screen.getByText(/No list here yet/)).toBeTruthy();
   });
 
-  it("a workspace with no list says so", async () => {
+  it("a guest (403 on the lists) is told there is no access", async () => {
     api = new FakeApi([]);
     const fetchImpl: typeof fetch = async (input, init) =>
       String(input).endsWith("/inventory/lists/")
@@ -390,7 +390,7 @@ describe("phases and failures", () => {
     controller = new Controller({ base: "", fetchImpl, lock: makeLock(undefined) });
     await controller.start();
     render(<App controller={controller} locale="en" />);
-    expect(screen.getByText(/No list here yet/)).toBeTruthy();
+    expect(screen.getByText("You have no access to the lists in this workspace.")).toBeTruthy();
   });
 });
 
