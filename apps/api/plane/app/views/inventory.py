@@ -17,6 +17,7 @@ from rest_framework.response import Response
 
 from plane.api.rate_limit import ApiKeyRateThrottle
 from plane.app.inventory import engine
+from plane.bgtasks.deletion_task import soft_delete_related_objects
 from plane.app.inventory.access import can_use_project, is_inventory_member, visible_items, visible_lists
 from plane.app.inventory.derive import OVERDUE_AFTER, counts, to_buy
 from plane.api.middleware.api_authentication import APIKeyAuthentication as ApiKeyAuth
@@ -276,7 +277,9 @@ def _clean_item_data(data, current=None):
             if not isinstance(value, bool):
                 return None, _bad(field)
         elif field in ("min_quantity", "restock_to"):
-            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > engine.MAX_QUANTITY
+            ):
                 return None, _bad(field)
         elif field == "sort_order":
             if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -468,10 +471,11 @@ class ProjectInventoryItemDetailEndpoint(ProjectInventoryBaseView):
                 return _forbidden()
         try:
             with transaction.atomic():
-                # Everything is read and checked under the row lock: an unlocked read could save back a
-                # project or list someone changed in between (phase 2 audit).
+                # The item and its data are read and checked under the item's row lock: an unlocked read
+                # could save back a project or list someone changed in between (phase 2 audit). of=self:
+                # the list join must not be locked, or two opposite moves deadlock (phase 2 re-review).
                 locked = (
-                    InventoryItem.objects.select_for_update()
+                    InventoryItem.objects.select_for_update(of=("self",))
                     .filter(pk=pk, project=project, inventory_list__deleted_at__isnull=True)
                     .first()
                 )
@@ -483,6 +487,15 @@ class ProjectInventoryItemDetailEndpoint(ProjectInventoryBaseView):
                 for field, value in cleaned.items():
                     setattr(locked, field, value)
                 if target is not None and target.pk != locked.inventory_list_id:
+                    # The target was checked before the lock; re-check it is still usable now.
+                    target = (
+                        visible_lists(request.user, project.workspace_id)
+                        .select_related("project")
+                        .filter(pk=target.pk)
+                        .first()
+                    )
+                    if target is None:
+                        return _forbidden()
                     if target.project_id != locked.project_id:
                         # Orders and events are CASCADE copies of the project: they move with the item, or
                         # the old project's deletion would take them. update() skips save(), so both are set.
@@ -506,9 +519,14 @@ class ProjectInventoryItemDetailEndpoint(ProjectInventoryBaseView):
         if project is None:
             return _forbidden()
         with transaction.atomic():
-            # Soft delete is a full save(): under the lock it writes the current state, not a stale read.
-            item = InventoryItem.objects.select_for_update().filter(pk=pk, project=project).first()
+            # Soft-deleted here rather than with item.delete(): that is a full save() and enqueues the
+            # cascade before the commit, where a fast worker reads the old row. Under the lock, then the
+            # cascade on commit (phase 2 re-review).
+            item = InventoryItem.objects.select_for_update(of=("self",)).filter(pk=pk, project=project).first()
             if item is None:
                 return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
-            item.delete()
+            item.deleted_at = timezone.now()
+            item.save(update_fields=["deleted_at", "updated_at", "updated_by"])
+            item_pk = item.pk
+            transaction.on_commit(lambda: soft_delete_related_objects.delay("db", "inventoryitem", item_pk))
         return Response(status=status.HTTP_204_NO_CONTENT)

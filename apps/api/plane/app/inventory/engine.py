@@ -16,12 +16,13 @@
 # The event row is written in the same transaction as the state it records: its unique client_op_id
 # then rolls back a racing duplicate, which is answered from the ledger.
 
-import json
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from django.db import DatabaseError, IntegrityError, transaction
+import logging
+
+from django.db import DataError, IntegrityError, transaction
 from django.db.models import F
 from django.db.models.functions import Coalesce
 
@@ -35,11 +36,14 @@ from plane.db.models import (
     InventoryOrderStatus,
 )
 
+logger = logging.getLogger("plane.api")
+
 OP_VERSION = 1
 MAX_OPS = 100
 MAX_AGE = timedelta(days=60)
-# Bounds that keep every value inside its column, so a typo is answered "invalid" for that operation
-# instead of a database error that fails the whole request and blocks the device queue (phase 2 audit).
+# Bounds on the ARGUMENTS, so a typo is answered "invalid" for that operation instead of a database
+# error that fails the whole request and blocks the device queue (phase 2 audit). Repeated adjusts can
+# still push quantity past its column; that DataError is answered per operation below.
 MAX_QUANTITY = 1_000_000
 MAX_REV = 2**62
 ALWAYS = frozenset({"adjust", "buy", "mark_ordered", "arrived", "cancel"})
@@ -98,6 +102,16 @@ def _int(value, field, minimum=None, maximum=MAX_QUANTITY):
     return value
 
 
+def _has_nul(value):
+    if isinstance(value, str):
+        return "\x00" in value
+    if isinstance(value, dict):
+        return any(_has_nul(k) or _has_nul(v) for k, v in value.items())
+    if isinstance(value, list):
+        return any(_has_nul(v) for v in value)
+    return False
+
+
 def _parse(raw, ctx):
     if not isinstance(raw, dict):
         raise _Invalid("operation")
@@ -109,8 +123,10 @@ def _parse(raw, ctx):
     args = raw.get("args") or {}
     if not isinstance(args, dict):
         raise _Invalid("args")
-    if "\x00" in json.dumps(args, ensure_ascii=False):
-        raise _Invalid("args")  # jsonb refuses NUL; it would fail every insert of this operation
+    if _has_nul(args):
+        # jsonb refuses NUL and the ledger row is written on every path, refusals included; json.dumps
+        # escapes it as \u0000, so the strings are walked (measured).
+        raise _Invalid("args")
     queue_id = raw.get("queue_id")
     base_rev = raw.get("base_rev")
     if op in CAS:
@@ -353,7 +369,7 @@ def _op_revert(item, args, ctx, parsed):
     if event is None:
         raise _Rejected("gone")
     if event.actor_id != ctx.user.id:
-        raise _Rejected("not_yours")  # undo belongs to the device that tapped (brief)
+        raise _Rejected("not_yours")  # undo belongs to the person who made the operation (brief)
     if event.result != "applied" or event.op not in REVERTIBLE:
         raise _Rejected("not_revertible")
     if event.reverted_at is not None:
@@ -496,6 +512,12 @@ def _record_outside(ctx, parsed, raw, result, reason, item=None):
     return out
 
 
+def _ledger_row(client_op_id):
+    # The duplicate check. A racing twin can commit right after it, which is what the IntegrityError
+    # branches below answer.
+    return InventoryEvent.objects.filter(client_op_id=client_op_id).first()
+
+
 def apply_operation(raw, ctx):
     if not isinstance(raw, dict) or raw.get("client_op_id") is None:
         return {"client_op_id": None, "result": "rejected", "reason": "invalid"}
@@ -527,7 +549,7 @@ def apply_operation(raw, ctx):
         return _record_outside(ctx, parsed, raw, "rejected", "forbidden")
 
     # Then the ledger: a duplicate delivery returns the recorded result, marked as a duplicate.
-    existing = InventoryEvent.objects.filter(client_op_id=client_op_id).first()
+    existing = _ledger_row(client_op_id)
     if existing is not None:
         if existing.actor_id != ctx.user.id or existing.item_id != item.pk:
             return {"client_op_id": str(client_op_id), "result": "rejected", "reason": "duplicate_id"}
@@ -536,7 +558,9 @@ def apply_operation(raw, ctx):
 
     try:
         with transaction.atomic():
-            locked = InventoryItem.objects.select_for_update().select_related("project").get(pk=item.pk)
+            # of=("self",): without it FOR UPDATE also locks the joined Plane project row, and inventory
+            # operations would queue behind every project-scoped write (phase 2 re-review).
+            locked = InventoryItem.objects.select_for_update(of=("self",)).select_related("project").get(pk=item.pk)
             before = _snapshot(locked)
             op = parsed["op"]
             if op in CAS and _changed_by_someone_else(locked, parsed["base_rev"], ctx, parsed["queue_id"]):
@@ -566,8 +590,7 @@ def apply_operation(raw, ctx):
         except IntegrityError:
             # A racing duplicate recorded first (always so for a queueless one: the first copy applied,
             # the second sees it as someone else's change). Answer from the ledger, as for applied.
-            item.refresh_from_db()
-            return _answer(InventoryEvent.objects.get(client_op_id=client_op_id), duplicate=True, item=item)
+            return _from_ledger(InventoryEvent.objects.get(client_op_id=client_op_id), ctx, item)
         item.refresh_from_db()
         out = _answer(event, item=item)
         out["changed"] = _last_change(item)
@@ -577,24 +600,32 @@ def apply_operation(raw, ctx):
             with transaction.atomic():
                 event = _record(ctx, parsed, raw, "rejected", e.reason, item=item)
         except IntegrityError:
-            item.refresh_from_db()
-            return _answer(InventoryEvent.objects.get(client_op_id=client_op_id), duplicate=True, item=item)
+            return _from_ledger(InventoryEvent.objects.get(client_op_id=client_op_id), ctx, item)
         item.refresh_from_db()
         return _answer(event, item=item)
     except IntegrityError:
         # A racing delivery of the same client_op_id committed first; answer from the ledger.
         existing = InventoryEvent.objects.filter(client_op_id=client_op_id).first()
         if existing is not None:
-            item.refresh_from_db()
-            return _answer(existing, duplicate=True, item=item)
-        return _db_refused(client_op_id)
-    except DatabaseError:
-        return _db_refused(client_op_id)
+            return _from_ledger(existing, ctx, item)
+        return _db_refused(client_op_id, "integrity")
+    except DataError:
+        return _db_refused(client_op_id, "data")
 
 
-def _db_refused(client_op_id):
-    # Anything the database refuses (a CHECK, a dangling user, a racing order id) is this operation's
-    # problem, not the batch's: answered on its own, nothing written, the rest of the batch goes on.
+def _from_ledger(existing, ctx, item):
+    if existing.actor_id != ctx.user.id or existing.item_id != item.pk:
+        return {"client_op_id": str(existing.client_op_id), "result": "rejected", "reason": "duplicate_id"}
+    item.refresh_from_db()
+    return _answer(existing, duplicate=True, item=item)
+
+
+def _db_refused(client_op_id, kind):
+    # Only the deterministic classes (SQLSTATE 22 data, 23 integrity): this operation is bad and will be
+    # bad on every retry, so it is answered on its own and the batch goes on. Anything transient or
+    # server-side (deadlock, timeout, lost connection, a missing table) propagates as a 5xx, which the
+    # device retries with the same ids; a refusal would make it drop the operation (phase 2 re-review).
+    logger.warning("inventory: operation %s refused by the database (%s)", client_op_id, kind)
     return {"client_op_id": str(client_op_id), "result": "rejected", "reason": "invalid"}
 
 

@@ -417,17 +417,65 @@ def test_an_arrival_does_not_stamp_the_items_other_open_orders(make_item, ctx, a
         ("recount", {"quantity": 99_999_999_999}, True),
         ("adjust", {"delta": -(10**12)}, False),
         ("mark_ordered", {"order_id": "ORDER", "quantity": 10**10}, False),
-        ("mark_ordered", {"order_id": "ORDER", "reference": "bad\x00byte"}, False),
     ],
 )
 def test_out_of_range_input_is_invalid_for_that_operation_only(name, args, cas, make_item, ctx, alice):
+    """Refused by the bound, so recorded in the ledger like any other refusal; a database error caught
+    later would not be (that is what tells the two paths apart)."""
     item = make_item(mode="units", quantity=0)
     args = {k: (str(uuid.uuid4()) if v == "ORDER" else v) for k, v in args.items()}
-    results = engine.apply_batch(
-        [op(name, item, args, base_rev=0 if cas else None), op("adjust", item, {"delta": 1})], ctx(alice)
-    )
+    first = op(name, item, args, base_rev=0 if cas else None)
+    results = engine.apply_batch([first, op("adjust", item, {"delta": 1})], ctx(alice))
     assert [(r["result"], r.get("reason")) for r in results] == [("rejected", "invalid"), ("applied", None)]
+    assert InventoryEvent.objects.get(client_op_id=first["client_op_id"]).reason == "invalid"
     assert fresh(item).quantity == 1
+
+
+def test_nul_in_the_arguments_of_a_refused_operation_does_not_fail_the_batch(make_item, ctx, alice):
+    """jsonb refuses NUL and the ledger row is written on refusal paths too (phase 2 re-review)."""
+    item = make_item(mode="units", quantity=0)
+    bad = op("set_level", item, {"level": "out", "note": "a\x00b"}, base_rev=0)
+    results = engine.apply_batch([bad, op("adjust", item, {"delta": 1})], ctx(alice))
+    assert [(r["result"], r.get("reason")) for r in results] == [("rejected", "invalid"), ("applied", None)]
+
+
+def test_a_transient_database_error_propagates_so_the_device_retries(make_item, ctx, alice, monkeypatch):
+    """A deadlock or timeout answered "rejected" would make the device drop a purchase for good."""
+    from django.db import OperationalError
+
+    def deadlock(*args, **kwargs):
+        raise OperationalError("deadlock detected")
+
+    monkeypatch.setitem(engine.HANDLERS, "adjust", deadlock)
+    item = make_item(mode="units", quantity=0)
+    with pytest.raises(OperationalError):
+        apply(ctx(alice), op("adjust", item, {"delta": 1}))
+
+
+def test_a_stale_duplicate_that_loses_the_race_is_answered_from_the_ledger(make_item, ctx, alice, bob, monkeypatch):
+    """Deterministic version of the race in test_overlap: the twin's ledger row is committed, but this
+    copy's duplicate check ran just before that commit and did not see it."""
+    item = make_item(mode="level")
+    apply(ctx(bob), op("set_level", item, {"level": "ok"}, base_rev=0))
+    raw = op("set_level", item, {"level": "out"}, base_rev=0)
+    engine.InventoryEvent.objects.create(
+        client_op_id=raw["client_op_id"],
+        workspace_id=item.workspace_id,
+        item=item,
+        actor=alice,
+        op="set_level",
+        result="stale",
+        occurred_at=timezone.now(),
+    )
+    monkeypatch.setattr(engine, "_ledger_row", lambda client_op_id: None)
+    out = apply(ctx(alice), raw)
+    assert (out["result"], out.get("duplicate")) == ("stale", True)
+
+
+def test_the_engine_locks_only_the_item_row():
+    import inspect
+
+    assert 'select_for_update(of=("self",))' in inspect.getsource(engine.apply_operation)
 
 
 def test_an_absurd_age_is_clamped_not_an_overflow(make_item, ctx, alice):

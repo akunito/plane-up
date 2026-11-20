@@ -142,19 +142,22 @@ def test_the_to_buy_list_and_suggestions_show_only_projects_the_viewer_is_in(wor
 
 
 def test_suggestions_list_every_distinct_category_past_200_items(workspace, people, home, groceries):
+    """A category that only appears after the 200th item in the model's own ordering (sort_order) must
+    still be listed: with Meta.ordering in the DISTINCT, the cap counted items (phase 2 re-review)."""
     InventoryItem.objects.bulk_create(
         InventoryItem(
             name=f"Item {i}",
             name_normalised=f"item {i}",
             mode="pinned",
-            category=("A", "B", "C")[i % 3],
+            category="Z" if i == 449 else "A",
+            sort_order=i,
             inventory_list=groceries,
             project=home,
             workspace=home.workspace,
         )
         for i in range(450)
     )
-    assert _client(people["bob"]).get(ws(workspace.slug, "suggestions/")).json()["categories"] == ["A", "B", "C"]
+    assert _client(people["bob"]).get(ws(workspace.slug, "suggestions/")).json()["categories"] == ["A", "Z"]
 
 
 @pytest.mark.parametrize("setup", ["deactivated", "archived", "deleted", "flag_off"])
@@ -171,6 +174,12 @@ def test_a_member_who_lost_access_sees_nothing_and_may_change_nothing(setup, wor
     client = _client(people["bob"])
     assert client.get(ws(workspace.slug, "shopping-list/")).json()["items"] == []
     assert client.get(proj(workspace.slug, home, "lists/")).status_code == 403
+    assert client.post(proj(workspace.slug, home, "lists/"), {"name": "New"}, format="json").status_code == 403
+    item = InventoryItem.all_objects.get(name="Milk")
+    body = {"ops": [{"v": 1, "client_op_id": str(uuid.uuid4()), "target": str(item.pk), "op": "buy", "args": {}}]}
+    assert client.post(ws(workspace.slug, "ops/"), body, format="json").json()["results"][0]["result"] == "rejected"
+    item.refresh_from_db()
+    assert item.needed is True and InventoryList.all_objects.filter(name="New").count() == 0
 
 
 # ---------------------------------------------------------------- the to-buy list
@@ -353,3 +362,18 @@ def test_events_older_than_90_days_are_pruned(workspace, home, groceries):
     InventoryEvent.objects.filter(client_op_id=old).update(received_at=timezone.now() - timedelta(days=91))
     assert prune_inventory_events() == 1
     assert list(InventoryEvent.objects.values_list("client_op_id", flat=True)) == [recent]
+
+
+def test_deleting_an_item_cascades_only_after_the_commit(
+    workspace, people, home, groceries, django_capture_on_commit_callbacks, monkeypatch
+):
+    item = _item(groceries, "Milk", "on_demand", needed=True)
+    calls = []
+    monkeypatch.setattr("plane.app.views.inventory.soft_delete_related_objects.delay", lambda *a, **k: calls.append(a))
+    with django_capture_on_commit_callbacks(execute=False) as callbacks:
+        response = _client(people["bob"]).delete(proj(workspace.slug, home, f"items/{item.pk}/"))
+    assert response.status_code == 204 and calls == [], "nothing enqueued before the commit"
+    for callback in callbacks:
+        callback()
+    assert calls == [("db", "inventoryitem", item.pk)]
+    assert InventoryItem.all_objects.get(pk=item.pk).deleted_at is not None
