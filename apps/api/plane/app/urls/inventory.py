@@ -5,6 +5,7 @@
 from django.urls import path
 
 from plane.app.views.inventory import (
+    InventoryCategoryRenameEndpoint,
     InventoryListsEndpoint,
     InventoryOpsEndpoint,
     InventoryPreferenceEndpoint,
@@ -25,6 +26,11 @@ urlpatterns = [
     ),
     path("workspaces/<str:slug>/inventory/lists/", InventoryListsEndpoint.as_view(), name="inventory-lists"),
     path("workspaces/<str:slug>/inventory/ops/", InventoryOpsEndpoint.as_view(), name="inventory-ops"),
+    path(
+        "workspaces/<str:slug>/inventory/categories/rename/",
+        InventoryCategoryRenameEndpoint.as_view(),
+        name="inventory-category-rename",
+    ),
     path(
         "workspaces/<str:slug>/inventory/suggestions/",
         InventorySuggestionsEndpoint.as_view(),

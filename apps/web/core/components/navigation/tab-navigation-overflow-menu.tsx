@@ -9,6 +9,7 @@ import { Link } from "react-router";
 import { MoreHorizontal, Pin } from "lucide-react";
 // plane imports
 import { useTranslation } from "@plane/i18n";
+import { navLabel } from "@/components/inventory/i18n";
 import { SetAsDefaultIcon } from "@plane/propel/icons";
 import { Menu } from "@plane/propel/menu";
 import { Tooltip } from "@plane/propel/tooltip";
@@ -31,7 +32,7 @@ type Props = {
  * Shows "Eye" icon for user-hidden items, "Set as default" icon for all items
  */
 export function TabNavigationOverflowMenu({ overflowItems, isActive, tabPreferences, onToggleDefault, onShow }: Props) {
-  const { t } = useTranslation();
+  const { t, currentLocale } = useTranslation();
 
   return (
     <Menu
@@ -54,7 +55,7 @@ export function TabNavigationOverflowMenu({ overflowItems, isActive, tabPreferen
           <Menu.MenuItem key={`${item.key}-overflow-${itemIsActive ? "active" : "inactive"}`} className="w-full p-0">
             <div className="group/menu-item flex w-full items-center justify-between">
               <Link to={item.href} className="w-full min-w-0 flex-1 p-1">
-                <span className="text-11">{t(item.i18n_key)}</span>
+                <span className="text-11">{navLabel(item.key, item.i18n_key, t, currentLocale)}</span>
               </Link>
               <div className="flex items-center">
                 {/* Show Eye icon ONLY for user-hidden items */}

@@ -89,6 +89,7 @@ def test_guests_get_403_on_every_endpoint(workspace, people, home, groceries):
         ("get", ws(workspace.slug, "preferences/"), None),
         ("get", ws(workspace.slug, "lists/"), None),
         ("get", proj(workspace.slug, home, f"items/{item.pk}/history/"), None),
+        ("post", ws(workspace.slug, "categories/rename/"), {"from": "a", "to": "b"}),
         ("put", ws(workspace.slug, "preferences/"), {}),
         ("get", proj(workspace.slug, home, "lists/"), None),
         ("post", proj(workspace.slug, home, "lists/"), {"name": "x"}),
@@ -449,3 +450,42 @@ def test_item_history_lists_applied_steps_newest_first(workspace, people, home, 
     assert _client(people["olga"]).get(proj(workspace.slug, home, f"items/{item.pk}/history/")).status_code == 403
     InventoryItem.all_objects.filter(pk=other.pk).update(deleted_at=timezone.now())
     assert client.get(proj(workspace.slug, home, f"items/{other.pk}/history/")).status_code == 404
+
+
+def test_renaming_a_category_reaches_every_editable_item_and_only_the_renamers_aisle_order(
+    workspace, people, home, groceries
+):
+    # S30: " lácteos " and "Lácteos" are one category; a project the renamer is not in keeps its own.
+    hers = Project.objects.create(name="Hers", identifier="HERS", workspace=workspace, inventory_view=True, network=0)
+    ProjectMember.objects.create(project=hers, member=people["olga"], role=20)
+    other = InventoryList.objects.create(name="Olga's", project=hers)
+    milk = _item(groceries, "Milk", "pinned", category="Lácteos")
+    yogurt = _item(groceries, "Yogurt", "pinned", category="lácteos")
+    bread = _item(groceries, "Bread", "pinned", category="Bakery")
+    hers_milk = _item(other, "Milk", "pinned", category="Lácteos")
+    rev = milk.state_rev
+    alice, olga = _client(people["alice"]), _client(people["olga"])
+    assert (
+        alice.put(
+            ws(workspace.slug, "preferences/"), {"category_order": ["Bakery", "lácteos"]}, format="json"
+        ).status_code
+        == 200
+    )
+    assert (
+        olga.put(ws(workspace.slug, "preferences/"), {"category_order": ["Lácteos"]}, format="json").status_code == 200
+    )
+
+    response = alice.post(
+        ws(workspace.slug, "categories/rename/"), {"from": " LÁCTEOS ", "to": " Dairy "}, format="json"
+    )
+    assert response.status_code == 200 and response.json() == {"renamed": 2}
+    for item, expected in ((milk, "Dairy"), (yogurt, "Dairy"), (bread, "Bakery"), (hers_milk, "Lácteos")):
+        item.refresh_from_db()
+        assert item.category == expected, item.name
+    milk.refresh_from_db()
+    assert milk.state_rev == rev
+    assert alice.get(ws(workspace.slug, "preferences/")).json()["category_order"] == ["Bakery", "Dairy"]
+    assert olga.get(ws(workspace.slug, "preferences/")).json()["category_order"] == ["Lácteos"]
+
+    for body in ({"from": "", "to": "x"}, {"from": "x", "to": "  "}, {"from": "x"}, {"from": 1, "to": "y"}):
+        assert alice.post(ws(workspace.slug, "categories/rename/"), body, format="json").status_code == 400, body

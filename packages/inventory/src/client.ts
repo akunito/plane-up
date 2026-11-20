@@ -263,3 +263,34 @@ export const updateItem = (opts: ClientOptions, projectId: string, itemId: strin
     `${project(opts, projectId)}/items/${encodeURIComponent(itemId)}/`,
     data
   );
+
+/** Project › Inventory (main app). Online only, like every data edit. */
+export interface ProjectList {
+  id: string;
+  name: string;
+  default_mode: string;
+  sort_order: number;
+}
+
+export const fetchProjectLists = (opts: ClientOptions, projectId: string) =>
+  requestJson<ProjectList[]>(opts, "GET", `${project(opts, projectId)}/lists/`);
+
+export const createList = (opts: ClientOptions, projectId: string, data: { name: string; default_mode: string }) =>
+  requestJson<ProjectList>(opts, "POST", `${project(opts, projectId)}/lists/`, data);
+
+export const updateList = (
+  opts: ClientOptions,
+  projectId: string,
+  listId: string,
+  data: Partial<Pick<ProjectList, "name" | "default_mode" | "sort_order">>
+) => requestJson<ProjectList>(opts, "PATCH", `${project(opts, projectId)}/lists/${encodeURIComponent(listId)}/`, data);
+
+export const deleteList = (opts: ClientOptions, projectId: string, listId: string) =>
+  requestJson<null>(opts, "DELETE", `${project(opts, projectId)}/lists/${encodeURIComponent(listId)}/`);
+
+export const deleteItem = (opts: ClientOptions, projectId: string, itemId: string) =>
+  requestJson<null>(opts, "DELETE", `${project(opts, projectId)}/items/${encodeURIComponent(itemId)}/`);
+
+/** Renames a category on every item the requester may edit, and in their own aisle order. */
+export const renameCategory = (opts: ClientOptions, from: string, to: string) =>
+  requestJson<{ renamed: number }>(opts, "POST", `${ws(opts)}/inventory/categories/rename/`, { from, to });

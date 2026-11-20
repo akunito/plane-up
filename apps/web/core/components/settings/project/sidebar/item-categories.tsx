@@ -16,6 +16,7 @@ import {
 } from "@plane/constants";
 import { useTranslation } from "@plane/i18n";
 // components
+import { navLabel } from "@/components/inventory/i18n";
 import { SettingsSidebarItem } from "@/components/settings/sidebar/item";
 // hooks
 import { useUserPermissions } from "@/hooks/store/user";
@@ -36,7 +37,7 @@ export const ProjectSettingsSidebarItemCategories = observer(function ProjectSet
   // store hooks
   const { allowPermissions } = useUserPermissions();
   // translation
-  const { t } = useTranslation();
+  const { t, currentLocale } = useTranslation();
 
   return (
     <div className="mt-3 flex flex-col divide-y divide-subtle px-3">
@@ -67,7 +68,7 @@ export const ProjectSettingsSidebarItemCategories = observer(function ProjectSet
                     href={`/${workspaceSlug}/settings/projects/${projectId}${item.href}/`}
                     isActive={isItemActive}
                     icon={PROJECT_SETTINGS_ICONS[item.key]}
-                    label={t(item.i18n_label)}
+                    label={navLabel(item.key, item.i18n_label, t, currentLocale)}
                   />
                 );
               })}

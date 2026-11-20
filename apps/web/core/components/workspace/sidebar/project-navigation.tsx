@@ -10,10 +10,12 @@ import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
 import { EUserPermissionsLevel, EUserPermissions } from "@plane/constants";
 import { useTranslation } from "@plane/i18n";
+import { Package } from "lucide-react";
 import { CycleIcon, IntakeIcon, ModuleIcon, PageIcon, ViewsIcon, WorkItemsIcon } from "@plane/propel/icons";
 import type { EUserProjectRoles } from "@plane/types";
 // plane ui
 // components
+import { navLabel } from "@/components/inventory/i18n";
 import { SidebarNavItem } from "@/components/sidebar/sidebar-navigation";
 // hooks
 import { useAppTheme } from "@/hooks/store/use-app-theme";
@@ -42,7 +44,7 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
   const { workspaceSlug, projectId, additionalNavigationItems } = props;
   const { workItem: workItemIdentifierFromRoute } = useParams();
   // store hooks
-  const { t } = useTranslation();
+  const { t, currentLocale } = useTranslation();
   const { isExtendedProjectSidebarOpened, toggleExtendedProjectSidebar, toggleSidebar } = useAppTheme();
   const { getPartialProjectById } = useProject();
   const { allowPermissions } = useUserPermissions();
@@ -130,6 +132,17 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
         shouldRender: project?.inbox_view ?? false,
         sortOrder: 6,
       },
+      // Fork (APLANE-63): guests never see inventory (brief: Designer defaults); the label is the fork's own.
+      {
+        i18n_key: "sidebar.inventory",
+        key: "inventory",
+        name: "Inventory",
+        href: `/${workspaceSlug}/projects/${projectId}/inventory`,
+        icon: Package,
+        access: [EUserPermissions.ADMIN, EUserPermissions.MEMBER],
+        shouldRender: project?.inventory_view ?? false,
+        sortOrder: 7,
+      },
     ],
     [project]
   );
@@ -191,7 +204,7 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
                   <item.icon
                     className={`size-4 flex-shrink-0 ${item.name === "Intake" ? "stroke-1" : "stroke-[1.5]"}`}
                   />
-                  <span className="text-11 font-medium">{t(item.i18n_key)}</span>
+                  <span className="text-11 font-medium">{navLabel(item.key, item.i18n_key, t, currentLocale)}</span>
                 </div>
                 {shouldShowCount && <span className="text-11 font-medium text-tertiary">{project.intake_count}</span>}
               </div>

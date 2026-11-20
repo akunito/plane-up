@@ -2,7 +2,17 @@
 
 import { describe, expect, it } from "vitest";
 
-import { createItem, fetchListItems, requestJson, sendOps, updateItem } from "../src/client";
+import {
+  createItem,
+  createList,
+  deleteItem,
+  deleteList,
+  fetchListItems,
+  renameCategory,
+  requestJson,
+  sendOps,
+  updateItem,
+} from "../src/client";
 
 const respond = (init: { status: number; json?: unknown; type?: ResponseType; html?: boolean }) =>
   (async () => {
@@ -115,6 +125,32 @@ describe("requestJson and the online-only writes", () => {
     expect(calls[0]!.url).toBe("/api/workspaces/home/projects/p/inventory/items/i/");
     expect(calls[0]!.init.method).toBe("PATCH");
     expect(calls[0]!.init.redirect).toBe("manual");
+  });
+
+  it("project page calls: list create and delete, item delete (204), category rename", async () => {
+    calls.length = 0;
+    expect(await createList(opts(recording(201, { id: "l" })), "p", { name: "Baby", default_mode: "units" })).toEqual({
+      kind: "ok",
+      body: { id: "l" },
+      status: 201,
+    });
+    const gone = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+    expect(await deleteList(opts(gone), "p", "l")).toMatchObject({ kind: "ok", status: 204 });
+    expect(await deleteItem(opts(gone), "p", "i")).toMatchObject({ kind: "ok", status: 204 });
+    expect(await renameCategory(opts(recording(200, { renamed: 2 })), "lácteos", "Dairy")).toMatchObject({
+      kind: "ok",
+      body: { renamed: 2 },
+    });
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual([
+      "POST /api/workspaces/home/projects/p/inventory/lists/",
+      "DELETE /api/workspaces/home/projects/p/inventory/lists/l/",
+      "DELETE /api/workspaces/home/projects/p/inventory/items/i/",
+      "POST /api/workspaces/home/inventory/categories/rename/",
+    ]);
+    expect(JSON.parse(calls[3]!.init.body as string)).toEqual({ from: "lácteos", to: "Dairy" });
   });
 
   it("a list's items come with its open orders", async () => {

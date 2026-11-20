@@ -331,19 +331,9 @@ export function badge(state: ItemState): Badge {
 /** A negative total is shown as 0 with a "recount" mark (brief: the server never clamps). */
 export const shownQuantity = (state: ItemState): number => Math.max(state.quantity ?? 0, 0);
 
-/** Who can see a list, said plainly instead of asserting "only you" from the member count. */
-export type Audience =
-  | { kind: "only_you" }
-  | { kind: "people"; names: string[] }
-  | { kind: "public"; names: string[] }
-  | { kind: "admins"; names: string[]; admins: number };
-
-export function audience(project: VisibleProject, meId: string): Audience {
-  const names = project.members.filter((m) => m.id !== meId).map((m) => m.display_name);
-  if (project.network !== 0) return { kind: "public", names };
-  if (project.admins_outside > 0) return { kind: "admins", names, admins: project.admins_outside };
-  return names.length === 0 ? { kind: "only_you" } : { kind: "people", names };
-}
+// Who can see a list, said plainly instead of asserting "only you" from the member count. Shared with the main app's project page (@plane/inventory).
+export { audience } from "@plane/inventory";
+export type { Audience } from "@plane/inventory";
 
 export function projectOf(lists: Lists | null, projectId: string): VisibleProject | undefined {
   return lists?.projects.find((p) => p.id === projectId);

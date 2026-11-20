@@ -236,6 +236,40 @@ class InventorySuggestionsEndpoint(InventoryBaseView):
         return Response({"items": matches, "categories": categories, "stores": stores})
 
 
+class InventoryCategoryRenameEndpoint(InventoryBaseView):
+    """Renames a category on every item the requester may edit (all their inventory projects in this
+    workspace), matching without regard to case or surrounding spaces, and in their own aisle order.
+    Other people's aisle orders are theirs (brief: the aisle order is per user). A data edit: no revision."""
+
+    def post(self, request, slug):
+        workspace = self._workspace(slug)
+        if workspace is None or not is_inventory_member(request.user, workspace.pk):
+            return _forbidden()
+        source, target = request.data.get("from"), request.data.get("to")
+        if not isinstance(source, str) or not source.strip() or len(source) > 255:
+            return _bad("from")
+        if not isinstance(target, str) or not target.strip() or len(target) > 255:
+            return _bad("to")
+        source, target = source.strip(), target.strip()
+        renamed = (
+            visible_items(request.user, workspace.pk)
+            .filter(category__iexact=source)
+            .update(category=target, updated_at=timezone.now())
+        )
+        pref = InventoryPreference.objects.filter(workspace=workspace, user=request.user).first()
+        if pref is not None and pref.category_order:
+            order, seen = [], set()
+            for entry in pref.category_order:
+                value = target if entry.strip().lower() == source.lower() else entry
+                if value.lower() not in seen:
+                    seen.add(value.lower())
+                    order.append(value)
+            if order != pref.category_order:
+                pref.category_order = order
+                pref.save(update_fields=["category_order", "updated_at"])
+        return Response({"renamed": renamed})
+
+
 class InventoryListsEndpoint(InventoryBaseView):
     """Every list the viewer can see, and who else can see each one (brief: Privacy). The app needs the
     lists without knowing the projects, and the people's names for "bought by" and "flagged by"."""

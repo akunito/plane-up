@@ -79,6 +79,14 @@ export const PROJECT_SETTINGS: Record<TProjectSettingsTabs, TProjectSettingsItem
     access: [EUserProjectRoles.ADMIN],
     highlight: (pathname: string, baseUrl: string) => pathname === `${baseUrl}/features/intake/`,
   },
+  // Fork (APLANE-63): its label comes from the inventory dictionaries (apps/web core/components/inventory/i18n.ts).
+  features_inventory: {
+    key: "features_inventory",
+    i18n_label: "project_settings.features.inventory.short_title",
+    href: `/features/inventory`,
+    access: [EUserProjectRoles.ADMIN],
+    highlight: (pathname: string, baseUrl: string) => pathname === `${baseUrl}/features/inventory/`,
+  },
   states: {
     key: "states",
     i18n_label: "common.states",
@@ -119,6 +127,7 @@ export const GROUPED_PROJECT_SETTINGS: Record<PROJECT_SETTINGS_CATEGORY, TProjec
     PROJECT_SETTINGS["features_views"],
     PROJECT_SETTINGS["features_pages"],
     PROJECT_SETTINGS["features_intake"],
+    PROJECT_SETTINGS["features_inventory"],
   ],
   [PROJECT_SETTINGS_CATEGORY.WORK_STRUCTURE]: [
     PROJECT_SETTINGS["states"],

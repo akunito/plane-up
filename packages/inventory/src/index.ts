@@ -5,3 +5,4 @@ export * from "./queue";
 export * from "./storage";
 export * from "./client";
 export * from "./replay";
+export * from "./audience";
