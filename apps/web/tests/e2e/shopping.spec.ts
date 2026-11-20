@@ -197,7 +197,7 @@ test.describe("shopping app @shopping", () => {
     const name = `QA e2e ${Date.now()}`;
     await page.getByRole("searchbox").fill(name);
     await page.getByRole("group", { name: "in list" }).getByRole("button", { name: "Groceries" }).click();
-    await page.getByRole("button", { name: `Create “${name}” and add it to the shopping` }).click();
+    await page.getByRole("button", { name: `Create “${name}” and add it to the shopping list` }).click();
     await expect(page.getByText(`${name}: added to the shopping list.`)).toBeVisible();
     const created = await item(page, name);
     expect(created.needed).toBe(true);

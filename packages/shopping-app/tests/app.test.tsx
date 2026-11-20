@@ -226,7 +226,7 @@ describe("quick capture", () => {
   it("creates a new item into the chosen list, and offers the existing one for a duplicate", async () => {
     await boot(catalog(), "#/capture");
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Oat milk" } });
-    const create = await screen.findByRole("button", { name: "Create “Oat milk” and add it to the shopping" });
+    const create = await screen.findByRole("button", { name: "Create “Oat milk” and add it to the shopping list" });
     fireEvent.click(screen.getByRole("button", { name: "Baby" }));
     fireEvent.click(create);
     await waitFor(() => expect(screen.getByText("Oat milk: added to the shopping list.")).toBeTruthy());
