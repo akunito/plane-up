@@ -82,11 +82,12 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("who sees the widget and the sidebar entry", () => {
   it("nobody without a member role in a project with inventory on, and no request is made", () => {
-    for (const projects of [
+    const cases: (typeof state.projects)[] = [
       {},
       { p1: { inventory_view: false, member_role: 20 } },
       { p1: { inventory_view: true, member_role: 5 } },
-    ]) {
+    ];
+    for (const projects of cases) {
       state.projects = projects;
       const { container, unmount } = render(
         <>
