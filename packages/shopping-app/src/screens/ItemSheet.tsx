@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { HistoryEntry, Mode } from "@plane/inventory";
-import { fetchHistory, view } from "@plane/inventory";
+import { fetchHistory, photoUrl, view } from "@plane/inventory";
 import type { AppState } from "../controller";
 import { MODES, board, personName, shownQuantity } from "../model";
 import type { Key } from "../i18n";
@@ -49,6 +49,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
   const [recount, setRecount] = useState(false);
   const [ordering, setOrdering] = useState(false);
   const [missing, setMissing] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState(false);
   const projectId = k?.data.project.id;
   const listId = k?.data.list.id;
   const rev = state?.rev;
@@ -102,6 +103,12 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
   }
   const data = k.data;
   const item = data.name;
+
+  function photoError(error: string): string {
+    if (error === "too_large") return t("photo_too_large");
+    if (error === "photo_unreadable") return t("photo_unreadable");
+    return error;
+  }
 
   async function save(field: Field, raw: string) {
     let value: unknown = raw.trim();
@@ -287,6 +294,53 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
         <h2 className="group">{t("optional")}</h2>
         {text("expires_on", "expiry", "date")}
         {text("barcode", "barcode", "text", { inputMode: "numeric", maxLength: 64 })}
+        <div className="photo-field" data-photo={data.photo ? "yes" : "no"}>
+          <span className="muted">{t("photo")}</span>
+          {data.photo ? (
+            <img
+              className="item-photo"
+              src={photoUrl(c.client(), data.project.id, id, data.photo)}
+              alt={t("photo_of", { item })}
+            />
+          ) : null}
+          <div className="photo-actions">
+            {/* No `capture`: it forces the camera on Android, and a photo already on the phone is as good. */}
+            <label className={`secondary${photoBusy ? " disabled" : ""}`}>
+              {t(data.photo ? "photo_replace" : "photo_add")}
+              <input
+                type="file"
+                accept="image/*"
+                hidden
+                disabled={photoBusy}
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  setPhotoBusy(true);
+                  setMessage(t("photo_uploading"));
+                  const out = await c.setPhoto(id, file);
+                  setPhotoBusy(false);
+                  setMessage(out.ok ? t("saved") : t("save_failed", { error: photoError(out.error) }));
+                }}
+              />
+            </label>
+            {data.photo ? (
+              <button
+                type="button"
+                className="text-button"
+                disabled={photoBusy}
+                onClick={async () => {
+                  setPhotoBusy(true);
+                  const out = await c.removePhoto(id);
+                  setPhotoBusy(false);
+                  setMessage(out.ok ? t("saved") : t("save_failed", { error: out.error }));
+                }}
+              >
+                {t("photo_remove")}
+              </button>
+            ) : null}
+          </div>
+        </div>
 
         {message ? (
           <p className="notice" role="status">

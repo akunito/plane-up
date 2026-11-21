@@ -18,6 +18,7 @@ export type Item = {
   level: string | null;
   quantity: number | null;
   category: string;
+  photo?: string | null;
 };
 
 /** An item as the server holds it now (suggestions return the full payload). */
@@ -84,6 +85,9 @@ export async function restoreSeed(page: Page) {
       // oxlint-disable-next-line no-await-in-loop -- rarely more than one
       await apiDelete(page, `/api/workspaces/qa-inv/projects/${left.project.id}/inventory/items/${left.id}/`);
   const salt = await item(page, "Salt");
+  // The photo test adds one to Salt (APLANE-66); seeded without.
+  if (salt.photo)
+    await apiDelete(page, `/api/workspaces/qa-inv/projects/${salt.project.id}/inventory/items/${salt.id}/photo/`);
   if (salt.category !== "Pantry")
     await apiPatch(page, `/api/workspaces/qa-inv/projects/${salt.project.id}/inventory/items/${salt.id}/`, {
       category: "Pantry",

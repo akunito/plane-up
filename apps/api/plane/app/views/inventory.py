@@ -9,9 +9,11 @@ import uuid
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Sum, Value
+from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Sum, UUIDField, Value
 from django.db.models.functions import Coalesce
+from django.http import HttpResponseRedirect
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -31,6 +33,7 @@ from plane.app.inventory.derive import OVERDUE_AFTER, counts, to_buy
 from plane.api.middleware.api_authentication import APIKeyAuthentication as ApiKeyAuth
 from plane.app.middleware.api_authentication import APIKeyAuthentication as AppApiKeyAuth
 from plane.db.models import (
+    FileAsset,
     InventoryEvent,
     InventoryItem,
     InventoryLevel,
@@ -45,6 +48,7 @@ from plane.db.models import (
     WorkspaceMember,
 )
 from plane.db.models.inventory import normalise_item_name
+from plane.settings.storage import S3Storage
 
 from .base import BaseAPIView
 
@@ -121,6 +125,7 @@ def item_payload(item, on_order=0, has_open=False):
         # The re-run key of an import (brief, Moving an item): the importer finds its own rows by these.
         "external_source": item.external_source,
         "external_id": item.external_id,
+        "photo": str(item.photo_id) if getattr(item, "photo_id", None) else None,
         "last_bought_at": item.last_bought_at.isoformat() if item.last_bought_at else None,
         "last_bought_by": str(item.last_bought_by_id) if item.last_bought_by_id else None,
         "on_order": on_order,
@@ -149,10 +154,29 @@ def order_payload(order, now):
     }
 
 
+def photo_assets(item_ref, workspace_ref, project_ref):
+    """An item's photo rows. Owned through the item AND its workspace and project AND the photo type: the
+    key alone is not proof of ownership (dark-schema audit), and an item moved across projects moves its
+    photos with it (ProjectInventoryItemDetailEndpoint.patch)."""
+    return FileAsset.all_objects.filter(
+        inventory_item=item_ref,
+        workspace_id=workspace_ref,
+        project_id=project_ref,
+        entity_type=FileAsset.INVENTORY_ITEM_PHOTO,
+    )
+
+
 def with_orders(items):
     open_orders = InventoryOrder.objects.filter(item=OuterRef("pk"), status=InventoryOrderStatus.OPEN).order_by()
     total = open_orders.values("item").annotate(total=Sum("quantity")).values("total")
+    photo = (
+        photo_assets(OuterRef("pk"), OuterRef("workspace_id"), OuterRef("project_id"))
+        .filter(deleted_at__isnull=True, is_uploaded=True)
+        .order_by("-created_at")
+        .values("pk")[:1]
+    )
     return items.annotate(
+        photo_id=Subquery(photo, output_field=UUIDField()),
         on_order=Coalesce(Subquery(total, output_field=IntegerField()), Value(0)),
         open_count=Coalesce(
             Subquery(open_orders.values("item").annotate(n=Count("pk")).values("n"), output_field=IntegerField()),
@@ -648,6 +672,12 @@ class ProjectInventoryItemDetailEndpoint(ProjectInventoryBaseView):
                         InventoryEvent.objects.filter(item=locked).update(
                             project_id=target.project_id, workspace_id=target.workspace_id
                         )
+                        # Photos too, deleted ones included: the purge reaches them through the item either way,
+                        # but photo_assets() reads them by project, and a project-bound row left behind would be
+                        # the old project's to cascade.
+                        FileAsset.all_objects.filter(inventory_item=locked).update(
+                            project_id=target.project_id, workspace_id=target.workspace_id
+                        )
                     locked.inventory_list = target
                 # Data edits do not advance state_rev (brief).
                 locked.save()
@@ -672,6 +702,166 @@ class ProjectInventoryItemDetailEndpoint(ProjectInventoryBaseView):
             item_pk = item.pk
             transaction.on_commit(lambda: soft_delete_related_objects.delay("db", "inventoryitem", item_pk))
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------- photo (APLANE-66)
+
+# The types the phone's re-encode produces, plus PNG. All three are inline-safe (settings.INLINE_SAFE_MIME_TYPES),
+# so the stored type is pinned as the served Content-Type.
+PHOTO_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+# Uploads started and never confirmed, per item: each one is a row and a presigned POST. The unconfirmed rows are
+# removed by delete_unuploaded_file_asset after UNUPLOADED_ASSET_DELETE_DAYS.
+PHOTO_PENDING_MAX = 5
+
+
+def _photo_item(project, pk, lock=False):
+    items = InventoryItem.objects.filter(pk=pk, project=project, inventory_list__deleted_at__isnull=True)
+    if lock:
+        items = items.select_for_update(of=("self",))
+    return items.first()
+
+
+def _item_response(pk):
+    item = with_orders(InventoryItem.objects.filter(pk=pk)).get()
+    return Response(item_payload(item, item.on_order, item.open_count > 0))
+
+
+class ProjectInventoryItemPhotoEndpoint(ProjectInventoryBaseView):
+    """The item's photo: POST starts an upload (presigned POST straight to storage), PATCH <asset> confirms it and
+    makes it THE photo (earlier ones are soft-deleted, so the purge removes their objects), DELETE removes it,
+    GET <asset> redirects to a short-lived URL. Online only; the device queue never carries photos."""
+
+    def post(self, request, slug, project_id, pk):
+        project = self._project(request, slug, project_id)
+        if project is None:
+            return _forbidden()
+        if not isinstance(request.data, dict):
+            return _bad("body")
+        content_type = request.data.get("type")
+        if content_type not in PHOTO_TYPES:
+            return _bad("type")
+        size = request.data.get("size")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 1:
+            return _bad("size")
+        if size > settings.FILE_SIZE_LIMIT:
+            # Refused, not clamped as the generic views do: the client must shrink the photo, and a clamped
+            # presigned POST would only fail later, at storage, with an error the phone cannot read.
+            return Response(
+                {"error": "too_large", "field": "size", "limit": settings.FILE_SIZE_LIMIT},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        item = _photo_item(project, pk)
+        if item is None:
+            return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        pending = photo_assets(item, project.workspace_id, project.pk).filter(
+            deleted_at__isnull=True, is_uploaded=False
+        )
+        if pending.count() >= PHOTO_PENDING_MAX:
+            return Response({"error": "pending"}, status=status.HTTP_409_CONFLICT)
+        ext = PHOTO_TYPES[content_type]
+        # No client file name anywhere: a phone's names carry dates and device names, and none is needed.
+        key = f"{project.workspace_id}/{uuid.uuid4().hex}-item-photo.{ext}"
+        asset = FileAsset.objects.create(
+            attributes={"name": f"photo.{ext}", "type": content_type, "size": size},
+            asset=key,
+            size=size,
+            workspace_id=project.workspace_id,
+            project=project,
+            inventory_item=item,
+            entity_type=FileAsset.INVENTORY_ITEM_PHOTO,
+            is_uploaded=False,
+        )
+        upload = S3Storage(request=request).generate_presigned_post(
+            object_name=key, file_type=content_type, file_size=size
+        )
+        if not upload:
+            asset.delete(soft=False)
+            return Response({"error": "storage"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response({"asset_id": str(asset.pk), "upload_data": upload})
+
+    def patch(self, request, slug, project_id, pk, asset_id):
+        project = self._project(request, slug, project_id)
+        if project is None:
+            return _forbidden()
+        item = _photo_item(project, pk)
+        if item is None:
+            return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        asset = (
+            photo_assets(item, project.workspace_id, project.pk).filter(pk=asset_id, deleted_at__isnull=True).first()
+        )
+        if asset is None:
+            return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        meta = None
+        if not asset.is_uploaded:
+            # Read from storage outside the row lock: it is a network call. The presigned POST already bounds the
+            # length and pins the type; this proves the object is there before the item points at it.
+            meta = S3Storage(request=request).get_object_metadata(asset.asset.name)
+            if not meta or not meta.get("ContentLength"):
+                return Response({"error": "not_uploaded"}, status=status.HTTP_409_CONFLICT)
+            if meta["ContentLength"] > settings.FILE_SIZE_LIMIT or meta.get("ContentType") != asset.attributes.get(
+                "type"
+            ):
+                return _bad("photo")
+        with transaction.atomic():
+            locked = _photo_item(project, pk, lock=True)
+            if locked is None:
+                return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
+            mine = photo_assets(locked, project.workspace_id, project.pk)
+            asset = mine.select_for_update().filter(pk=asset_id, deleted_at__isnull=True).first()
+            if asset is None:
+                return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
+            if meta is not None and not asset.is_uploaded:
+                asset.is_uploaded = True
+                asset.size = meta["ContentLength"]
+                asset.storage_metadata = meta
+                asset.save(update_fields=["is_uploaded", "size", "storage_metadata", "updated_at", "updated_by"])
+            # The last confirmed upload is the photo. Uploads still pending elsewhere are left alone; they win
+            # if they are confirmed later.
+            mine.filter(deleted_at__isnull=True, is_uploaded=True).exclude(pk=asset.pk).update(
+                deleted_at=timezone.now(), is_deleted=True
+            )
+        return _item_response(item.pk)
+
+    def delete(self, request, slug, project_id, pk):
+        project = self._project(request, slug, project_id)
+        if project is None:
+            return _forbidden()
+        with transaction.atomic():
+            locked = _photo_item(project, pk, lock=True)
+            if locked is None:
+                return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
+            photo_assets(locked, project.workspace_id, project.pk).filter(deleted_at__isnull=True).update(
+                deleted_at=timezone.now(), is_deleted=True
+            )
+        return _item_response(locked.pk)
+
+    def get(self, request, slug, project_id, pk, asset_id):
+        project = self._project(request, slug, project_id)
+        if project is None:
+            return _forbidden()
+        item = _photo_item(project, pk)
+        if item is None:
+            return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        asset = (
+            photo_assets(item, project.workspace_id, project.pk)
+            .filter(pk=asset_id, deleted_at__isnull=True, is_uploaded=True)
+            .first()
+        )
+        if asset is None:
+            return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        url = S3Storage(request=request).generate_presigned_url(
+            object_name=asset.asset.name,
+            disposition="inline",
+            filename=asset.attributes.get("name"),
+            content_type=asset.attributes.get("type"),
+        )
+        if not url:
+            return Response({"error": "storage"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        response = HttpResponseRedirect(url)
+        # The URL names one immutable photo (a new photo is a new id), but the redirect target expires: keep it
+        # private and well inside the signature's lifetime.
+        response["Cache-Control"] = "private, max-age=300"
+        return response
 
 
 # Arguments shown in the history; anything else an operation carried stays in the ledger only.

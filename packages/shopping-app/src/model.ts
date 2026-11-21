@@ -21,6 +21,8 @@ export interface ItemData extends ItemState {
   currency: string;
   expires_on: string | null;
   barcode: string;
+  /** The confirmed photo's asset id (APLANE-66); its <img> goes through photoUrl. */
+  photo?: string | null;
   sort_order: number;
   on_order: number;
   to_buy: number;

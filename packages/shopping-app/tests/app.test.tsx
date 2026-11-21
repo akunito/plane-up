@@ -7,7 +7,8 @@ import { App } from "../src/app";
 import { Controller } from "../src/controller";
 import { memoryStore } from "../src/store";
 import type { AppStore } from "../src/store";
-import { BABY, FakeApi, GROCERIES, SUPPLEMENTS, state, uid } from "./fake-api";
+import type { ImageEnv } from "@plane/inventory";
+import { BABY, FakeApi, GROCERIES, STORAGE, SUPPLEMENTS, state, uid } from "./fake-api";
 import type { Data } from "./fake-api";
 import type { ItemState } from "@plane/inventory";
 
@@ -45,6 +46,12 @@ function catalog(): { state: ItemState; data: Data }[] {
 
 let api: FakeApi;
 let controller: Controller;
+/** The size every re-encode answers; jsdom has no canvas, so the photo's shrink is faked (APLANE-66). */
+let encodedSize = 300_000;
+const fakeImages: ImageEnv = {
+  decode: async () => ({ width: 4032, height: 3024, close: () => undefined }),
+  encode: async () => new Blob([new Uint8Array(encodedSize)], { type: "image/jpeg" }),
+};
 
 async function boot(items = catalog(), hash = "#/") {
   window.location.hash = hash;
@@ -54,6 +61,7 @@ async function boot(items = catalog(), hash = "#/") {
     fetchImpl: (input, init) => api.fetch(input, init),
     lock: makeLock(undefined),
     openStore: async (userId) => memoryStore(createQueue(userId, newUuid())),
+    imageEnv: fakeImages,
   });
   await controller.start();
   render(<App controller={controller} locale="en" />);
@@ -306,6 +314,47 @@ describe("item sheet", () => {
     await waitFor(() => expect(screen.getByText("Saved.")).toBeTruthy());
     expect(api.calls.find((c) => c.method === "PATCH")!.body).toEqual({ category: "Spices" });
     expect(api.ops()).toHaveLength(0);
+  });
+
+  it("a photo is shrunk, sent to storage and confirmed, then shown; removing it clears it (APLANE-66)", async () => {
+    encodedSize = 300_000;
+    await boot(catalog(), `#/item/${SALT}`);
+    const input = await screen.findByLabelText("Add photo");
+    fireEvent.change(input, {
+      target: { files: [new File([new Uint8Array(6_000_000)], "IMG_1.jpg", { type: "image/jpeg" })] },
+    });
+    const img = (await screen.findByAltText("Photo of Salt")) as HTMLImageElement;
+    const confirmed = api.calls.find((c) => c.method === "PATCH" && c.path.includes("/photo/"))!;
+    const assetId = confirmed.path.match(/\/photo\/([^/]+)\/$/)![1];
+    expect(img.getAttribute("src")).toMatch(
+      new RegExp(`^/api/workspaces/home/projects/[^/]+/inventory/items/${SALT}/photo/${assetId}/$`)
+    );
+    expect(api.calls.filter((c) => c.path.includes("/photo/") || c.path === STORAGE).map((c) => c.method)).toEqual([
+      "POST",
+      "POST",
+      "PATCH",
+    ]);
+    // What was sent is the shrunk photo, not the 6 MB original.
+    expect(api.calls.find((c) => c.method === "POST" && c.path.endsWith("/photo/"))!.body).toEqual({
+      type: "image/jpeg",
+      size: 300_000,
+    });
+    expect(api.ops()).toHaveLength(0);
+    expect(screen.getByLabelText("Change photo")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove photo" }));
+    await waitFor(() => expect(screen.queryByAltText("Photo of Salt")).toBeNull());
+    expect(screen.getByLabelText("Add photo")).toBeTruthy();
+  });
+
+  it("a photo that cannot be shrunk under the limit is refused before anything is sent", async () => {
+    encodedSize = 6_000_000;
+    await boot(catalog(), `#/item/${SALT}`);
+    const input = await screen.findByLabelText("Add photo");
+    fireEvent.change(input, { target: { files: [new File([new Uint8Array(10)], "x.jpg", { type: "image/jpeg" })] } });
+    await waitFor(() => expect(screen.getByText("Not saved: the photo is too large")).toBeTruthy());
+    expect(api.calls.filter((c) => c.path.includes("/photo/") || c.path === STORAGE)).toHaveLength(0);
+    encodedSize = 300_000;
   });
 });
 

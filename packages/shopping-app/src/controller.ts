@@ -16,6 +16,8 @@ import type {
   ClientOptions,
   Entry,
   FailureKind,
+  Fetched,
+  ImageEnv,
   Lists,
   Notice,
   OpName,
@@ -24,6 +26,10 @@ import type {
 } from "@plane/inventory";
 import {
   approve,
+  browserImageEnv,
+  removePhoto,
+  shrinkPhoto,
+  uploadPhoto,
   BACKOFF_MAX_MS,
   createItem,
   createQueue,
@@ -114,6 +120,8 @@ export interface Deps {
    * asks the worker for a one-off background sync, which the browser fires once it sees a network.
    */
   onQueued?: () => void;
+  /** Decoding and re-encoding a photo; the browser's canvas by default (tests pass a fake). */
+  imageEnv?: ImageEnv;
 }
 
 type Listener = () => void;
@@ -134,6 +142,7 @@ export class Controller {
   private stores = new Map<string, AppStore>();
   private readonly now: () => number;
   private readonly lock: Lock | undefined;
+  private readonly imageEnv: ImageEnv;
   private refreshing: Promise<void> | null = null;
   private refreshAgain = false;
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -152,6 +161,7 @@ export class Controller {
   constructor(private readonly deps: Deps) {
     this.now = deps.now ?? Date.now;
     this.lock = deps.lock;
+    this.imageEnv = deps.imageEnv ?? (browserImageEnv as ImageEnv);
     this.snapshots = deps.snapshots ?? safeSnapshots();
     this.state = {
       phase: "loading",
@@ -830,6 +840,46 @@ export class Controller {
       return { ok: false, error: out.failure };
     }
     await this.learn([out.body as unknown as ItemData], startedAt, target);
+    return { ok: true };
+  }
+
+  /** The item's photo (APLANE-66): shrunk on the device, then uploaded; online only, like every data edit. */
+  async setPhoto(itemId: string, file: Blob): Promise<{ ok: true } | { ok: false; error: string }> {
+    return this.photoEdit(itemId, async (projectId) => {
+      let shrunk: Blob | null;
+      try {
+        shrunk = await shrinkPhoto(file, this.imageEnv);
+      } catch {
+        return { kind: "refused", status: 0, error: "photo_unreadable" };
+      }
+      if (!shrunk) return { kind: "refused", status: 0, error: "too_large" };
+      return uploadPhoto<ItemData>(this.client(), projectId, itemId, shrunk);
+    });
+  }
+
+  removePhoto(itemId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    return this.photoEdit(itemId, (projectId) => removePhoto<ItemData>(this.client(), projectId, itemId));
+  }
+
+  private async photoEdit(
+    itemId: string,
+    run: (projectId: string) => Promise<Fetched<ItemData>>
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (this.openedOffline || !this.ownsStore()) {
+      void this.reconnect();
+      return { ok: false, error: "offline" };
+    }
+    const item = this.state.known[itemId]?.data;
+    if (!item) return { ok: false, error: "gone" };
+    const target = this.store;
+    const startedAt = this.now();
+    const out = await run(item.project.id);
+    if (out.kind === "refused") return { ok: false, error: out.error };
+    if (out.kind !== "ok") {
+      this.set({ connection: out.failure });
+      return { ok: false, error: out.failure };
+    }
+    await this.learn([out.body], startedAt, target);
     return { ok: true };
   }
 

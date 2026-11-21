@@ -23,7 +23,11 @@ export interface Data {
   store?: string;
   buy_online?: boolean;
   purchase_url?: string;
+  photo?: string | null;
 }
+
+/** Where the fake's presigned POST points; the fake answers it like storage (APLANE-66). */
+export const STORAGE = "https://storage.test/upload";
 
 const LISTS: Record<string, { name: string; project: string }> = {
   [GROCERIES]: { name: "Groceries", project: PROJECT },
@@ -60,6 +64,7 @@ export class FakeApi {
   /** Answer every request with this instead (a status and an optional JSON body). */
   fail: { status: number; json?: unknown } | null = null;
   ordersAt = new Map<string, string>();
+  pendingPhotos = new Set<string>();
   constructor(items: { state: ItemState; data: Data }[]) {
     this.server = new ModelServer(items.map((i) => i.state));
     for (const i of items) this.data.set(i.state.id, i.data);
@@ -93,6 +98,7 @@ export class FakeApi {
       currency: "",
       expires_on: null,
       barcode: "",
+      photo: d.photo ?? null,
       sort_order: 0,
       on_order: onOrder,
       to_buy: toBuy({ ...s, on_order: onOrder, has_open_order: open.length > 0 }),
@@ -203,6 +209,24 @@ export class FakeApi {
     }
     const history = p.match(/\/inventory\/items\/([^/]+)\/history\/$/);
     if (history) return [200, []];
+    if (path === STORAGE) return [201, {}];
+    const photo = p.match(/\/inventory\/items\/([^/]+)\/photo\/(?:([^/]+)\/)?$/);
+    if (photo) {
+      const d = this.data.get(photo[1]!)!;
+      if (method === "POST" && !photo[2]) {
+        const assetId = uid("9");
+        this.pendingPhotos.add(assetId);
+        return [200, { asset_id: assetId, upload_data: { url: STORAGE, fields: { key: `k-${assetId}` } } }];
+      }
+      if (method === "PATCH" && photo[2] && this.pendingPhotos.has(photo[2])) {
+        d.photo = photo[2];
+        return [200, this.payload(photo[1]!)];
+      }
+      if (method === "DELETE" && !photo[2]) {
+        d.photo = null;
+        return [200, this.payload(photo[1]!)];
+      }
+    }
     const item = p.match(/\/inventory\/items\/([^/]+)\/$/);
     if (item && method === "PATCH") {
       const d = this.data.get(item[1]!)!;

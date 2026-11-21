@@ -187,6 +187,7 @@ class EntityAssetEndpoint(BaseAPIView):
             workspace=deploy_board.workspace,
             project_id=deploy_board.project_id,
             created_by=request.user,
+            inventory_item__isnull=True,
         ).first()
         if asset is None:
             return Response({"error": "The requested asset could not be found."}, status=status.HTTP_404_NOT_FOUND)
@@ -214,6 +215,7 @@ class EntityAssetEndpoint(BaseAPIView):
             workspace=deploy_board.workspace,
             project_id=deploy_board.project_id,
             created_by=request.user,
+            inventory_item__isnull=True,
         ).first()
         if asset is None:
             return Response({"error": "The requested asset could not be found."}, status=status.HTTP_404_NOT_FOUND)
@@ -241,6 +243,7 @@ class AssetRestoreEndpoint(BaseAPIView):
             workspace=deploy_board.workspace,
             project_id=deploy_board.project_id,
             created_by=request.user,
+            inventory_item__isnull=True,
         ).first()
         if asset is None:
             return Response({"error": "The requested asset could not be found."}, status=status.HTTP_404_NOT_FOUND)

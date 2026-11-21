@@ -6,3 +6,4 @@ export * from "./storage";
 export * from "./client";
 export * from "./replay";
 export * from "./audience";
+export * from "./photo";

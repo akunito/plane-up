@@ -180,6 +180,50 @@ test.describe("shopping app @shopping", () => {
     await server(page, "Salt", "category").toBe("Pantry");
   });
 
+  test("item photo: a phone-sized photo is shrunk, stored, shown, and removed (APLANE-66)", async ({
+    page,
+    browser,
+  }, info) => {
+    await open(page, `#/item/${items.Salt}`);
+    const input = page.getByLabel("Add photo");
+    await expect(input).toHaveCount(1);
+    // A real JPEG larger than the 1600 px the app shrinks to, made by the browser itself: setInputFiles
+    // would need a fixture file, and the point is the canvas path the phones take.
+    await input.evaluate(async (el: HTMLInputElement) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 2400;
+      canvas.height = 1800;
+      const g = canvas.getContext("2d")!;
+      const grad = g.createLinearGradient(0, 0, 2400, 1800);
+      grad.addColorStop(0, "#c33");
+      grad.addColorStop(1, "#33c");
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 2400, 1800);
+      const blob: Blob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b!), "image/jpeg", 0.95));
+      const files = new DataTransfer();
+      files.items.add(new File([blob], "IMG_20261121_090000.jpg", { type: "image/jpeg" }));
+      el.files = files.files;
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const photo = page.getByRole("img", { name: "Photo of Salt" });
+    await expect(photo).toBeVisible({ timeout: 20_000 });
+    // Loaded through the redirect to storage, at the shrunk size.
+    await expect
+      .poll(() => photo.evaluate((img: HTMLImageElement) => (img.complete ? img.naturalWidth : 0)), { timeout: 15_000 })
+      .toBe(1600);
+    await expect(page.getByText("Saved.")).toBeVisible();
+    await server(page, "Salt", "photo").toEqual(expect.stringMatching(/^[0-9a-f-]{36}$/));
+    // A workspace guest cannot read it, not even with its address.
+    const src = await photo.getAttribute("src");
+    expect(src).toMatch(/\/photo\/[0-9a-f-]{36}\/$/);
+    const gus = await contextFor(browser, info, "qa-inv-gus");
+    expect((await gus.page.request.get(src!, { maxRedirects: 0 })).status()).toBe(403);
+    await gus.context.close();
+    await page.getByRole("button", { name: "Remove photo" }).click();
+    await expect(photo).toHaveCount(0);
+    await server(page, "Salt", "photo").toBeNull();
+  });
+
   test("two people: one flags it needed, the other sees it on the next refresh; lists stay private", async ({
     browser,
   }, info) => {
@@ -293,7 +337,8 @@ test.describe("@visual-shopping", () => {
     // Nappy cream: no workflow above touches it, so its history is the same on every project.
     await open(page, `#/item/${items["Nappy cream"]}`);
     await expect(page.getByText(/set it to: In stock/)).toBeVisible();
-    await shot(page, "vs-05-item");
+    // Renamed with the photo field (APLANE-66), which changed this screen: the new name creates its baseline.
+    await shot(page, "vs-05-item-photo");
   });
 
   test("VS-06 order dialog", async ({ page }) => {

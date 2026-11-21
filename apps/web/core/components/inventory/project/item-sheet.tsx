@@ -9,7 +9,15 @@
 
 import { useEffect, useState } from "react";
 import type { ClientOptions, HistoryEntry, ProjectList } from "@plane/inventory";
-import { fetchHistory, updateItem } from "@plane/inventory";
+import {
+  browserImageEnv,
+  fetchHistory,
+  photoUrl,
+  removePhoto,
+  shrinkPhoto,
+  updateItem,
+  uploadPhoto,
+} from "@plane/inventory";
 import { Button } from "@plane/propel/button";
 import { EModalWidth, ModalCore } from "@plane/ui";
 import type { InventoryKey, InventoryT } from "../i18n";
@@ -34,6 +42,7 @@ export function ItemSheet(props: {
   const { open, t, opts, projectId, item, lists, onClose, onSaved } = props;
   const [history, setHistory] = useState<HistoryEntry[] | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
   const itemId = item?.id;
 
   useEffect(() => {
@@ -64,6 +73,32 @@ export function ItemSheet(props: {
     setMessage(t("saved"));
     return out.body as Item;
   };
+  /** The photo (APLANE-66): shrunk here (fits the server's limit, drops EXIF and GPS), online only. */
+  const photoDone = (out: { kind: string; failure?: string; error?: string; body?: unknown }) => {
+    setPhotoBusy(false);
+    if (out.kind !== "ok") {
+      if (out.error === "too_large") return setMessage(t("photo_too_large"));
+      return setMessage(failureMessage(out, t));
+    }
+    onSaved(out.body as Item);
+    notifyInventoryChanged();
+    setMessage(t("saved"));
+  };
+  const pickPhoto = async (file: File) => {
+    setPhotoBusy(true);
+    setMessage(t("photo_uploading"));
+    let shrunk: Blob | null;
+    try {
+      shrunk = await shrinkPhoto(file, browserImageEnv);
+    } catch {
+      setPhotoBusy(false);
+      return setMessage(t("photo_unreadable"));
+    }
+    if (!shrunk) return photoDone({ kind: "refused", error: "too_large" });
+    photoDone(await uploadPhoto<Item>(opts, projectId, item.id, shrunk));
+  };
+  const photo = typeof item.photo === "string" ? item.photo : null;
+
   const commit = (field: string, value: (draft: string) => unknown) => async (draft: string) => {
     const saved = await save({ [field]: value(draft) });
     return saved ? str(saved[field]) : null;
@@ -124,6 +159,47 @@ export function ItemSheet(props: {
             />
           </label>
         </div>
+        <section className="flex flex-col gap-2">
+          <h4 className="text-13 font-medium text-secondary">{t("photo")}</h4>
+          {photo && (
+            <img
+              src={photoUrl(opts, projectId, item.id, photo)}
+              alt={t("photo_of", { item: item.name })}
+              className="max-h-64 max-w-full self-start rounded-md border border-subtle object-contain"
+            />
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <label
+              className={`inline-flex h-8 cursor-pointer items-center rounded-md border border-strong px-3 text-13 text-secondary ${photoBusy ? "pointer-events-none opacity-50" : ""}`}
+            >
+              {t(photo ? "photo_replace" : "photo_add")}
+              <input
+                type="file"
+                accept="image/*"
+                hidden
+                disabled={photoBusy}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) void pickPhoto(file);
+                }}
+              />
+            </label>
+            {photo && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={photoBusy}
+                onClick={async () => {
+                  setPhotoBusy(true);
+                  photoDone(await removePhoto<Item>(opts, projectId, item.id));
+                }}
+              >
+                {t("photo_remove")}
+              </Button>
+            )}
+          </div>
+        </section>
         {message && (
           <p role="status" className="text-13 text-secondary">
             {message}

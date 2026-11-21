@@ -13,6 +13,7 @@ from plane.app.views.inventory import (
     InventorySuggestionsEndpoint,
     ProjectInventoryItemDetailEndpoint,
     ProjectInventoryItemHistoryEndpoint,
+    ProjectInventoryItemPhotoEndpoint,
     ProjectInventoryItemsEndpoint,
     ProjectInventoryListDetailEndpoint,
     ProjectInventoryListsEndpoint,
@@ -65,5 +66,15 @@ urlpatterns = [
         "workspaces/<str:slug>/projects/<uuid:project_id>/inventory/items/<uuid:pk>/history/",
         ProjectInventoryItemHistoryEndpoint.as_view(),
         name="project-inventory-item-history",
+    ),
+    path(
+        "workspaces/<str:slug>/projects/<uuid:project_id>/inventory/items/<uuid:pk>/photo/",
+        ProjectInventoryItemPhotoEndpoint.as_view(),
+        name="project-inventory-item-photo",
+    ),
+    path(
+        "workspaces/<str:slug>/projects/<uuid:project_id>/inventory/items/<uuid:pk>/photo/<uuid:asset_id>/",
+        ProjectInventoryItemPhotoEndpoint.as_view(),
+        name="project-inventory-item-photo-asset",
     ),
 ]
