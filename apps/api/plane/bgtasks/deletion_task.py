@@ -400,8 +400,8 @@ def _doomed_blobs(doomed_pks):
     """`[(storage key, bytes)]` for every doomed row that owns an object in the bucket.
 
     Read during collection, before anything is deleted, because the key exists ONLY in the row:
-    `FileAsset`'s seven owner foreign keys (user, workspace, draft_issue, project, issue, comment,
-    page) and `IssueAttachment.issue` are all CASCADE, so a purge
+    `FileAsset`'s eight owner foreign keys (user, workspace, draft_issue, project, issue, comment,
+    page, inventory_item) and `IssueAttachment.issue` are all CASCADE, so a purge
     removes the row and leaves behind an object nothing can name again short of listing the whole
     bucket. `size` is read where the model has the column (`FileAsset` only) so the disarmed report
     can state bytes rather than a row count.

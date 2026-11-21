@@ -19,6 +19,7 @@ from django.utils import timezone
 
 from plane.bgtasks.deletion_task import hard_delete, soft_delete_related_objects
 from plane.db.models import (
+    FileAsset,
     InventoryEvent,
     InventoryItem,
     InventoryList,
@@ -141,3 +142,43 @@ def test_purging_a_long_deleted_item_of_a_live_list_takes_its_orders_and_events(
     left = _left(stocked.workspace_id)
     assert left["InventoryItem"] == left["InventoryOrder"] == left["InventoryEvent"] == 0
     assert left["InventoryList"] == 1
+
+
+def _photo(item, key):
+    return FileAsset.objects.create(
+        asset=key,
+        workspace_id=item.workspace_id,
+        project_id=item.project_id,
+        inventory_item=item,
+        entity_type="INVENTORY_ITEM_PHOTO",
+        is_uploaded=True,
+        size=1024,
+    )
+
+
+def test_soft_deleting_an_item_soft_deletes_its_photo(stocked):
+    # APLANE-66: the photo hangs off the item by a CASCADE key, so the item's cascade reaches it.
+    item = InventoryItem.objects.get(project=stocked)
+    photo = _photo(item, f"{stocked.workspace_id}/photo-soft.jpg")
+    item.deleted_at = timezone.now()
+    item.save()
+    soft_delete_related_objects("db", "inventoryitem", item.pk)
+    assert not FileAsset.objects.filter(pk=photo.pk).exists()
+    assert FileAsset.all_objects.get(pk=photo.pk).deleted_at is not None
+
+
+def test_purging_an_item_deletes_its_photo_row_and_stored_object(
+    stocked, storage, settings, django_capture_on_commit_callbacks
+):
+    # The object key exists only in the row: a photo that outlived its row would leak in the bucket.
+    settings.HARD_DELETE_ENABLED = True
+    settings.HARD_DELETE_AFTER_DAYS = 60
+    item = InventoryItem.objects.get(project=stocked)
+    key = f"{stocked.workspace_id}/photo-purge.jpg"
+    photo = _photo(item, key)
+    InventoryItem.all_objects.filter(pk=item.pk).update(deleted_at=timezone.now() - timezone.timedelta(days=61))
+    with django_capture_on_commit_callbacks(execute=True):
+        hard_delete()
+    _constraints_hold()
+    assert not FileAsset.all_objects.filter(pk=photo.pk).exists()
+    storage.delete_files.assert_called_once_with(object_names=[key])
