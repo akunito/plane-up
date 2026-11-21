@@ -637,6 +637,7 @@ class IssueAttachmentSerializer(BaseSerializer):
             "workspace",
             "project",
             "issue",
+            "inventory_item",
         ]
 
 

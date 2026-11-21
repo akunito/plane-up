@@ -712,6 +712,7 @@ class IssueAttachmentSerializer(BaseSerializer):
         fields = "__all__"
         read_only_fields = [
             "id",
+            "inventory_item",
             "workspace",
             "project",
             "issue",

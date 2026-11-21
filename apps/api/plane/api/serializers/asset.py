@@ -115,6 +115,7 @@ class FileAssetSerializer(BaseSerializer):
             "comment",
             "page",
             "draft_issue",
+            "inventory_item",
             "user",
             "is_deleted",
             "deleted_at",
