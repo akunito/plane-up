@@ -131,7 +131,7 @@ export const en = {
   photo_uploading: "Uploading the photo…",
   photo_too_large: "the photo is too large",
   photo_unreadable: "that image cannot be read",
-  photo_unavailable: "The photo cannot be shown now (offline?).",
+  photo_unavailable: "The photo cannot be shown now.",
   photo_pending: "too many photos half uploaded; try again in an hour",
   history: "History",
   history_empty: "Nothing yet.",

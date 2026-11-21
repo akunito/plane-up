@@ -709,9 +709,10 @@ class ProjectInventoryItemDetailEndpoint(ProjectInventoryBaseView):
 # The types the phone's re-encode produces, plus PNG. All three are inline-safe (settings.INLINE_SAFE_MIME_TYPES),
 # so the stored type is pinned as the served Content-Type.
 PHOTO_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
-# Uploads started and never confirmed, per item, counted only while their presigned POST is still valid
-# (SIGNED_URL_EXPIRATION): older ones can take no more bytes, and counting them locked an item out for the
-# 7 days delete_unuploaded_file_asset waits (phase 8 audit F6).
+# A RATE, not a bound: uploads started and never confirmed count only while their presigned POST is still
+# valid (SIGNED_URL_EXPIRATION), so a member can start about 5 per item per hour. Counting older ones locked an
+# item out for the 7 days delete_unuploaded_file_asset waits (phase 8 audit F6); that task only soft-deletes,
+# so objects uploaded and never confirmed stay in storage while the purge is disarmed. Members only.
 PHOTO_PENDING_MAX = 5
 
 

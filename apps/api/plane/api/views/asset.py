@@ -52,7 +52,11 @@ class UserAssetEndpoint(BaseAPIView):
 
     def asset_delete(self, asset_id):
         # Never an inventory photo, whatever id a user pointer was set to (phase 8 audit F3).
-        asset = FileAsset.objects.filter(id=asset_id, inventory_item__isnull=True).first()
+        asset = (
+            FileAsset.objects.filter(id=asset_id, inventory_item__isnull=True)
+            .exclude(entity_type=FileAsset.INVENTORY_ITEM_PHOTO)
+            .first()
+        )
         if asset is None:
             return
         asset.is_deleted = True
@@ -251,7 +255,11 @@ class UserServerAssetEndpoint(BaseAPIView):
 
     def asset_delete(self, asset_id):
         # Never an inventory photo, whatever id a user pointer was set to (phase 8 audit F3).
-        asset = FileAsset.objects.filter(id=asset_id, inventory_item__isnull=True).first()
+        asset = (
+            FileAsset.objects.filter(id=asset_id, inventory_item__isnull=True)
+            .exclude(entity_type=FileAsset.INVENTORY_ITEM_PHOTO)
+            .first()
+        )
         if asset is None:
             return
         asset.is_deleted = True

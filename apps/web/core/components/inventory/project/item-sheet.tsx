@@ -44,6 +44,12 @@ export function ItemSheet(props: {
   const [message, setMessage] = useState<string | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoBroken, setPhotoBroken] = useState<string | null>(null);
+  // A photo that failed to load (offline: photos are never cached) is tried again when the network returns.
+  useEffect(() => {
+    const retry = () => setPhotoBroken(null);
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, []);
   const itemId = item?.id;
 
   useEffect(() => {

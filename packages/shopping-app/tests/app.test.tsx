@@ -53,7 +53,7 @@ const fakeImages: ImageEnv = {
   encode: async () => new Blob([new Uint8Array(encodedSize)], { type: "image/jpeg" }),
 };
 
-async function boot(items = catalog(), hash = "#/") {
+async function boot(items = catalog(), hash = "#/", now?: () => number) {
   window.location.hash = hash;
   api = new FakeApi(items);
   controller = new Controller({
@@ -62,6 +62,7 @@ async function boot(items = catalog(), hash = "#/") {
     lock: makeLock(undefined),
     openStore: async (userId) => memoryStore(createQueue(userId, newUuid())),
     imageEnv: fakeImages,
+    ...(now ? { now } : {}),
   });
   await controller.start();
   render(<App controller={controller} locale="en" />);
@@ -349,7 +350,10 @@ describe("item sheet", () => {
 
   it("a refresh that runs during the upload does not hide the photo once it is confirmed (audit F1)", async () => {
     encodedSize = 300_000;
-    await boot(catalog(), `#/item/${SALT}`);
+    // A clock that moves on every read: with the real one, two reads in the same millisecond made this pass
+    // without the fix (re-review).
+    let tick = Date.now();
+    await boot(catalog(), `#/item/${SALT}`, () => ++tick);
     // A list refresh started and answered while the bytes are on their way: it says "no photo" and was
     // fetched after the upload began. The confirmation's answer is newer still and must win.
     api.onStorage = () => controller.loadList(GROCERIES);

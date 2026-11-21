@@ -48,7 +48,8 @@ function paint(
 
 export const browserImageEnv: ImageEnv<ImageBitmap & Decoded> = {
   // from-image: phones store portrait shots as rotated landscape plus an EXIF flag, which the re-encode drops.
-  // A browser that rejects the option still decodes without it (upright as stored) rather than refusing the photo.
+  // A browser that rejects the option still decodes without it (as stored: sideways when the phone rotated it
+  // only by EXIF) rather than refusing the photo.
   decode: (file) => createImageBitmap(file, { imageOrientation: "from-image" }).catch(() => createImageBitmap(file)),
   async encode(image, width, height, quality) {
     if (typeof OffscreenCanvas !== "undefined") {

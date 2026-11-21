@@ -131,7 +131,7 @@ export const es: Dictionary = {
   photo_uploading: "Subiendo la foto…",
   photo_too_large: "la foto es demasiado grande",
   photo_unreadable: "no se puede leer esa imagen",
-  photo_unavailable: "La foto no se puede mostrar ahora (¿sin conexión?).",
+  photo_unavailable: "La foto no se puede mostrar ahora.",
   photo_pending: "hay demasiadas fotos a medio subir; prueba dentro de una hora",
   history: "Historial",
   history_empty: "Nada todavía.",

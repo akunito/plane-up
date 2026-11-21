@@ -281,7 +281,11 @@ class WorkspaceFileAssetEndpoint(BaseAPIView):
     def asset_delete(self, asset_id):
         # The id comes from a project's cover or a workspace's logo pointer, which ProjectSerializer and
         # WorkSpaceSerializer accept as any asset id: never let it reach an inventory photo (phase 8 audit F3).
-        asset = FileAsset.objects.filter(id=asset_id, inventory_item__isnull=True).first()
+        asset = (
+            FileAsset.objects.filter(id=asset_id, inventory_item__isnull=True)
+            .exclude(entity_type=FileAsset.INVENTORY_ITEM_PHOTO)
+            .first()
+        )
         # Check if the asset exists
         if asset is None:
             return
