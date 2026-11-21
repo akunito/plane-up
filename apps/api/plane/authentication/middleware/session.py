@@ -13,6 +13,17 @@ from django.utils.deprecation import MiddlewareMixin
 from django.utils.http import http_date
 
 
+# The instance-admin API mount (plane/urls.py "api/instances/") is the only place the admin cookie belongs.
+# This was `"instances" in request.path`: a workspace slug like instances-team is legal, so every request
+# of such a workspace read the ADMIN cookie: its members got 401, or, with an admin session in the same
+# browser, acted as the admin (APLANE-71). path_info is the part the URLconf matches.
+ADMIN_PATH_PREFIX = "/api/instances/"
+
+
+def is_admin_path(request):
+    return request.path_info.startswith(ADMIN_PATH_PREFIX)
+
+
 class SessionMiddleware(MiddlewareMixin):
     def __init__(self, get_response):
         super().__init__(get_response)
@@ -20,7 +31,7 @@ class SessionMiddleware(MiddlewareMixin):
         self.SessionStore = engine.SessionStore
 
     def process_request(self, request):
-        if "instances" in request.path:
+        if is_admin_path(request):
             session_key = request.COOKIES.get(settings.ADMIN_SESSION_COOKIE_NAME)
         else:
             session_key = request.COOKIES.get(settings.SESSION_COOKIE_NAME)
@@ -40,8 +51,8 @@ class SessionMiddleware(MiddlewareMixin):
             return response
         # First check if we need to delete this cookie.
         # The session should be deleted only if the session is entirely empty.
-        is_admin_path = "instances" in request.path
-        cookie_name = settings.ADMIN_SESSION_COOKIE_NAME if is_admin_path else settings.SESSION_COOKIE_NAME
+        admin = is_admin_path(request)
+        cookie_name = settings.ADMIN_SESSION_COOKIE_NAME if admin else settings.SESSION_COOKIE_NAME
 
         if cookie_name in request.COOKIES and empty:
             response.delete_cookie(
@@ -60,7 +71,7 @@ class SessionMiddleware(MiddlewareMixin):
                     expires = None
                 else:
                     # Use different max_age based on whether it's an admin cookie
-                    if is_admin_path:
+                    if admin:
                         max_age = settings.ADMIN_SESSION_COOKIE_AGE
                     else:
                         max_age = request.session.get_expiry_age()
