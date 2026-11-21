@@ -459,3 +459,24 @@ def test_a_wrong_method_on_either_route_is_405_not_500(workspace, people, home, 
     assert client.patch(url(workspace, home, milk), {}, format="json").status_code == 405
     assert client.post(url(workspace, home, milk, asset_id), {}, format="json").status_code == 405
     assert client.delete(url(workspace, home, milk, asset_id)).status_code == 405
+
+
+def test_confirm_reads_storage_through_the_internal_endpoint_and_a_dead_one_is_503(
+    workspace, people, home, milk, storage
+):
+    # Measured on dev: S3Storage(request=...) points at the public host, which the container cannot reach,
+    # and the botocore error escaped as a 500 on every confirm. The presigned POST and GET keep the request.
+    from botocore.exceptions import EndpointConnectionError
+
+    import plane.app.views.inventory as views
+
+    client = _client(people["bob"])
+    asset_id = _start(client, workspace, home, milk).json()["asset_id"]
+    assert views.S3Storage.call_args_list[-1].kwargs.get("request") is not None, "the presigned POST is public"
+    views.S3Storage.reset_mock()
+    storage.get_object_metadata.side_effect = EndpointConnectionError(endpoint_url="https://x/uploads/k")
+    response = client.patch(url(workspace, home, milk, asset_id), {}, format="json")
+    assert response.status_code == 503 and response.json()["error"] == "storage"
+    assert views.S3Storage.call_args_list == [((), {})], "the metadata read must not use the request's host"
+    storage.get_object_metadata.side_effect = None
+    assert client.patch(url(workspace, home, milk, asset_id), {}, format="json").status_code == 200

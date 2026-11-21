@@ -9,6 +9,7 @@ import uuid
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+from botocore.exceptions import BotoCoreError
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Sum, UUIDField, Value
@@ -803,7 +804,14 @@ class ProjectInventoryItemPhotoEndpoint(ProjectInventoryBaseView):
         if not asset.is_uploaded:
             # Read from storage outside the row lock: it is a network call. The presigned POST already bounds the
             # length and pins the type; this proves the object is there before the item points at it.
-            meta = S3Storage(request=request).get_object_metadata(asset.asset.name)
+            # S3Storage() with NO request: with one, its endpoint is the request's public host (storage.py, USE_MINIO),
+            # right for the URLs a browser follows and unreachable from inside the container — measured on dev
+            # 2026-11-21, "Could not connect to the endpoint URL: https://plane-dev…/uploads/…", a botocore error
+            # that get_object_metadata does not catch, so every confirm was a 500. Plane's metadata task does the same.
+            try:
+                meta = S3Storage().get_object_metadata(asset.asset.name)
+            except BotoCoreError:
+                return Response({"error": "storage"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
             if not meta or not meta.get("ContentLength"):
                 return Response({"error": "not_uploaded"}, status=status.HTTP_409_CONFLICT)
             if meta["ContentLength"] > settings.FILE_SIZE_LIMIT or meta.get("ContentType") != asset.attributes.get(
