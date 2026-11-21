@@ -47,6 +47,7 @@ def _client(user):
 def storage():
     with patch("plane.app.views.inventory.S3Storage") as mocked, patch("plane.app.views.asset.v2.S3Storage") as generic:
         s = mocked.return_value
+        s.signed_url_expiration = 3600
         s.generate_presigned_post.return_value = {"url": "https://storage.test/b", "fields": {"key": "k"}}
         s.get_object_metadata.return_value = {"ContentType": "image/jpeg", "ContentLength": 2048}
         s.generate_presigned_url.return_value = "https://storage.test/b/k?sig=1"
@@ -394,3 +395,67 @@ def test_no_generic_asset_view_serves_changes_or_copies_a_photo(workspace, peopl
 
     current = FileAsset.objects.get(inventory_item=milk, deleted_at__isnull=True, is_uploaded=True)
     assert current.attributes["name"] == "photo.jpg" and not current.is_deleted
+
+
+# ---------------------------------------------------------------- phase 8 audit
+
+
+def test_the_other_asset_views_refuse_a_photo_too(workspace, people, home, milk, storage, api_key_client):
+    # v1 by key, and the external API by id (the app v2 views are the test above).
+    asset_id = _photo(_client(people["alice"]), workspace, home, milk)
+    photo = FileAsset.objects.get(pk=asset_id)
+    FileAsset.objects.filter(pk=asset_id).update(created_by=people["alice"])
+    key = photo.asset.name.split("/", 1)[1]
+    client = _client(people["alice"])
+    by_key = client.get(f"/api/workspaces/file-assets/{workspace.pk}/{key}/").json()
+    assert by_key.get("status") is not True and "data" not in by_key
+    assert client.delete(f"/api/workspaces/file-assets/{workspace.pk}/{key}/").status_code in (403, 404)
+    assert client.get(f"/api/users/file-assets/{photo.asset.name}/").json().get("data") is None
+    assert client.delete(f"/api/users/file-assets/{photo.asset.name}/").status_code == 404
+    with patch("plane.api.views.asset.S3Storage"):
+        external = api_key_client.get(f"/api/v1/workspaces/{workspace.slug}/assets/{asset_id}/")
+    assert external.status_code in (403, 404), external.status_code
+    current = FileAsset.objects.get(pk=asset_id)
+    assert current.deleted_at is None and not current.is_deleted
+
+
+def test_an_old_cover_or_logo_pointer_cannot_delete_a_photo(workspace, people, home, milk, storage):
+    # ProjectSerializer/WorkSpaceSerializer accept any asset id as cover/logo; replacing it then deletes the
+    # "previous" asset by id (audit F3).
+    from plane.api.views.asset import UserAssetEndpoint
+    from plane.app.views.asset.v2 import WorkspaceFileAssetEndpoint
+
+    asset_id = _photo(_client(people["alice"]), workspace, home, milk)
+    WorkspaceFileAssetEndpoint().asset_delete(asset_id)
+    UserAssetEndpoint().asset_delete(asset_id)
+    assert FileAsset.objects.get(pk=asset_id).deleted_at is None
+
+
+def test_duplicating_a_page_never_copies_a_photo(workspace, people, home, milk, storage):
+    from plane.bgtasks import copy_s3_object
+    from plane.db.models import Page
+
+    asset_id = _photo(_client(people["alice"]), workspace, home, milk)
+    page = Page.objects.create(name="Notes", workspace=workspace, owned_by=people["alice"])
+    with patch.object(copy_s3_object, "S3Storage"):
+        copied = copy_s3_object.copy_assets(page, page.pk, home.pk, [asset_id], people["alice"].pk)
+    assert copied == []
+    assert FileAsset.objects.filter(entity_type=PHOTO).count() == 1
+
+
+def test_pending_uploads_older_than_their_signature_do_not_lock_the_item(workspace, people, home, milk, storage):
+    client = _client(people["bob"])
+    for _ in range(5):
+        assert _start(client, workspace, home, milk).status_code == 200
+    assert _start(client, workspace, home, milk).status_code == 409
+    FileAsset.objects.filter(inventory_item=milk).update(created_at=timezone.now() - timezone.timedelta(hours=2))
+    assert _start(client, workspace, home, milk).status_code == 200
+
+
+def test_a_wrong_method_on_either_route_is_405_not_500(workspace, people, home, milk, storage):
+    client = _client(people["bob"])
+    asset_id = _start(client, workspace, home, milk).json()["asset_id"]
+    assert client.get(url(workspace, home, milk)).status_code == 405
+    assert client.patch(url(workspace, home, milk), {}, format="json").status_code == 405
+    assert client.post(url(workspace, home, milk, asset_id), {}, format="json").status_code == 405
+    assert client.delete(url(workspace, home, milk, asset_id)).status_code == 405

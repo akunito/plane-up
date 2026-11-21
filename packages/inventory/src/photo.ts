@@ -33,23 +33,33 @@ export interface ImageEnv<D extends Decoded = Decoded> {
   encode(image: D, width: number, height: number, quality: number): Promise<Blob>;
 }
 
+function paint(
+  g: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null,
+  image: CanvasImageSource,
+  width: number,
+  height: number
+) {
+  if (!g) throw new Error("no 2d context");
+  // JPEG has no transparency: without a fill a transparent PNG comes out black (phase 8 audit).
+  g.fillStyle = "#fff";
+  g.fillRect(0, 0, width, height);
+  g.drawImage(image, 0, 0, width, height);
+}
+
 export const browserImageEnv: ImageEnv<ImageBitmap & Decoded> = {
   // from-image: phones store portrait shots as rotated landscape plus an EXIF flag, which the re-encode drops.
-  decode: (file) => createImageBitmap(file, { imageOrientation: "from-image" }),
+  // A browser that rejects the option still decodes without it (upright as stored) rather than refusing the photo.
+  decode: (file) => createImageBitmap(file, { imageOrientation: "from-image" }).catch(() => createImageBitmap(file)),
   async encode(image, width, height, quality) {
     if (typeof OffscreenCanvas !== "undefined") {
       const canvas = new OffscreenCanvas(width, height);
-      const g = canvas.getContext("2d");
-      if (!g) throw new Error("no 2d context");
-      g.drawImage(image, 0, 0, width, height);
+      paint(canvas.getContext("2d"), image, width, height);
       return canvas.convertToBlob({ type: PHOTO_TYPE, quality });
     }
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
-    const g = canvas.getContext("2d");
-    if (!g) throw new Error("no 2d context");
-    g.drawImage(image, 0, 0, width, height);
+    paint(canvas.getContext("2d"), image, width, height);
     return new Promise((resolve, reject) => {
       canvas.toBlob(
         (b) => {
@@ -104,7 +114,10 @@ export async function uploadPhoto<T>(
   opts: ClientOptions,
   projectId: string,
   itemId: string,
-  photo: Blob
+  photo: Blob,
+  /** Called just before the confirming request: the payload it answers is as fresh as that moment, not as the
+   * start of an upload that can take two minutes (merges by fetch time drop it otherwise; phase 8 audit F1). */
+  beforeConfirm?: () => void
 ): Promise<Fetched<T>> {
   const path = photoPath(opts, projectId, itemId);
   const started = await requestJson<Started>(opts, "POST", path, { type: photo.type, size: photo.size });
@@ -127,6 +140,7 @@ export async function uploadPhoto<T>(
     return { kind: "failed", failure: "offline", status: 0 };
   }
   if (!stored.ok) return { kind: "failed", failure: "server", status: stored.status };
+  beforeConfirm?.();
   return requestJson<T>(opts, "PATCH", `${path}${encodeURIComponent(asset_id)}/`, {});
 }
 

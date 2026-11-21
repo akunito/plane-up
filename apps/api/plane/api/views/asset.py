@@ -51,7 +51,8 @@ class UserAssetEndpoint(BaseAPIView):
     """This endpoint is used to upload user profile images."""
 
     def asset_delete(self, asset_id):
-        asset = FileAsset.objects.filter(id=asset_id).first()
+        # Never an inventory photo, whatever id a user pointer was set to (phase 8 audit F3).
+        asset = FileAsset.objects.filter(id=asset_id, inventory_item__isnull=True).first()
         if asset is None:
             return
         asset.is_deleted = True
@@ -249,7 +250,8 @@ class UserServerAssetEndpoint(BaseAPIView):
     """This endpoint is used to upload user profile images."""
 
     def asset_delete(self, asset_id):
-        asset = FileAsset.objects.filter(id=asset_id).first()
+        # Never an inventory photo, whatever id a user pointer was set to (phase 8 audit F3).
+        asset = FileAsset.objects.filter(id=asset_id, inventory_item__isnull=True).first()
         if asset is None:
             return
         asset.is_deleted = True

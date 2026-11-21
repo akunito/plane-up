@@ -89,7 +89,10 @@ def copy_assets(entity, entity_identifier, project_id, asset_ids, user_id):
     duplicated_assets = []
     workspace = entity.workspace
     storage = S3Storage()
-    original_assets = FileAsset.objects.filter(workspace=workspace, project_id=project_id, id__in=asset_ids)
+    # Never an inventory photo named in a page: its copy would be an object no item owns (phase 8 audit F4).
+    original_assets = FileAsset.objects.filter(
+        workspace=workspace, project_id=project_id, id__in=asset_ids, inventory_item__isnull=True
+    ).exclude(entity_type=FileAsset.INVENTORY_ITEM_PHOTO)
 
     for original_asset in original_assets:
         destination_key = f"{workspace.id}/{uuid.uuid4().hex}-{original_asset.attributes.get('name')}"

@@ -845,7 +845,7 @@ export class Controller {
 
   /** The item's photo (APLANE-66): shrunk on the device, then uploaded; online only, like every data edit. */
   async setPhoto(itemId: string, file: Blob): Promise<{ ok: true } | { ok: false; error: string }> {
-    return this.photoEdit(itemId, async (projectId) => {
+    return this.photoEdit(itemId, async (projectId, confirming) => {
       let shrunk: Blob | null;
       try {
         shrunk = await shrinkPhoto(file, this.imageEnv);
@@ -853,7 +853,7 @@ export class Controller {
         return { kind: "refused", status: 0, error: "photo_unreadable" };
       }
       if (!shrunk) return { kind: "refused", status: 0, error: "too_large" };
-      return uploadPhoto<ItemData>(this.client(), projectId, itemId, shrunk);
+      return uploadPhoto<ItemData>(this.client(), projectId, itemId, shrunk, confirming);
     });
   }
 
@@ -863,7 +863,7 @@ export class Controller {
 
   private async photoEdit(
     itemId: string,
-    run: (projectId: string) => Promise<Fetched<ItemData>>
+    run: (projectId: string, confirming: () => void) => Promise<Fetched<ItemData>>
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     if (this.openedOffline || !this.ownsStore()) {
       void this.reconnect();
@@ -872,8 +872,10 @@ export class Controller {
     const item = this.state.known[itemId]?.data;
     if (!item) return { ok: false, error: "gone" };
     const target = this.store;
-    const startedAt = this.now();
-    const out = await run(item.project.id);
+    let startedAt = this.now();
+    const out = await run(item.project.id, () => {
+      startedAt = this.now();
+    });
     if (out.kind === "refused") return { ok: false, error: out.error };
     if (out.kind !== "ok") {
       this.set({ connection: out.failure });

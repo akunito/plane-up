@@ -43,6 +43,7 @@ export function ItemSheet(props: {
   const [history, setHistory] = useState<HistoryEntry[] | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoBroken, setPhotoBroken] = useState<string | null>(null);
   const itemId = item?.id;
 
   useEffect(() => {
@@ -78,6 +79,7 @@ export function ItemSheet(props: {
     setPhotoBusy(false);
     if (out.kind !== "ok") {
       if (out.error === "too_large") return setMessage(t("photo_too_large"));
+      if (out.error === "pending") return setMessage(t("photo_pending"));
       return setMessage(failureMessage(out, t));
     }
     onSaved(out.body as Item);
@@ -161,12 +163,17 @@ export function ItemSheet(props: {
         </div>
         <section className="flex flex-col gap-2">
           <h4 className="text-13 font-medium text-secondary">{t("photo")}</h4>
-          {photo && (
-            <img
-              src={photoUrl(opts, projectId, item.id, photo)}
-              alt={t("photo_of", { item: item.name })}
-              className="max-h-64 max-w-full self-start rounded-md border border-subtle object-contain"
-            />
+          {photo && photoBroken === photo ? (
+            <p className="text-13 text-tertiary">{t("photo_unavailable")}</p>
+          ) : (
+            photo && (
+              <img
+                src={photoUrl(opts, projectId, item.id, photo)}
+                alt={t("photo_of", { item: item.name })}
+                className="max-h-64 max-w-full self-start rounded-md border border-subtle object-contain"
+                onError={() => setPhotoBroken(photo)}
+              />
+            )
           )}
           <div className="flex flex-wrap items-center gap-2">
             <label

@@ -50,6 +50,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
   const [ordering, setOrdering] = useState(false);
   const [missing, setMissing] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoBroken, setPhotoBroken] = useState<string | null>(null);
   const projectId = k?.data.project.id;
   const listId = k?.data.list.id;
   const rev = state?.rev;
@@ -107,6 +108,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
   function photoError(error: string): string {
     if (error === "too_large") return t("photo_too_large");
     if (error === "photo_unreadable") return t("photo_unreadable");
+    if (error === "pending") return t("photo_pending");
     return error;
   }
 
@@ -296,11 +298,15 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
         {text("barcode", "barcode", "text", { inputMode: "numeric", maxLength: 64 })}
         <div className="photo-field" data-photo={data.photo ? "yes" : "no"}>
           <span className="muted">{t("photo")}</span>
-          {data.photo ? (
+          {data.photo && photoBroken === data.photo ? (
+            <p className="muted small">{t("photo_unavailable")}</p>
+          ) : data.photo ? (
             <img
               className="item-photo"
               src={photoUrl(c.client(), data.project.id, id, data.photo)}
               alt={t("photo_of", { item })}
+              // Offline (photos are never cached) or the storage link failed: say so instead of a broken icon.
+              onError={() => setPhotoBroken(data.photo ?? null)}
             />
           ) : null}
           <div className="photo-actions">

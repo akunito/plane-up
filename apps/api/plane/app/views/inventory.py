@@ -709,8 +709,9 @@ class ProjectInventoryItemDetailEndpoint(ProjectInventoryBaseView):
 # The types the phone's re-encode produces, plus PNG. All three are inline-safe (settings.INLINE_SAFE_MIME_TYPES),
 # so the stored type is pinned as the served Content-Type.
 PHOTO_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
-# Uploads started and never confirmed, per item: each one is a row and a presigned POST. The unconfirmed rows are
-# removed by delete_unuploaded_file_asset after UNUPLOADED_ASSET_DELETE_DAYS.
+# Uploads started and never confirmed, per item, counted only while their presigned POST is still valid
+# (SIGNED_URL_EXPIRATION): older ones can take no more bytes, and counting them locked an item out for the
+# 7 days delete_unuploaded_file_asset waits (phase 8 audit F6).
 PHOTO_PENDING_MAX = 5
 
 
@@ -727,11 +728,14 @@ def _item_response(pk):
 
 
 class ProjectInventoryItemPhotoEndpoint(ProjectInventoryBaseView):
-    """The item's photo: POST starts an upload (presigned POST straight to storage), PATCH <asset> confirms it and
-    makes it THE photo (earlier ones are soft-deleted, so the purge removes their objects), DELETE removes it,
-    GET <asset> redirects to a short-lived URL. Online only; the device queue never carries photos."""
+    """The item's photo: POST starts an upload (presigned POST straight to storage), PATCH <asset> confirms it
+    and makes it THE photo, DELETE removes it, GET <asset> redirects to a short-lived URL. Replaced and removed
+    photos are soft-deleted: hidden at once; their rows and objects go only when the nightly purge is armed
+    (HARD_DELETE_ENABLED, off in prod as of 2026-11-21). Online only; the device queue never carries photos."""
 
-    def post(self, request, slug, project_id, pk):
+    def post(self, request, slug, project_id, pk, asset_id=None):
+        if asset_id is not None:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
         project = self._project(request, slug, project_id)
         if project is None:
             return _forbidden()
@@ -753,8 +757,11 @@ class ProjectInventoryItemPhotoEndpoint(ProjectInventoryBaseView):
         item = _photo_item(project, pk)
         if item is None:
             return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        storage = S3Storage(request=request)
         pending = photo_assets(item, project.workspace_id, project.pk).filter(
-            deleted_at__isnull=True, is_uploaded=False
+            deleted_at__isnull=True,
+            is_uploaded=False,
+            created_at__gte=timezone.now() - timezone.timedelta(seconds=storage.signed_url_expiration),
         )
         if pending.count() >= PHOTO_PENDING_MAX:
             return Response({"error": "pending"}, status=status.HTTP_409_CONFLICT)
@@ -771,15 +778,15 @@ class ProjectInventoryItemPhotoEndpoint(ProjectInventoryBaseView):
             entity_type=FileAsset.INVENTORY_ITEM_PHOTO,
             is_uploaded=False,
         )
-        upload = S3Storage(request=request).generate_presigned_post(
-            object_name=key, file_type=content_type, file_size=size
-        )
+        upload = storage.generate_presigned_post(object_name=key, file_type=content_type, file_size=size)
         if not upload:
             asset.delete(soft=False)
             return Response({"error": "storage"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         return Response({"asset_id": str(asset.pk), "upload_data": upload})
 
-    def patch(self, request, slug, project_id, pk, asset_id):
+    def patch(self, request, slug, project_id, pk, asset_id=None):
+        if asset_id is None:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
         project = self._project(request, slug, project_id)
         if project is None:
             return _forbidden()
@@ -822,7 +829,9 @@ class ProjectInventoryItemPhotoEndpoint(ProjectInventoryBaseView):
             )
         return _item_response(item.pk)
 
-    def delete(self, request, slug, project_id, pk):
+    def delete(self, request, slug, project_id, pk, asset_id=None):
+        if asset_id is not None:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
         project = self._project(request, slug, project_id)
         if project is None:
             return _forbidden()
@@ -835,7 +844,9 @@ class ProjectInventoryItemPhotoEndpoint(ProjectInventoryBaseView):
             )
         return _item_response(locked.pk)
 
-    def get(self, request, slug, project_id, pk, asset_id):
+    def get(self, request, slug, project_id, pk, asset_id=None):
+        if asset_id is None:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
         project = self._project(request, slug, project_id)
         if project is None:
             return _forbidden()

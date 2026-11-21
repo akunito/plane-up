@@ -187,8 +187,9 @@ test.describe("shopping app @shopping", () => {
     await open(page, `#/item/${items.Salt}`);
     const input = page.getByLabel("Add photo");
     await expect(input).toHaveCount(1);
-    // A real JPEG larger than the 1600 px the app shrinks to, made by the browser itself: setInputFiles
-    // would need a fixture file, and the point is the canvas path the phones take.
+    // A real JPEG larger than the 1600 px the app shrinks to, made by the browser itself, with an EXIF block
+    // spliced in the way a phone writes one: orientation 6 (stored landscape, shown portrait). The stored
+    // photo must come out upright (1200 × 1600) and without the EXIF block (phase 8 audit: both were assumed).
     await input.evaluate(async (el: HTMLInputElement) => {
       const canvas = document.createElement("canvas");
       canvas.width = 2400;
@@ -200,25 +201,45 @@ test.describe("shopping app @shopping", () => {
       g.fillStyle = grad;
       g.fillRect(0, 0, 2400, 1800);
       const blob: Blob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b!), "image/jpeg", 0.95));
+      const jpeg = new Uint8Array(await blob.arrayBuffer());
+      // APP1 "Exif\0\0" + little-endian TIFF, IFD0 with one entry: 0x0112 Orientation, SHORT, 1, value 6.
+      const tiff = [0x49, 0x49, 0x2a, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0];
+      const payload = [0x45, 0x78, 0x69, 0x66, 0, 0, ...tiff];
+      const app1 = [0xff, 0xe1, (payload.length + 2) >> 8, (payload.length + 2) & 0xff, ...payload];
+      const withExif = new Uint8Array(jpeg.length + app1.length);
+      withExif.set(jpeg.subarray(0, 2));
+      withExif.set(app1, 2);
+      withExif.set(jpeg.subarray(2), 2 + app1.length);
       const files = new DataTransfer();
-      files.items.add(new File([blob], "IMG_20261121_090000.jpg", { type: "image/jpeg" }));
+      files.items.add(new File([withExif], "IMG_20261121_090000.jpg", { type: "image/jpeg" }));
       el.files = files.files;
       el.dispatchEvent(new Event("change", { bubbles: true }));
     });
     const photo = page.getByRole("img", { name: "Photo of Salt" });
     await expect(photo).toBeVisible({ timeout: 20_000 });
-    // Loaded through the redirect to storage, at the shrunk size.
+    // Loaded through the redirect to storage, shrunk and upright.
     await expect
-      .poll(() => photo.evaluate((img: HTMLImageElement) => (img.complete ? img.naturalWidth : 0)), { timeout: 15_000 })
-      .toBe(1600);
+      .poll(
+        () =>
+          photo.evaluate((img: HTMLImageElement) => (img.complete ? `${img.naturalWidth}x${img.naturalHeight}` : "")),
+        { timeout: 15_000 }
+      )
+      .toBe("1200x1600");
     await expect(page.getByText("Saved.")).toBeVisible();
     await server(page, "Salt", "photo").toEqual(expect.stringMatching(/^[0-9a-f-]{36}$/));
     // A workspace guest cannot read it, not even with its address.
     const src = await photo.getAttribute("src");
     expect(src).toMatch(/\/photo\/[0-9a-f-]{36}\/$/);
+    // The stored bytes, through the same redirect: no EXIF block left.
+    const stored = await (await page.request.get(src!)).body();
+    expect(stored.subarray(0, 2).toString("hex")).toBe("ffd8");
+    expect(stored.includes(Buffer.from("Exif\0\0", "latin1"))).toBe(false);
     const gus = await contextFor(browser, info, "qa-inv-gus");
-    expect((await gus.page.request.get(src!, { maxRedirects: 0 })).status()).toBe(403);
-    await gus.context.close();
+    try {
+      expect((await gus.page.request.get(src!, { maxRedirects: 0 })).status()).toBe(403);
+    } finally {
+      await gus.context.close();
+    }
     await page.getByRole("button", { name: "Remove photo" }).click();
     await expect(photo).toHaveCount(0);
     await server(page, "Salt", "photo").toBeNull();

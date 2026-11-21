@@ -131,6 +131,8 @@ export const pl: Dictionary = {
   photo_uploading: "Wysyłanie zdjęcia…",
   photo_too_large: "zdjęcie jest za duże",
   photo_unreadable: "nie można odczytać tego obrazu",
+  photo_unavailable: "Nie można teraz pokazać zdjęcia (brak połączenia?).",
+  photo_pending: "zbyt wiele niedokończonych wysyłek; spróbuj za godzinę",
   history: "Historia",
   history_empty: "Jeszcze nic.",
   open_link: "Otwórz link",

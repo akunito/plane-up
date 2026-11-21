@@ -74,8 +74,13 @@ describe("uploadPhoto", () => {
       new Response(null, { status: 204 }),
       json(200, { id: "i1", photo: "a1" }),
     ]);
-    const out = await uploadPhoto<{ photo: string }>(opts, "p1", "i1", PHOTO);
+    let confirmingAfter = -1;
+    const out = await uploadPhoto<{ photo: string }>(opts, "p1", "i1", PHOTO, () => {
+      confirmingAfter = seen.length;
+    });
     expect(out).toMatchObject({ kind: "ok", body: { photo: "a1" } });
+    // After the bytes reached storage and before the confirm left: the merge time of its answer (audit F1).
+    expect(confirmingAfter).toBe(2);
     expect(seen.map((s) => [s.init.method, s.url])).toEqual([
       ["POST", BASE],
       ["POST", "https://storage.test/b"],

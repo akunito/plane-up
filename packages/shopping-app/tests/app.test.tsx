@@ -347,6 +347,19 @@ describe("item sheet", () => {
     expect(screen.getByLabelText("Add photo")).toBeTruthy();
   });
 
+  it("a refresh that runs during the upload does not hide the photo once it is confirmed (audit F1)", async () => {
+    encodedSize = 300_000;
+    await boot(catalog(), `#/item/${SALT}`);
+    // A list refresh started and answered while the bytes are on their way: it says "no photo" and was
+    // fetched after the upload began. The confirmation's answer is newer still and must win.
+    api.onStorage = () => controller.loadList(GROCERIES);
+    const input = await screen.findByLabelText("Add photo");
+    fireEvent.change(input, { target: { files: [new File([new Uint8Array(10)], "x.jpg", { type: "image/jpeg" })] } });
+    expect(await screen.findByAltText("Photo of Salt")).toBeTruthy();
+    expect(controller.get().known[SALT]!.data.photo).toMatch(/^9/);
+    api.onStorage = null;
+  });
+
   it("a photo that cannot be shrunk under the limit is refused before anything is sent", async () => {
     encodedSize = 6_000_000;
     await boot(catalog(), `#/item/${SALT}`);

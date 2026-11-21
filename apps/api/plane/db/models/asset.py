@@ -60,8 +60,8 @@ class FileAsset(BaseModel):
     comment = models.ForeignKey("db.IssueComment", on_delete=models.CASCADE, null=True, related_name="assets")
     page = models.ForeignKey("db.Page", on_delete=models.CASCADE, null=True, related_name="assets")
     # An inventory item's photo (APLANE-66). CASCADE so the item's soft delete reaches the photo and the
-    # purge takes the row and its stored object (deletion_task._doomed_blobs). Nullable: a rollback to an
-    # image without the column must still insert assets (brief, M7).
+    # purge, when armed (HARD_DELETE_ENABLED), takes the row and its stored object (_doomed_blobs).
+    # Nullable: a rollback to an image without the column must still insert assets (brief, M7).
     inventory_item = models.ForeignKey("db.InventoryItem", on_delete=models.CASCADE, null=True, related_name="assets")
     entity_type = models.CharField(max_length=255, null=True, blank=True)
     entity_identifier = models.CharField(max_length=255, null=True, blank=True)
