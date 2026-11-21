@@ -118,6 +118,9 @@ def item_payload(item, on_order=0, has_open=False):
         "expires_on": item.expires_on.isoformat() if item.expires_on else None,
         "barcode": item.barcode,
         "sort_order": item.sort_order,
+        # The re-run key of an import (brief, Moving an item): the importer finds its own rows by these.
+        "external_source": item.external_source,
+        "external_id": item.external_id,
         "last_bought_at": item.last_bought_at.isoformat() if item.last_bought_at else None,
         "last_bought_by": str(item.last_bought_by_id) if item.last_bought_by_id else None,
         "on_order": on_order,

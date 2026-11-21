@@ -519,3 +519,15 @@ def test_a_batch_naming_another_owner_is_refused_whole(workspace, people, home, 
         ][0]["result"]
         == "applied"
     )
+
+
+def test_the_item_payload_carries_its_import_key(workspace, people, home, groceries):
+    """APLANE-65: an importer finds its own rows by (external_source, external_id) on a re-run."""
+    client = _client(people["alice"])
+    url = proj(workspace.slug, home, f"lists/{groceries.pk}/items/")
+    body = {"name": "Oats", "external_source": "catalog", "external_id": "groceries-oats"}
+    assert client.post(url, body, format="json").status_code == 201
+    assert client.post(url, {"name": "Rice"}, format="json").status_code == 201
+    rows = {r["name"]: r for r in client.get(url).json()["items"]}
+    assert (rows["Oats"]["external_source"], rows["Oats"]["external_id"]) == ("catalog", "groceries-oats")
+    assert (rows["Rice"]["external_source"], rows["Rice"]["external_id"]) == (None, None)
