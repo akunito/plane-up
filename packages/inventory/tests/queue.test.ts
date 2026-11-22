@@ -19,6 +19,7 @@ import {
   onRestart,
   refreshed,
   retryNow,
+  retryOutdated,
   tap,
   undo,
   view,
@@ -26,6 +27,7 @@ import {
 } from "../src/queue";
 import type { QueueState } from "../src/queue";
 import { OP_VERSION } from "../src/ops";
+import { load, serialize } from "../src/storage";
 import type { ItemState } from "../src/types";
 
 const item = (over: Partial<ItemState> = {}): ItemState => ({
@@ -192,11 +194,17 @@ describe("a server that no longer accepts this build's format (S25)", () => {
     expect(ids(s)).toEqual([first!.client_op_id]);
     expect(s.notices).toHaveLength(0);
     expect(s.failure).toMatchObject({ kind: "outdated", opVersion: OP_VERSION });
-    // Not by backoff or retry: a newer build sends again — and each start tries once more, so a server fixed
-    // after refusing this build's format does not leave the queue blocked for good (phase 9 review, M3).
+    // Not by backoff, retry or a store open (the worker opens the store on every sync: phase 9 re-review); the
+    // page tries once more per load (retryOutdated), so a server fixed after refusing this format does not leave
+    // the queue blocked for good.
     expect(nextBatch(s, 3_000_000, "ana")).toBeNull();
     expect(nextBatch(retryNow(s), 3_000_000, "ana")).toBeNull();
-    expect(nextBatch(onRestart(s), 3_000_000, "ana")!.batch.map((o) => o.client_op_id)).toEqual([first!.client_op_id]);
+    expect(nextBatch(onRestart(s), 3_000_000, "ana")).toBeNull();
+    const reloaded = load(serialize(s));
+    expect(reloaded.ok && nextBatch(reloaded.state, 3_000_000, "ana")).toBeNull();
+    expect(nextBatch(retryOutdated(s), 3_000_000, "ana")!.batch.map((o) => o.client_op_id)).toEqual([
+      first!.client_op_id,
+    ]);
     const updated = { ...s, failure: { ...s.failure!, opVersion: OP_VERSION - 1 } };
     expect(nextBatch(updated, 3_000_000, "ana")!.batch.map((o) => o.client_op_id)).toEqual([first!.client_op_id]);
   });

@@ -28,6 +28,7 @@ import {
   approve,
   browserImageEnv,
   removePhoto,
+  retryOutdated,
   sameFailure,
   shrinkPhoto,
   uploadPhoto,
@@ -319,6 +320,7 @@ export class Controller {
           const open = this.deps.openStore ?? defaultStore;
           store = await open(lists.body.me.id, this.state.slug);
           this.stores.set(key, store);
+          await store.update(retryOutdated);
         }
         this.store = store;
         this.storeKey = key;
@@ -370,6 +372,7 @@ export class Controller {
         const open = this.deps.openStore ?? defaultStore;
         store = await open(userId, slug);
         this.stores.set(key, store);
+        await store.update(retryOutdated);
       }
       this.store = store;
       this.storeKey = key;
@@ -660,13 +663,16 @@ export class Controller {
         id = next.entries[next.entries.length - 1]!.op.client_op_id;
         return next;
       });
-    } catch {
+    } catch (error) {
       // The tap was not stored (quota, a browser error): say so instead of losing it silently (phase 9 review).
+      // Only IndexedDB's own errors; anything else (no store yet, a corrupt queue) keeps its own handling.
+      if (!(error instanceof DOMException)) throw error;
       this.set({ storageProblem: "write_failed" });
       return null;
     } finally {
       if (options.tick) this.ticking.delete(itemId);
     }
+    if (this.state.storageProblem === "write_failed") this.set({ storageProblem: null });
     if (options.tick) {
       prefs.set("lastTickAt", String(this.now()));
       this.set({ lastTickAt: this.now() });

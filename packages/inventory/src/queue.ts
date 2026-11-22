@@ -437,11 +437,17 @@ export function retryNow(state: QueueState): QueueState {
 
 /** After loading from storage: a replay that was running when the app died is not running any more. */
 export function onRestart(state: QueueState): QueueState {
-  // "outdated" is tried once more per start (phase 9 review): a server fixed after refusing this build's format
-  // (a deploy-order mistake, a rollback) would otherwise leave the queue blocked behind a button that reloads
-  // the same build. Still refused, it is outdated again after one request.
-  const failure = state.failure?.kind === "outdated" ? null : state.failure;
-  return retryNow({ ...state, sending: false, failure });
+  return retryNow({ ...state, sending: false });
+}
+
+/**
+ * The page, once per load and workspace, tries an "outdated" queue once more: a server fixed after refusing this
+ * build's format (a deploy-order mistake, a rollback) would otherwise leave it blocked behind a button that reloads
+ * the same build. Not in onRestart: every store open runs that, and the worker opens the store on every sync
+ * (phase 9 re-review). Still refused, it is outdated again after one request.
+ */
+export function retryOutdated(state: QueueState): QueueState {
+  return state.failure?.kind === "outdated" ? { ...state, failure: null } : state;
 }
 
 /** A fresh snapshot from the server (polling, reopening, a list's items): newer states replace older. */

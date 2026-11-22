@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createQueue, makeLock, newUuid, tap } from "@plane/inventory";
+import { createQueue, makeLock, newUuid, OP_VERSION, tap } from "@plane/inventory";
 import { App } from "../src/app";
 import { Controller, DONE_RESET_MS } from "../src/controller";
 import { memoryStore } from "../src/store";
@@ -527,7 +527,7 @@ describe("item sheet", () => {
     expect(api.ops()).toHaveLength(0);
     expect(screen.getByLabelText("Change photo")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Salt: remove the photo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salt: Remove photo" }));
     await waitFor(() => expect(screen.queryByAltText("Photo of Salt")).toBeNull());
     expect(screen.getByLabelText("Add photo")).toBeTruthy();
   });
@@ -625,6 +625,25 @@ describe("phase 9 device review", () => {
     render(<App controller={controller} locale="en" {...(now ? { now } : {})} />);
   }
 
+  it("an 'outdated' queue is tried once more when the page loads (a fixed server unblocks it)", async () => {
+    const queue = createQueue(ME.id, newUuid());
+    const queued = tap(
+      { ...queue, known: { [MILK]: { ...state(MILK, "on_demand"), rev: 0 } } },
+      "set_needed",
+      MILK,
+      { needed: false },
+      { now: Date.now() - 60_000, newId: newUuid }
+    );
+    const outdated = {
+      ...queued,
+      failure: { kind: "outdated" as const, attempts: 1, nextTryAt: 0, opVersion: OP_VERSION },
+    };
+    await bootWith(async () => memoryStore(outdated));
+    await waitFor(() => expect(api.ops().filter((o) => o.target === MILK)).toHaveLength(1));
+    await waitFor(() => expect(controller.get().queue.entries).toHaveLength(0));
+    expect(controller.get().queue.failure).toBeNull();
+  });
+
   it("a store that cannot keep changes is said on screen", async () => {
     await bootWith(async (userId) => ({ ...memoryStore(createQueue(userId, newUuid())), volatile: true }));
     expect(screen.getByText(/This device cannot keep changes/)).toBeTruthy();
@@ -646,6 +665,10 @@ describe("phase 9 device review", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Milk: bought" }));
     expect(await screen.findByText(/A change could not be saved on this device/)).toBeTruthy();
     expect(api.ops()).toHaveLength(0);
+    // The next tap that is stored takes the warning away (phase 9 re-review: it stayed until a reload).
+    broken = false;
+    fireEvent.click(screen.getByRole("checkbox", { name: "Milk: bought" }));
+    await waitFor(() => expect(screen.queryByText(/A change could not be saved on this device/)).toBeNull());
   });
 
   it("a double tap on a row buys once", async () => {
@@ -700,7 +723,7 @@ describe("phase 9 device review", () => {
     expect(await held.findByText(/^Salt:/)).toBeTruthy();
     const reads = () => api.calls.filter((c) => c.path.endsWith(`/lists/${GROCERIES}/items/`)).length;
     const before = reads();
-    fireEvent.click(held.getByRole("button", { name: "Salt: discard this change" }));
+    fireEvent.click(held.getByRole("button", { name: "Salt: Discard" }));
     await waitFor(() => expect(reads()).toBeGreaterThan(before));
     expect(controller.get().queue.needsRefresh).toEqual([]);
   });
@@ -793,14 +816,14 @@ describe("phases and failures", () => {
     fireEvent.click(screen.getByRole("button", { name: "Detergent: Running low" }));
     await waitFor(() => expect(controller.get().queue.notices).toHaveLength(1));
     await go("#/pending");
-    expect(screen.getByRole("button", { name: "Detergent: apply anyway" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Detergent: apply anyway" }));
+    expect(screen.getByRole("button", { name: "Detergent: Apply anyway" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Detergent: Apply anyway" }));
     await settle();
     expect(api.server.items.get(DETERGENT)!.level).toBe("low");
     // The notice leaves with it, on a store that parses the queue afresh as IndexedDB does (phase 9 review:
     // compared by identity, it stayed and every tap queued another operation).
     expect(controller.get().queue.notices).toHaveLength(0);
-    expect(screen.queryByRole("button", { name: "Detergent: apply anyway" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Detergent: Apply anyway" })).toBeNull();
     expect(api.ops().filter((o) => o.target === DETERGENT && o.op === "set_level")).toHaveLength(2);
   });
 
@@ -915,11 +938,11 @@ describe("phases and failures", () => {
     expect(screen.queryByRole("region", { name: "Sending is failing" })).toBeNull();
     expect(screen.getAllByText("An earlier attempt may already have reached the server.")).toHaveLength(2);
     const held = within(screen.getByRole("region", { name: "Not sent for more than two hours" }));
-    const rows = held.getAllByRole("button", { name: /: send this change$/ });
+    const rows = held.getAllByRole("button", { name: /: Send$/ });
     expect(rows).toHaveLength(2);
     fireEvent.click(rows[0]!);
     await waitFor(() => expect(api.ops()).toHaveLength(failed + 1));
-    fireEvent.click(held.getByRole("button", { name: /: discard this change$/ }));
+    fireEvent.click(held.getByRole("button", { name: /: Discard$/ }));
     await waitFor(() => expect(controller.get().queue.entries).toHaveLength(0));
     expect(api.ops()).toHaveLength(failed + 1);
     expect(api.server.items.get(MILK)!.needed).toBe(false);
@@ -965,7 +988,7 @@ describe("phases and failures", () => {
     await act(async () => controller.retry());
     expect(controller.get().queue.entries).toHaveLength(2);
     await go("#/pending");
-    fireEvent.click(screen.getByRole("button", { name: "Milk: discard the first change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Milk: Discard the first change" }));
     await act(async () => controller.retry());
     await waitFor(() => expect(controller.get().queue.entries).toHaveLength(0));
     expect(api.server.items.get(WIPES)!.quantity).toBe(3);

@@ -362,7 +362,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
                 <input
                   type="file"
                   accept="image/*"
-                  aria-label={t("photo_take_label", { item })}
+                  aria-label={t("item_action", { item, action: t("photo_take") })}
                   capture="environment"
                   hidden
                   disabled={photoBusy}
@@ -375,8 +375,9 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
               <input
                 type="file"
                 accept="image/*"
-                aria-label={t(camera ? "photo_gallery_label" : data.photo ? "photo_replace_label" : "photo_add_label", {
+                aria-label={t("item_action", {
                   item,
+                  action: t(camera ? "photo_gallery" : data.photo ? "photo_replace" : "photo_add"),
                 })}
                 hidden
                 disabled={photoBusy}
@@ -387,7 +388,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
               <button
                 type="button"
                 className="text-button"
-                aria-label={t("photo_remove_label", { item })}
+                aria-label={t("item_action", { item, action: t("photo_remove") })}
                 disabled={photoBusy}
                 onClick={async () => {
                   setPhotoBusy(true);

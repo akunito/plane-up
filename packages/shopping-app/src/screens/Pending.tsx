@@ -96,7 +96,7 @@ export function Pending({ s }: { s: AppState }) {
                 className="secondary"
                 aria-label={
                   s.queue.entries[0]
-                    ? t("discard_first_label", { item: name(s.queue.entries[0].op.target) })
+                    ? t("item_action", { item: name(s.queue.entries[0].op.target), action: t("discard_first") })
                     : undefined
                 }
                 onClick={() => void c.discardHead()}
@@ -125,7 +125,7 @@ export function Pending({ s }: { s: AppState }) {
                   <button
                     type="button"
                     className="secondary"
-                    aria-label={t("send_label", { item: name(e.op.target) })}
+                    aria-label={t("item_action", { item: name(e.op.target), action: t("send") })}
                     onClick={() => void c.approve([e.op.client_op_id])}
                   >
                     {t("send")}
@@ -134,7 +134,7 @@ export function Pending({ s }: { s: AppState }) {
                 <button
                   type="button"
                   className="secondary"
-                  aria-label={t("discard_label", { item: name(e.op.target) })}
+                  aria-label={t("item_action", { item: name(e.op.target), action: t("discard") })}
                   onClick={() => void c.discard(e.op.client_op_id)}
                 >
                   {t("discard")}
@@ -223,7 +223,7 @@ function NoticeRow({ notice, s }: { notice: Notice; s: AppState }) {
         <button
           type="button"
           className="secondary"
-          aria-label={t("apply_anyway_label", { item })}
+          aria-label={t("item_action", { item, action: t("apply_anyway") })}
           onClick={() => void c.applyAnyway(notice)}
         >
           {t("apply_anyway")}
@@ -232,7 +232,7 @@ function NoticeRow({ notice, s }: { notice: Notice; s: AppState }) {
       <button
         type="button"
         className="secondary"
-        aria-label={t("dismiss_label", { item })}
+        aria-label={t("item_action", { item, action: t("dismiss") })}
         onClick={() => void c.dismiss(notice)}
       >
         {t("dismiss")}
