@@ -531,3 +531,134 @@ def test_the_item_payload_carries_its_import_key(workspace, people, home, grocer
     rows = {r["name"]: r for r in client.get(url).json()["items"]}
     assert (rows["Oats"]["external_source"], rows["Oats"]["external_id"]) == ("catalog", "groceries-oats")
     assert (rows["Rice"]["external_source"], rows["Rice"]["external_id"]) == (None, None)
+
+
+# ---------------------------------------------------------------- phase 9 scenario matrix (APLANE-67)
+
+
+def _project_calls(slug, home, groceries, item):
+    return [
+        ("get", proj(slug, home, "lists/"), None),
+        ("post", proj(slug, home, "lists/"), {"name": "x"}),
+        ("patch", proj(slug, home, f"lists/{groceries.pk}/"), {"name": "x"}),
+        ("delete", proj(slug, home, f"lists/{groceries.pk}/"), None),
+        ("get", proj(slug, home, f"lists/{groceries.pk}/items/"), None),
+        ("post", proj(slug, home, f"lists/{groceries.pk}/items/"), {"name": "x"}),
+        ("patch", proj(slug, home, f"items/{item.pk}/"), {"category": "x"}),
+        ("delete", proj(slug, home, f"items/{item.pk}/"), None),
+        ("get", proj(slug, home, f"items/{item.pk}/history/"), None),
+    ]
+
+
+@pytest.mark.parametrize("who", ["outsider", "deactivated"])
+def test_s22_a_non_member_and_a_deactivated_member_are_refused_on_every_project_endpoint(
+    who, workspace, people, home, groceries
+):
+    item = _item(groceries, "Milk", "on_demand", needed=True, category="Dairy")
+    if who == "deactivated":
+        ProjectMember.objects.filter(project=home, member=people["bob"]).update(is_active=False)
+    client = _client(people["olga" if who == "outsider" else "bob"])
+    for method, url, body in _project_calls(workspace.slug, home, groceries, item):
+        response = getattr(client, method)(url, body, format="json")
+        assert response.status_code == 403, (who, method, url, response.status_code)
+    # The workspace-level endpoints answer, but show nothing of the project and change nothing in it.
+    assert client.get(ws(workspace.slug, "shopping-list/")).json()["items"] == []
+    assert client.get(ws(workspace.slug, "suggestions/?q=mi")).json()["items"] == []
+    assert client.get(ws(workspace.slug, "lists/")).json()["lists"] == []
+    client.post(ws(workspace.slug, "categories/rename/"), {"from": "Dairy", "to": "Gone"}, format="json")
+    op = {"v": 1, "client_op_id": str(uuid.uuid4()), "target": str(item.pk), "op": "buy", "args": {}}
+    result = client.post(ws(workspace.slug, "ops/"), {"ops": [op]}, format="json").json()["results"][0]
+    assert (result["result"], result["reason"]) == ("rejected", "forbidden")
+    item.refresh_from_db()
+    assert (item.needed, item.category, item.name) == (True, "Dairy", "Milk")
+    assert InventoryList.objects.filter(pk=groceries.pk, name="Supermarket").exists()
+
+
+def test_s22_a_guest_sending_an_operation_on_a_real_item_is_refused_and_nothing_changes(
+    workspace, people, home, groceries
+):
+    item = _item(groceries, "Milk", "on_demand", needed=True)
+    op = {"v": 1, "client_op_id": str(uuid.uuid4()), "target": str(item.pk), "op": "buy", "args": {}}
+    assert _client(people["gus"]).post(ws(workspace.slug, "ops/"), {"ops": [op]}, format="json").status_code == 403
+    item.refresh_from_db()
+    assert item.needed is True and not InventoryEvent.objects.filter(item=item).exists()
+
+
+def test_s21_a_public_project_s_lists_become_visible_once_the_person_joins(workspace, people, home, groceries):
+    public = Project.objects.create(name="Open", identifier="OPEN", workspace=workspace, inventory_view=True, network=2)
+    ProjectMember.objects.create(project=public, member=people["alice"], role=20)
+    _item(InventoryList.objects.create(name="Garden", project=public), "Mulch", "on_demand", needed=True)
+    client = _client(people["bob"])
+    names = lambda: sorted(i["name"] for i in client.get(ws(workspace.slug, "shopping-list/")).json()["items"])  # noqa: E731
+    assert names() == []
+    assert client.get(proj(workspace.slug, public, "lists/")).status_code == 403
+    ProjectMember.objects.create(project=public, member=people["bob"], role=15)
+    assert names() == ["Mulch"]
+    assert [lst["name"] for lst in client.get(proj(workspace.slug, public, "lists/")).json()] == ["Garden"]
+
+
+@pytest.mark.parametrize(
+    "mode,check",
+    [
+        ("on_demand", lambda b: b["needed"] is True),
+        ("level", lambda b: b["level"] == "low"),
+        ("units", lambda b: (b["quantity"], b["min_quantity"]) == (0, 1)),
+        ("pinned", lambda b: True),
+    ],
+)
+def test_s28_an_item_created_without_a_mode_takes_its_list_s_default_and_is_on_the_to_buy_list(
+    mode, check, workspace, people, home
+):
+    lst = InventoryList.objects.create(name=f"List {mode}", project=home, default_mode=mode)
+    client = _client(people["bob"])
+    response = client.post(proj(workspace.slug, home, f"lists/{lst.pk}/items/"), {"name": "Thing"}, format="json")
+    assert response.status_code == 201, response.json()
+    body = response.json()
+    assert body["mode"] == mode and check(body)
+    to_buy = {i["name"]: i["to_buy"] for i in client.get(ws(workspace.slug, "shopping-list/")).json()["items"]}
+    assert to_buy.get("Thing", 0) >= 1
+
+
+def test_s20_a_units_item_partly_on_order_is_counted_for_what_is_still_missing(workspace, people, home, groceries):
+    water = _item(groceries, "Water", "units", quantity=0, min_quantity=3, restock_to=3)
+    _item(groceries, "Bread", "pinned")
+    InventoryOrder.objects.create(item=water, project=home, quantity=1, ordered_at=timezone.now())
+    body = _client(people["bob"]).get(ws(workspace.slug, "shopping-list/")).json()
+    rows = {i["name"]: (i["to_buy"], i["on_order"]) for i in body["items"]}
+    assert rows["Water"] == (2, 1)
+    assert body["count"] == 1, "Water counts (2 still missing); the pinned Bread does not"
+
+
+def test_s50_a_deleted_list_leaves_the_to_buy_list_and_the_counter(workspace, people, home, groceries):
+    _item(groceries, "Milk", "on_demand", needed=True)
+    other = InventoryList.objects.create(name="Pharmacy", project=home)
+    _item(other, "Plasters", "on_demand", needed=True)
+    client = _client(people["bob"])
+    before = client.get(ws(workspace.slug, "shopping-list/")).json()
+    assert before["count"] == 2
+    assert client.delete(proj(workspace.slug, home, f"lists/{other.pk}/")).status_code in (200, 204)
+    after = client.get(ws(workspace.slug, "shopping-list/")).json()
+    assert [i["name"] for i in after["items"]] == ["Milk"] and after["count"] == 1
+    assert [lst["name"] for lst in client.get(ws(workspace.slug, "lists/")).json()["lists"]] == ["Supermarket"]
+
+
+def test_s31_the_history_shows_a_step_made_through_the_api(workspace, people, home, groceries):
+    item = _item(groceries, "Milk", "on_demand", needed=True)
+    token = APIToken.objects.create(user=people["bob"], label="mcp", token="inventory-test-key-2")
+    api = APIClient()
+    api.credentials(HTTP_X_API_KEY=token.token)
+    op = {"v": 1, "client_op_id": str(uuid.uuid4()), "target": str(item.pk), "op": "buy", "args": {}}
+    bought = api.post(ws(workspace.slug, "ops/"), {"ops": [op]}, format="json").json()["results"][0]
+    assert bought["result"] == "applied"
+    web = {
+        "v": 1,
+        "client_op_id": str(uuid.uuid4()),
+        "target": str(item.pk),
+        "op": "set_needed",
+        "args": {"needed": True},
+        "base_rev": bought["item"]["rev"],
+    }
+    result = _client(people["bob"]).post(ws(workspace.slug, "ops/"), {"ops": [web]}, format="json").json()["results"][0]
+    assert result["result"] == "applied", result
+    body = _client(people["bob"]).get(proj(workspace.slug, home, f"items/{item.pk}/history/")).json()
+    assert [(e["op"], e["source"]) for e in body] == [("set_needed", "web"), ("buy", "api")]

@@ -7,6 +7,7 @@ for a viewer who can see a project with inventory on, so every other Home and ma
 it is first for a new user and for one who had reordered widgets (Home orders by sort_order descending)."""
 
 import pytest
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from plane.db.models import Project, ProjectMember, User, WorkspaceHomePreference, WorkspaceMember
@@ -74,3 +75,11 @@ def test_guests_outsiders_and_people_who_lost_access_do_not_see_it(workspace, cr
     # The row stays (the person's order and toggle survive), but neither Home nor the dialog lists it.
     assert KEY not in _home(create_user, workspace.slug)
     assert WorkspaceHomePreference.objects.filter(user=create_user, key=KEY).exists()
+
+
+def test_s50_the_widget_leaves_with_an_archived_project(workspace, create_user):
+    home = Project.objects.create(name="Home", identifier="HOME", workspace=workspace, inventory_view=True)
+    ProjectMember.objects.create(project=home, member=create_user, role=20)
+    assert KEY in _home(create_user, workspace.slug)
+    Project.objects.filter(pk=home.pk).update(archived_at=timezone.now())
+    assert KEY not in _home(create_user, workspace.slug)
