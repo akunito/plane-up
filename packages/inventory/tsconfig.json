@@ -1,0 +1,9 @@
+{
+  "extends": "../typescript-config/base.json",
+  "compilerOptions": {
+    "lib": ["es2023", "dom"],
+    "composite": false,
+    "incremental": false
+  },
+  "include": ["src/**/*.ts"]
+}

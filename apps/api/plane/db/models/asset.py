@@ -46,6 +46,10 @@ class FileAsset(BaseModel):
         DRAFT_ISSUE_ATTACHMENT = "DRAFT_ISSUE_ATTACHMENT"
         DRAFT_ISSUE_DESCRIPTION = "DRAFT_ISSUE_DESCRIPTION"
 
+    # An inventory item's photo (APLANE-66). Deliberately NOT in EntityTypeContext: the generic upload and
+    # duplicate views accept any value of it, and photos are created only by the inventory photo endpoint.
+    INVENTORY_ITEM_PHOTO = "INVENTORY_ITEM_PHOTO"
+
     attributes = models.JSONField(default=dict)
     asset = models.FileField(upload_to=get_upload_path, max_length=800)
     user = models.ForeignKey("db.User", on_delete=models.CASCADE, null=True, related_name="assets")
@@ -56,8 +60,8 @@ class FileAsset(BaseModel):
     comment = models.ForeignKey("db.IssueComment", on_delete=models.CASCADE, null=True, related_name="assets")
     page = models.ForeignKey("db.Page", on_delete=models.CASCADE, null=True, related_name="assets")
     # An inventory item's photo (APLANE-66). CASCADE so the item's soft delete reaches the photo and the
-    # purge takes the row and its stored object (deletion_task._doomed_blobs). Nullable: a rollback to an
-    # image without the column must still insert assets (brief, M7).
+    # purge, when armed (HARD_DELETE_ENABLED), takes the row and its stored object (_doomed_blobs).
+    # Nullable: a rollback to an image without the column must still insert assets (brief, M7).
     inventory_item = models.ForeignKey("db.InventoryItem", on_delete=models.CASCADE, null=True, related_name="assets")
     entity_type = models.CharField(max_length=255, null=True, blank=True)
     entity_identifier = models.CharField(max_length=255, null=True, blank=True)
@@ -107,6 +111,10 @@ class FileAsset(BaseModel):
 
         return None
 
+    @property
+    def is_inventory_photo(self):
+        return self.inventory_item_id is not None or self.entity_type == self.INVENTORY_ITEM_PHOTO
+
     def is_project_accessible_to(self, user):
         """Return whether ``user`` is an active member of this asset's project.
 
@@ -116,7 +124,13 @@ class FileAsset(BaseModel):
 
         Assets with no project (workspace logos, user avatars and covers) are
         workspace-level, so this returns True for them.
+
+        An inventory photo is False for everyone: inventory is for project members only (guests excluded),
+        which this project-membership rule cannot express, so photos are served only by the inventory photo
+        endpoints and every generic asset view that asks here refuses them (APLANE-66).
         """
+        if self.is_inventory_photo:
+            return False
         if self.project_id is None:
             return True
         # Scope the membership to the asset's workspace as well as its project.

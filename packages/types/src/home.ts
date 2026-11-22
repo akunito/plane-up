@@ -8,7 +8,14 @@ import type { TLogoProps } from "./common";
 import type { TIssuePriorities } from "./issues";
 
 export type TRecentActivityFilterKeys = "all item" | "issue" | "page" | "project" | "workspace_page";
-export type THomeWidgetKeys = "quick_links" | "recents" | "my_stickies" | "quick_tutorial" | "new_at_plane";
+// shopping_list: fork (APLANE-63), listed by the API only for a viewer who can see inventory.
+export type THomeWidgetKeys =
+  | "quick_links"
+  | "recents"
+  | "my_stickies"
+  | "quick_tutorial"
+  | "new_at_plane"
+  | "shopping_list";
 
 export type THomeWidgetProps = {
   workspaceSlug: string;

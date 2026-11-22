@@ -209,6 +209,13 @@ export const coreRoutes: RouteConfigEntry[] = [
               "./(all)/[workspaceSlug]/(projects)/projects/(detail)/[projectId]/pages/(list)/page.tsx"
             ),
           ]),
+          // Inventory (fork, APLANE-63)
+          layout("./(all)/[workspaceSlug]/(projects)/projects/(detail)/[projectId]/inventory/layout.tsx", [
+            route(
+              ":workspaceSlug/projects/:projectId/inventory",
+              "./(all)/[workspaceSlug]/(projects)/projects/(detail)/[projectId]/inventory/page.tsx"
+            ),
+          ]),
           // Intake list
           layout("./(all)/[workspaceSlug]/(projects)/projects/(detail)/[projectId]/intake/layout.tsx", [
             route(
@@ -322,6 +329,11 @@ export const coreRoutes: RouteConfigEntry[] = [
             route(
               ":workspaceSlug/settings/projects/:projectId/features/intake",
               "./(all)/[workspaceSlug]/(settings)/settings/projects/[projectId]/features/intake/page.tsx"
+            ),
+            // Fork (APLANE-63)
+            route(
+              ":workspaceSlug/settings/projects/:projectId/features/inventory",
+              "./(all)/[workspaceSlug]/(settings)/settings/projects/[projectId]/features/inventory/page.tsx"
             ),
             // Project States
             route(

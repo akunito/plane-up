@@ -9,6 +9,7 @@ import { observer } from "mobx-react";
 import { useParams, useLocation, Link, useNavigate } from "react-router";
 import { EUserPermissionsLevel, EUserPermissions } from "@plane/constants";
 import { useTranslation } from "@plane/i18n";
+import { navLabel } from "@/components/inventory/i18n";
 import { TabNavigationList, TabNavigationItem } from "@plane/propel/tab-navigation";
 import type { EUserProjectRoles } from "@plane/types";
 // hooks
@@ -52,7 +53,7 @@ export const TabNavigationRoot = observer(function TabNavigationRoot(props: TTab
   const location = useLocation();
   const pathname = location.pathname;
   const navigate = useNavigate();
-  const { t } = useTranslation();
+  const { t, currentLocale } = useTranslation();
 
   // Store hooks
   const { getPartialProjectById } = useProject();
@@ -242,7 +243,7 @@ export const TabNavigationRoot = observer(function TabNavigationRoot(props: TTab
                   >
                     <Link to={item.href}>
                       <TabNavigationItem isActive={itemIsActive}>
-                        <span>{t(item.i18n_key)}</span>
+                        <span>{navLabel(item.key, item.i18n_key, t, currentLocale)}</span>
                       </TabNavigationItem>
                     </Link>
                   </div>

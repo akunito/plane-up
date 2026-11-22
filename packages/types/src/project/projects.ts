@@ -30,6 +30,8 @@ export interface IPartialProject {
   module_view: boolean;
   page_view: boolean;
   inbox_view: boolean;
+  /** Fork (APLANE-63): inventory on this project; the lite list carries it. */
+  inventory_view?: boolean;
   guest_view_all_features?: boolean;
   project_lead?: IUserLite | string | null;
   network?: number;

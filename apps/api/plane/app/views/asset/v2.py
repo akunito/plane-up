@@ -35,8 +35,11 @@ def can_modify_asset(user, asset):
     workspace admin and a project cover a project admin (as in the settings views), an
     issue attachment a project admin or its uploader (as in attachment delete), and
     any other asset a member, an admin or its uploader. The uploader must still be an
-    active member of the asset's project, if it has one.
+    active member of the asset's project, if it has one. Never an inventory photo: those change only
+    through the inventory photo endpoints (APLANE-66).
     """
+    if asset.is_inventory_photo:
+        return False
     workspace_role = (
         WorkspaceMember.objects.filter(member=user, workspace_id=asset.workspace_id, is_active=True)
         .values_list("role", flat=True)
@@ -276,7 +279,13 @@ class WorkspaceFileAssetEndpoint(BaseAPIView):
         return {}
 
     def asset_delete(self, asset_id):
-        asset = FileAsset.objects.filter(id=asset_id).first()
+        # The id comes from a project's cover or a workspace's logo pointer, which ProjectSerializer and
+        # WorkSpaceSerializer accept as any asset id: never let it reach an inventory photo (phase 8 audit F3).
+        asset = (
+            FileAsset.objects.filter(id=asset_id, inventory_item__isnull=True)
+            .exclude(entity_type=FileAsset.INVENTORY_ITEM_PHOTO)
+            .first()
+        )
         # Check if the asset exists
         if asset is None:
             return
@@ -712,7 +721,9 @@ class ProjectAssetEndpoint(BaseAPIView):
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST])
     def get(self, request, slug, project_id, pk):
         # get the asset id
-        asset = FileAsset.objects.get(workspace__slug=slug, project_id=project_id, pk=pk)
+        asset = FileAsset.objects.get(workspace__slug=slug, project_id=project_id, pk=pk, inventory_item__isnull=True)
+        if asset.is_inventory_photo:
+            return Response({"error": "The requested asset could not be found."}, status=status.HTTP_404_NOT_FOUND)
 
         # Check if the asset is uploaded
         if not asset.is_uploaded:
@@ -755,11 +766,16 @@ class ProjectBulkAssetEndpoint(BaseAPIView):
         # unassociated-or-same-project bound prevent cross-project/user IDOR (a caller can
         # only touch their own uploads, cannot move an asset in from another project, and
         # @allow_permission already scopes them to this project).
-        assets = FileAsset.objects.filter(
-            id__in=asset_ids,
-            workspace__slug=slug,
-            created_by=request.user,
-        ).filter(Q(project_id=project_id) | Q(project_id__isnull=True))
+        assets = (
+            FileAsset.objects.filter(
+                id__in=asset_ids,
+                workspace__slug=slug,
+                created_by=request.user,
+                inventory_item__isnull=True,
+            )
+            .exclude(entity_type=FileAsset.INVENTORY_ITEM_PHOTO)
+            .filter(Q(project_id=project_id) | Q(project_id__isnull=True))
+        )
 
         # Get the first asset
         asset = assets.first()
@@ -987,7 +1003,10 @@ class ProjectAssetDownloadEndpoint(BaseAPIView):
                 workspace__slug=slug,
                 project_id=project_id,
                 is_uploaded=True,
+                inventory_item__isnull=True,
             )
+            if asset.is_inventory_photo:
+                raise FileAsset.DoesNotExist
         except FileAsset.DoesNotExist:
             return Response(
                 {"error": "The requested asset could not be found."},

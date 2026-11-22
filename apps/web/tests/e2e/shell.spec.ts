@@ -54,6 +54,11 @@ test.describe("route crawl (L5-02)", () => {
     "/qa/notifications/",
     "/qa/drafts/",
     `/qa/profile/${manifest.users.alice.id}/`,
+    // Inventory routes, when the image has them (seed-qa.sh decides from the image tag): off in qa, so
+    // the page's "turned off" screen and the feature's settings page (APLANE-64, phase 6 gate additions).
+    ...(manifest.workspaces["qa-inv"]
+      ? [`/qa/projects/${QAA.id}/inventory/`, `/qa/settings/projects/${QAA.id}/features/inventory/`]
+      : []),
   ];
   for (const route of routes) {
     test(route.replace(/[0-9a-f-]{36}/g, ":id"), async ({ page }) => {

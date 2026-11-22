@@ -1,0 +1,303 @@
+/**
+ * APLANE-63 (inventory phase 5): the Home widget and the sidebar entry. Only for a viewer who can see a
+ * project with inventory on; the widget ticks online with a fresh queue id per request and keeps nothing
+ * when the request fails (S42); the counter is the to-buy count (S20).
+ */
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const state = vi.hoisted(() => ({
+  projects: {} as Record<string, { inventory_view?: boolean; member_role?: number }>,
+}));
+vi.mock("next/navigation", () => ({
+  useParams: () => ({ workspaceSlug: "home" }),
+  usePathname: () => "/home/",
+  useSearchParams: () => new URLSearchParams(),
+}));
+vi.mock("@plane/i18n", async (orig) => ({
+  ...(await orig<object>()),
+  useTranslation: () => ({ t: (k: string) => k, currentLocale: "en" }),
+}));
+vi.mock("@/hooks/store/use-project", () => ({
+  useProject: () => ({
+    joinedProjectIds: Object.keys(state.projects),
+    getPartialProjectById: (id: string) => state.projects[id],
+  }),
+}));
+
+import { EditableField } from "@/components/inventory/controls";
+import { ShoppingListWidget } from "@/components/inventory/home-widget";
+import { InventorySidebarEntry } from "@/components/inventory/sidebar-entry";
+
+const item = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  rev: 3,
+  mode: "on_demand",
+  needed: true,
+  level: null,
+  quantity: null,
+  min_quantity: null,
+  restock_to: null,
+  last_bought_at: null,
+  last_bought_by: null,
+  name,
+  category: "",
+  buy_online: false,
+  to_buy: 1,
+  list: { id: "l1", name: "Groceries" },
+  ...extra,
+});
+
+/** What the engine answers for an operation: the item's STATE only (engine item_state), no name or list. */
+const stateOnly = (i: ReturnType<typeof item>) => ({
+  id: i.id,
+  rev: i.rev,
+  mode: i.mode,
+  needed: i.needed,
+  level: i.level,
+  quantity: i.quantity,
+  min_quantity: i.min_quantity,
+  restock_to: i.restock_to,
+  last_bought_at: i.last_bought_at,
+  last_bought_by: i.last_bought_by,
+});
+
+type Call = { url: string; method: string; body: any };
+let calls: Call[] = [];
+let listItems: ReturnType<typeof item>[] = [];
+let opsAnswer: (body: any) => Response;
+
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+beforeEach(() => {
+  calls = [];
+  state.projects = { p1: { inventory_view: true, member_role: 15 } };
+  listItems = [item("a", "Milk"), item("b", "Wipes", { mode: "units", quantity: 0, min_quantity: 2, to_buy: 3 })];
+  opsAnswer = (body) =>
+    json(200, {
+      results: body.ops.map((op: any) => ({ client_op_id: op.client_op_id, result: "applied", rev: 4 })),
+    });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init: RequestInit) => {
+      const body = typeof init.body === "string" ? JSON.parse(init.body) : undefined;
+      calls.push({ url, method: init.method ?? "GET", body });
+      if (url.endsWith("/inventory/shopping-list/"))
+        return json(200, { items: listItems, count: listItems.length, on_the_way: [], generated_at: "" });
+      if (url.endsWith("/inventory/ops/")) return opsAnswer(body);
+      if (url.includes("/inventory/suggestions/")) return json(200, { items: listItems, categories: [], stores: [] });
+      if (url.endsWith("/inventory/lists/"))
+        return json(200, { me: { id: "u1", display_name: "Ana" }, projects: [], lists: [] });
+      return json(404, { error: "not found" });
+    })
+  );
+});
+afterEach(() => vi.unstubAllGlobals());
+
+describe("who sees the widget and the sidebar entry", () => {
+  // The widget itself is listed by the API only for such a viewer (contract test); the sidebar decides here.
+  it("the sidebar entry: nobody without a member role in a project with inventory on, and no request", () => {
+    const cases: (typeof state.projects)[] = [
+      {},
+      { p1: { inventory_view: false, member_role: 20 } },
+      { p1: { inventory_view: true, member_role: 5 } },
+    ];
+    for (const projects of cases) {
+      state.projects = projects;
+      const { container, unmount } = render(<InventorySidebarEntry />);
+      expect(container.innerHTML).toBe("");
+      unmount();
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it("the sidebar entry is a plain anchor to /shopping/ naming the workspace, with the to-buy count", async () => {
+    render(<InventorySidebarEntry />);
+    const link = screen.getByTestId("sidebar-shopping");
+    expect(link.tagName).toBe("A");
+    expect(link.getAttribute("href")).toBe("/shopping/?ws=home");
+    await waitFor(() => expect(screen.getByTestId("sidebar-shopping-count").textContent).toBe("2"));
+  });
+});
+
+describe("the sidebar counter", () => {
+  it("is fetched once per tab however many sidebars render it (main and peek)", async () => {
+    const lists = () => calls.filter((c) => c.url.endsWith("/inventory/shopping-list/")).length;
+    render(
+      <>
+        <InventorySidebarEntry />
+        <InventorySidebarEntry />
+      </>
+    );
+    await waitFor(() =>
+      expect(screen.getAllByTestId("sidebar-shopping-count").map((e) => e.textContent)).toEqual(["2", "2"])
+    );
+    expect(lists()).toBe(1);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(lists()).toBe(2);
+  });
+});
+
+describe("the Home widget", () => {
+  it("lists the to-buy rows and ticks online: buy with the list's quantity, a fresh queue id each time", async () => {
+    render(<ShoppingListWidget workspaceSlug="home" />);
+    await screen.findByText("Wipes");
+    expect(screen.getByTestId("shopping-widget-count").textContent).toBe("2 to buy");
+    fireEvent.click(screen.getByLabelText("Wipes: bought"));
+    await screen.findByText("Wipes: bought.");
+    fireEvent.click(screen.getByLabelText("Milk: bought"));
+    await screen.findByText("Milk: bought.");
+    const ops = calls.filter((c) => c.url.endsWith("/inventory/ops/")).map((c) => c.body.ops[0]);
+    expect(ops.map((o) => [o.op, o.target, o.args])).toEqual([
+      ["buy", "b", { quantity: 3 }],
+      ["buy", "a", {}],
+    ]);
+    expect(ops[0].queue_id).not.toBe(ops[1].queue_id);
+    expect(ops[0].age_ms).toBe(0);
+    // Each change reloads the list (and the counter, through the same event).
+    expect(calls.filter((c) => c.url.endsWith("/shopping-list/")).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("a failed request says so and keeps nothing to send later (S42)", async () => {
+    opsAnswer = () => {
+      throw new TypeError("network");
+    };
+    render(<ShoppingListWidget workspaceSlug="home" />);
+    await screen.findByText("Milk");
+    fireEvent.click(screen.getByLabelText("Milk: bought"));
+    await screen.findByText("No connection: nothing was changed.");
+    const before = calls.length;
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    expect(calls.slice(before).some((c) => c.url.endsWith("/ops/"))).toBe(false);
+  });
+
+  it("capture: a statement from a view that is not refreshed is refused and says who changed it (S67)", async () => {
+    opsAnswer = (body) =>
+      json(200, {
+        results: [
+          {
+            client_op_id: body.ops[0].client_op_id,
+            result: "stale",
+            changed: { op: "set_needed", by: "u2", by_name: "Bo", at: null },
+            item: stateOnly(item("a", "Milk", { needed: false, rev: 5 })),
+          },
+        ],
+      });
+    listItems = [item("a", "Milk", { needed: false, to_buy: 0 })];
+    render(<ShoppingListWidget workspaceSlug="home" />);
+    fireEvent.change(screen.getByLabelText("Add or search…"), { target: { value: "mi" } });
+    fireEvent.click(await screen.findByLabelText("Milk: Needed"));
+    await screen.findByText("Bo changed it first; the row now shows their change.");
+    const op = calls.find((c) => c.url.endsWith("/inventory/ops/"))!.body.ops[0];
+    expect([op.op, op.args, op.base_rev]).toEqual(["set_needed", { needed: true }, 3]);
+  });
+
+  it("a double tick buys once: the row is hidden while its answer is pending (phase 5 audit)", async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const answer = opsAnswer;
+    opsAnswer = (body) => answer(body);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        const body = typeof init.body === "string" ? JSON.parse(init.body) : undefined;
+        calls.push({ url, method: init.method ?? "GET", body });
+        if (url.endsWith("/inventory/shopping-list/"))
+          return json(200, { items: listItems, count: listItems.length, on_the_way: [], generated_at: "" });
+        if (url.endsWith("/inventory/ops/")) {
+          await gate;
+          return answer(body);
+        }
+        return json(404, {});
+      })
+    );
+    render(<ShoppingListWidget workspaceSlug="home" />);
+    const box = await screen.findByLabelText("Wipes: bought");
+    fireEvent.click(box);
+    expect(screen.queryByLabelText("Wipes: bought")).toBeNull();
+    fireEvent.click(box);
+    release?.();
+    await screen.findByText("Wipes: bought.");
+    expect(calls.filter((c) => c.url.endsWith("/inventory/ops/"))).toHaveLength(1);
+  });
+
+  it("capture says what each action did", async () => {
+    listItems = [
+      item("a", "Milk", { needed: true }),
+      item("d", "Detergent", { mode: "level", needed: false, level: "low" }),
+      item("w", "Wipes", { mode: "units", quantity: 1, min_quantity: 2 }),
+    ];
+    opsAnswer = (body) =>
+      json(200, {
+        results: body.ops.map((op: any) => ({
+          client_op_id: op.client_op_id,
+          result: "applied",
+          rev: 4,
+          item: stateOnly(
+            op.target === "w"
+              ? item("w", "Wipes", { mode: "units", quantity: 2, rev: 4 })
+              : op.target === "a"
+                ? item("a", "Milk", { needed: false, rev: 4 })
+                : item("d", "Detergent", { mode: "level", level: "out", rev: 4 })
+          ),
+        })),
+      });
+    render(<ShoppingListWidget workspaceSlug="home" />);
+    fireEvent.change(screen.getByLabelText("Add or search…"), { target: { value: "e" } });
+    fireEvent.click(await screen.findByLabelText("Milk: Needed"));
+    await screen.findByText("Milk: off the shopping list.");
+    fireEvent.click(screen.getByRole("button", { name: "Out" }));
+    await screen.findByText("Detergent: Out.");
+    fireEvent.click(screen.getByLabelText("Wipes: +1"));
+    await screen.findByText("Wipes: 2 at home.");
+    // A state-only answer is merged: the rows keep their names (phase 5 re-review: they were blanked).
+    expect(screen.getByLabelText("Milk: Needed")).toBeTruthy();
+    expect(screen.getByLabelText("Wipes: +1")).toBeTruthy();
+  });
+});
+
+describe("EditableField", () => {
+  it("shows the server's value after a save, and the saved one again after a failure", async () => {
+    const results: (string | null)[] = ["a b", null];
+    const commit = vi.fn(async () => results.shift() ?? null);
+    render(<EditableField aria-label="Name" value="old" onCommit={commit} />);
+    const input = screen.getByLabelText("Name") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "a   b" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(input.value).toBe("a b"));
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "rejected" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(input.value).toBe("old"));
+    expect(commit).toHaveBeenNthCalledWith(1, "a   b");
+    fireEvent.focus(input);
+    fireEvent.blur(input);
+    expect(commit).toHaveBeenCalledTimes(2);
+  });
+
+  it("Escape discards the draft; blurring after a newer value arrived commits nothing (phase 5 re-review)", async () => {
+    const commit = vi.fn(async (d: string) => d);
+    const { rerender } = render(<EditableField aria-label="Qty" value="3" onCommit={commit} />);
+    const input = screen.getByLabelText("Qty") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "9" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.blur(input);
+    await waitFor(() => expect(input.value).toBe("3"));
+    fireEvent.focus(input);
+    rerender(<EditableField aria-label="Qty" value="4" onCommit={commit} />);
+    fireEvent.blur(input);
+    await waitFor(() => expect(input.value).toBe("4"));
+    expect(commit).not.toHaveBeenCalled();
+  });
+});

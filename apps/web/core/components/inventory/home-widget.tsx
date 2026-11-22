@@ -1,0 +1,278 @@
+/**
+ * Copyright (c) 2023-present Plane Software, Inc. and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * See the LICENSE file for details.
+ */
+
+// The Home widget (plan, phase 5): the viewer's to-buy list with ticks, and capture (search, one action per
+// mode, create into a list). Online only: each action goes to ops/ at once with a fresh queue id; when it
+// fails the widget says so and keeps nothing (S42). Links to the app are plain anchors (S51).
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { observer } from "mobx-react";
+import type { THomeWidgetProps } from "@plane/types";
+import type { Lists, OpName } from "@plane/inventory";
+import { createItem, fetchLists, fetchShoppingList, fetchSuggestions } from "@plane/inventory";
+import { useTranslation } from "@plane/i18n";
+import { StateControl } from "./controls";
+import { makeInventoryT } from "./i18n";
+import type { Item } from "./online";
+import { clientOptions, failureMessage, sendNow } from "./online";
+import { INVENTORY_CHANGED, notifyInventoryChanged, shoppingHref } from "./visibility";
+
+/** Rows shown before "N more in the shopping app". */
+const MAX_ROWS = 12;
+const norm = (s: unknown) => (typeof s === "string" ? s.split(/\s+/).filter(Boolean).join(" ").toLowerCase() : "");
+
+// No client-side visibility check: the API lists this widget only for a viewer who can see inventory, and
+// a second check from the store could disagree with it (stale store) and leave an empty slot on Home.
+export const ShoppingListWidget = observer(function ShoppingListWidget({ workspaceSlug }: THomeWidgetProps) {
+  // Keyed: lists, the chosen list and pending ticks belong to one workspace (phase 5 re-review).
+  return <Widget key={workspaceSlug} workspaceSlug={workspaceSlug} />;
+});
+
+function Widget({ workspaceSlug }: THomeWidgetProps) {
+  const { currentLocale } = useTranslation();
+  const t = useMemo(() => makeInventoryT(currentLocale), [currentLocale]);
+  const opts = useMemo(() => clientOptions(workspaceSlug), [workspaceSlug]);
+  const [rows, setRows] = useState<Item[] | null>(null);
+  const [count, setCount] = useState(0);
+  const [message, setMessage] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [found, setFound] = useState<Item[] | null>(null);
+  const [lists, setLists] = useState<Lists | null>(null);
+  const [listId, setListId] = useState("");
+  const searchSeq = useRef(0);
+  const loadSeq = useRef(0);
+  // Rows ticked and not yet answered: hidden, and a second tick is ignored (a double tick bought twice).
+  const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
+
+  const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
+    const out = await fetchShoppingList(opts);
+    // Focus and a change often fire together: an older answer landing last must not bring back a row.
+    if (seq !== loadSeq.current) return;
+    if (out.kind !== "ok") {
+      setMessage(failureMessage(out, t));
+      setRows((r) => r ?? []);
+      return;
+    }
+    setRows(out.list.items as Item[]);
+    setCount(out.list.count);
+  }, [opts, t]);
+
+  useEffect(() => {
+    void load();
+    const reload = () => void load();
+    window.addEventListener(INVENTORY_CHANGED, reload);
+    window.addEventListener("focus", reload);
+    return () => {
+      window.removeEventListener(INVENTORY_CHANGED, reload);
+      window.removeEventListener("focus", reload);
+    };
+  }, [load]);
+
+  const search = useCallback(
+    async (q: string) => {
+      const seq = ++searchSeq.current;
+      if (!q.trim()) {
+        setFound(null);
+        return;
+      }
+      const [s, l] = await Promise.all([fetchSuggestions(opts, q.trim()), lists ? null : fetchLists(opts)]);
+      // A slower answer for an older query must not replace a newer one.
+      if (seq !== searchSeq.current) return;
+      if (l?.kind === "ok") {
+        setLists(l.body);
+        setListId((id) => id || l.body.lists[0]?.id || "");
+      }
+      if (s.kind !== "ok") {
+        setMessage(failureMessage(s, t));
+        return;
+      }
+      setFound(s.body.items as Item[]);
+    },
+    [opts, t, lists]
+  );
+
+  useEffect(() => {
+    const timer = setTimeout(() => void search(query), 200);
+    return () => clearTimeout(timer);
+  }, [query, search]);
+
+  /** What a successful action did, in words (phase 5 audit: every action used to say "on the list"). */
+  const done = (item: Item, name: OpName, args: Record<string, unknown>, fresh: Item | null): string => {
+    if (name === "buy") return t("widget_bought", { name: item.name });
+    if (name === "set_needed") return t(args.needed ? "widget_added" : "widget_removed", { name: item.name });
+    if (name === "set_level")
+      return t("widget_level", { name: item.name, level: t(`level_${String(args.level)}` as never) });
+    return t("widget_quantity", { name: item.name, n: Math.max(fresh?.quantity ?? 0, 0) });
+  };
+
+  const act = async (item: Item, name: OpName, args: Record<string, unknown>) => {
+    setMessage(null);
+    const out = await sendNow(opts, name, item, args, t);
+    setMessage(out.ok ? done(item, name, args, out.item) : out.message);
+    // An operation answers with the item's state only: merged into the row, never swapped in.
+    const fresh = out.item ? ({ ...item, ...out.item } as Item) : null;
+    if (fresh) setFound((f) => f?.map((i) => (i.id === fresh.id ? fresh : i)) ?? f);
+    // sendNow told the counter; the list reloads through the same event.
+    return { ok: out.ok, item: fresh };
+  };
+
+  const tick = async (item: Item, quantity: number) => {
+    if (pending.has(item.id)) return;
+    setPending((p) => new Set(p).add(item.id));
+    const out = await act(item, "buy", item.mode === "units" ? { quantity } : {});
+    // Bought: off the list now, unless pinned (always on it); the reload confirms either way. Only when
+    // applied: a refused tick keeps its row even if the reload fails.
+    if (out.ok && item.mode !== "pinned") setRows((r) => r?.filter((x) => x.id !== item.id) ?? r);
+    setPending((p) => {
+      const next = new Set(p);
+      next.delete(item.id);
+      return next;
+    });
+  };
+
+  const create = async () => {
+    const name = query.trim();
+    const list = lists?.lists.find((l) => l.id === listId);
+    if (!name || !list) return;
+    setMessage(null);
+    const out = await createItem(opts, list.project, list.id, { name });
+    if (out.kind === "ok") {
+      setQuery("");
+      setFound(null);
+      setMessage(t("widget_created", { name }));
+      notifyInventoryChanged();
+    } else if (out.kind === "conflict") setMessage(t("exists", { name }));
+    else setMessage(failureMessage(out, t));
+  };
+
+  const sorted = useMemo(
+    () =>
+      // oxlint-disable-next-line unicorn/no-array-sort -- a copy; the web lib is es2022 (no toSorted)
+      (rows ?? [])
+        .filter((r) => !pending.has(r.id))
+        .sort((a, b) => norm(a.category).localeCompare(norm(b.category)) || norm(a.name).localeCompare(norm(b.name))),
+    [rows, pending]
+  );
+  const exact = found?.some((i) => norm(i.name) === norm(query));
+
+  return (
+    <section className="flex flex-col gap-3" data-testid="shopping-widget" aria-label={t("widget_title")}>
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-14 font-semibold text-primary">
+          {t("widget_title")}
+          {rows !== null && (
+            <span className="font-normal ml-2 text-13 text-tertiary" data-testid="shopping-widget-count">
+              {t("widget_count", { n: count })}
+            </span>
+          )}
+        </h3>
+        <a href={shoppingHref(workspaceSlug)} className="text-13 text-accent-primary hover:underline">
+          {t("open_app")}
+        </a>
+      </div>
+
+      <input
+        className="w-full rounded-md border border-subtle bg-layer-1 px-3 py-1.5 text-13 text-primary outline-none focus:border-accent-strong"
+        value={query}
+        maxLength={255}
+        placeholder={t("widget_search")}
+        aria-label={t("widget_search")}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+      {message && (
+        <p role="status" className="text-13 text-secondary">
+          {message}
+        </p>
+      )}
+
+      {found !== null ? (
+        <ul className="flex flex-col divide-y divide-subtle rounded-md border border-subtle">
+          {found.length === 0 && <li className="px-3 py-2 text-13 text-tertiary">{t("widget_no_match")}</li>}
+          {found.map((item) => (
+            <li key={item.id} className="flex items-center justify-between gap-2 px-3 py-1.5">
+              <span className="truncate text-13 text-primary">
+                {item.name}
+                <span className="ml-2 text-11 text-tertiary">{(item.list as { name?: string } | undefined)?.name}</span>
+              </span>
+              <StateControl item={item} t={t} onOp={async (name, args) => (await act(item, name, args)).item} />
+            </li>
+          ))}
+          {query.trim() && !exact && lists && lists.lists.length > 0 && (
+            <li className="flex flex-wrap items-center gap-2 px-3 py-2">
+              <button
+                type="button"
+                className="rounded-md border border-dashed border-subtle px-2 py-1 text-13 text-secondary hover:bg-layer-1"
+                onClick={() => void create()}
+              >
+                {t("widget_create", {
+                  name: query.trim(),
+                  list: lists.lists.find((l) => l.id === listId)?.name ?? "",
+                })}
+              </button>
+              <select
+                className="rounded-md border border-subtle bg-layer-1 px-2 py-1 text-13 text-secondary"
+                value={listId}
+                aria-label={t("field_list")}
+                onChange={(e) => setListId(e.target.value)}
+              >
+                {lists.lists.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            </li>
+          )}
+        </ul>
+      ) : rows === null ? (
+        <p className="text-13 text-tertiary">{t("loading")}</p>
+      ) : sorted.length === 0 ? (
+        <p className="text-13 text-tertiary">{t("widget_empty")}</p>
+      ) : (
+        <ul className="flex flex-col divide-y divide-subtle rounded-md border border-subtle">
+          {sorted.slice(0, MAX_ROWS).map((item) => {
+            const toBuy = typeof item.to_buy === "number" ? item.to_buy : 1;
+            return (
+              <li key={item.id} className="flex items-center gap-3 px-3 py-1.5" data-testid="shopping-widget-row">
+                {item.buy_online === true ? (
+                  // Bought online: ordered from the app, not ticked (brief).
+                  <a
+                    href={shoppingHref(workspaceSlug, `#/item/${item.id}`)}
+                    className="text-13 text-accent-primary"
+                    aria-label={item.name}
+                  >
+                    ↗
+                  </a>
+                ) : (
+                  <input
+                    type="checkbox"
+                    className="size-4 shrink-0"
+                    aria-label={t("tick_label", { name: item.name })}
+                    onChange={(e) => {
+                      e.target.checked = false;
+                      void tick(item, toBuy);
+                    }}
+                  />
+                )}
+                <span className="flex-1 truncate text-13 text-primary">
+                  {item.name}
+                  {item.mode === "units" && toBuy > 1 && <span className="ml-1 text-tertiary">×{toBuy}</span>}
+                </span>
+                <span className="text-11 text-tertiary">{typeof item.category === "string" ? item.category : ""}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {found === null && sorted.length > MAX_ROWS && (
+        <a href={shoppingHref(workspaceSlug)} className="text-13 text-tertiary hover:underline">
+          {t("widget_more", { n: sorted.length - MAX_ROWS })}
+        </a>
+      )}
+    </section>
+  );
+}

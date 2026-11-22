@@ -20,6 +20,7 @@ import { useParams } from "next/navigation";
 import { createRoot } from "react-dom/client";
 // plane types
 import { useTranslation } from "@plane/i18n";
+import { navLabel } from "@/components/inventory/i18n";
 import type { InstructionType } from "@plane/types";
 // plane ui
 import { DropIndicator, ToggleSwitch } from "@plane/ui";
@@ -49,7 +50,7 @@ export const WidgetItem = observer(function WidgetItem(props: Props) {
   const elementRef = useRef<HTMLDivElement>(null);
   // hooks
   const { widgetsMap } = useHome();
-  const { t } = useTranslation();
+  const { t, currentLocale } = useTranslation();
   // derived values
   const widget = widgetsMap[widgetId];
   const widgetTitle = HOME_WIDGETS_LIST[widget.key]?.title;
@@ -134,7 +135,7 @@ export const WidgetItem = observer(function WidgetItem(props: Props) {
       >
         <div className="flex items-center">
           <WidgetItemDragHandle sort_order={widget.sort_order} isDragging={isDragging} />
-          <div>{t(widgetTitle, { count: 1 })}</div>
+          <div>{navLabel(widget.key, widgetTitle, (key) => t(key, { count: 1 }), currentLocale)}</div>
         </div>
         <ToggleSwitch
           value={widget.is_enabled}

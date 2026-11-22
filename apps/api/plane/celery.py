@@ -98,6 +98,10 @@ app.conf.beat_schedule = {
         "task": "plane.bgtasks.exporter_expired_task.delete_old_s3_link",
         "schedule": crontab(hour=3, minute=45),  # UTC 03:45
     },
+    "check-every-day-to-prune-inventory-events": {
+        "task": "plane.bgtasks.inventory_task.prune_inventory_events",
+        "schedule": crontab(hour=4, minute=0),  # UTC 04:00
+    },
 }
 
 

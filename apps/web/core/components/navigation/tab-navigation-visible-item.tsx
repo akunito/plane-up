@@ -8,6 +8,7 @@ import { Link } from "react-router";
 import { PinOff } from "lucide-react";
 // plane imports
 import { useTranslation } from "@plane/i18n";
+import { navLabel } from "@/components/inventory/i18n";
 import { ContextMenu } from "@plane/propel/context-menu";
 import { SetAsDefaultIcon } from "@plane/propel/icons";
 import { TabNavigationItem } from "@plane/propel/tab-navigation";
@@ -36,7 +37,7 @@ export function TabNavigationVisibleItem({
   onHide,
   itemRef,
 }: TTabNavigationVisibleItemProps) {
-  const { t } = useTranslation();
+  const { t, currentLocale } = useTranslation();
   const isDefault = item.key === tabPreferences.defaultTab;
 
   return (
@@ -49,7 +50,7 @@ export function TabNavigationVisibleItem({
           <ContextMenu.Trigger>
             <Link key={`${item.key}-${isActive ? "active" : "inactive"}`} to={item.href}>
               <TabNavigationItem isActive={isActive}>
-                <span>{t(item.i18n_key)}</span>
+                <span>{navLabel(item.key, item.i18n_key, t, currentLocale)}</span>
               </TabNavigationItem>
             </Link>
           </ContextMenu.Trigger>

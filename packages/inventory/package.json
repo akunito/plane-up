@@ -1,0 +1,26 @@
+{
+  "name": "@plane/inventory",
+  "version": "1.4.1",
+  "private": true,
+  "description": "Inventory and shopping lists: types, the to-buy rule, the operation builder, the device queue and the API client. Pure TypeScript, no UI (APLANE-61).",
+  "license": "AGPL-3.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "check:types": "tsc --noEmit",
+    "check:lint": "oxlint --max-warnings=0 .",
+    "check:format": "oxfmt --check .",
+    "fix:lint": "oxlint --fix .",
+    "fix:format": "oxfmt .",
+    "mutations": "node tooling/mutations.mjs"
+  },
+  "devDependencies": {
+    "@plane/typescript-config": "workspace:*",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

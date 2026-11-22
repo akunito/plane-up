@@ -262,6 +262,13 @@ export class UserStore implements IUserStore {
    */
   signOut = async (): Promise<void> => {
     await this.authService.signOut(API_BASE_URL);
+    // The shopping app (/shopping/, same origin) opens offline from the last user's saved list: forget who
+    // that was, so whoever holds the device next never sees it (APLANE-64). Its queue stays stored.
+    try {
+      localStorage.removeItem("plane-shopping:user");
+    } catch {
+      // storage blocked: nothing to forget
+    }
     this.store.resetOnSignOut();
   };
 

@@ -1,0 +1,31 @@
+{
+  "name": "@plane/shopping-app",
+  "version": "1.4.1",
+  "private": true,
+  "description": "The standalone shopping app served at /shopping/ (APLANE-62). Built by apps/web as a second Vite build after react-router build (apps/web/vite.shopping.config.ts).",
+  "license": "AGPL-3.0",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "check:types": "tsc --noEmit",
+    "check:lint": "oxlint --max-warnings=0 .",
+    "check:format": "oxfmt --check .",
+    "fix:lint": "oxlint --fix .",
+    "fix:format": "oxfmt .",
+    "mutations": "node tooling/mutations.mjs"
+  },
+  "dependencies": {
+    "@plane/inventory": "workspace:*",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@plane/typescript-config": "workspace:*",
+    "@testing-library/react": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "jsdom": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
