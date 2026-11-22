@@ -352,16 +352,17 @@ test.describe("shopping app @shopping", () => {
           sideways:
             rows.filter((x) => x.scrollWidth > x.clientWidth + 1).length +
             (document.scrollingElement!.scrollWidth > innerWidth ? 1 : 0),
-          // The top bar's counter and the workspace picker stay inside the screen (both widened the page at 200 %).
-          // At normal size the badge keeps its natural width: the list name gives way first.
+          // At normal size the badge stays on one line: compared by height with a one-line copy, not by rounded
+          // widths (a fraction of a pixel less already wraps it, and Math.round hid that).
           badgeShort: (() => {
             const clone = badge.cloneNode(true) as HTMLElement;
             clone.style.cssText = "position:absolute;visibility:hidden;width:max-content;white-space:nowrap";
             row.append(clone);
-            const natural = clone.getBoundingClientRect().width;
+            const oneLine = clone.getBoundingClientRect().height;
             clone.remove();
-            return Math.max(0, Math.round(natural - badge.getBoundingClientRect().width));
+            return badge.getBoundingClientRect().height > oneLine + 1 ? 1 : 0;
           })(),
+          // The top bar's counter and the workspace picker stay inside the screen (both widened the page at 200 %).
           edge: Array.from(document.querySelectorAll(".topbar > *, .select.workspace")).filter(
             (e) => e.getBoundingClientRect().right > document.documentElement.clientWidth + 1
           ).length,

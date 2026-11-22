@@ -525,10 +525,12 @@ select {
    a pinned row's "Pinned · bought …" took the whole width and squeezed the name to one letter per line (phase 9,
    measured on the Realme). */
 .row > .sub.inline {
-  /* Shrinks 100x faster than the badge, so the list name gives way first and the badge keeps its natural width
-     at normal sizes (an equal factor wrapped 'Running low' at 100 % with a long list name — phase 9 review); a
-     small floor so its text never spills over the badge. Measured in Brave at 360 px, app font and DejaVu. */
-  flex: 0 100 auto;
+  /* Flex shrink is shared in proportion to factor x base size, never in order: any share wraps the badge's text
+     ('Running low' at 100 % with a long list name: an equal factor took 25 px, 100x still a fraction of a pixel
+     — enough to wrap). At 100000x the badge's share is below Blink's 1/64 px layout unit, so in practice the list
+     name gives way alone until it reaches its floor; past the floor the badge is the only one left to shrink.
+     The floor keeps the list name's text from spilling over the badge. Measured in Brave at 360 px. */
+  flex: 0 100000 auto;
   min-width: min(2.5em, 15%);
   flex-wrap: wrap;
   /* safe: a word wider than its box stays inside it instead of spilling left over the name, and anywhere lets it
@@ -544,9 +546,9 @@ select {
   min-width: min(5em, 30%);
 }
 
-/* The badge gives way after the list name: only when that is at its floor does it shrink and, at 200 % text with a
-   classic scrollbar (330 px), break inside a word rather than leave the row ('Needed' stuck out 5 px, 'Running
-   low' 7 px). */
+/* The badge can shrink (see .row > .sub.inline for why it waits for the list name in practice) and, at 200 % text
+   with a classic scrollbar (330 px), breaks inside a word rather than leave the row ('Needed' stuck out 5 px,
+   'Running low' 7 px). */
 .row > .badge {
   flex: 0 1 auto;
   min-width: 0;
