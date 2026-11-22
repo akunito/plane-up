@@ -53,7 +53,7 @@ test.describe("shopping app offline @shopping-offline", () => {
     const other = await context.newPage();
     await openControlled(other);
     await context.setOffline(true);
-    // Wipes: 1 at home, minimum 3: a tick buys 2. Delivered twice it would read 5.
+    // Wipes (seed): 1 at home, restock to 4: a tick buys 3. Delivered once it reads 4; twice, 7.
     await page.getByRole("checkbox", { name: "Wipes: bought" }).click();
     await expect(page.getByText("Waiting to be sent: 1")).toBeVisible();
     // Both tabs see the stored queue and both try to send it the moment the network is back.
@@ -64,7 +64,7 @@ test.describe("shopping app offline @shopping-offline", () => {
       other.evaluate(() => window.dispatchEvent(new Event("online"))),
     ]);
     await expect(page.getByText(/Waiting to be sent/)).toHaveCount(0, { timeout: 20_000 });
-    await server(page, "Wipes", "quantity").toBe(3);
+    await server(page, "Wipes", "quantity").toBe(4);
     await other.close();
   });
 
