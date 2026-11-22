@@ -64,6 +64,8 @@ export class FakeApi {
   /** Answer every request with this instead (a status and an optional JSON body). */
   fail: { status: number; json?: unknown } | null = null;
   ordersAt = new Map<string, string>();
+  /** As the engine: a purchase applied while an order is open stamps the order once (S64). */
+  boughtSince = new Map<string, { at: string; by: string }>();
   pendingPhotos = new Set<string>();
   /** Runs while storage "receives" a photo, before it answers: a refresh racing the upload. */
   onStorage: (() => Promise<unknown>) | null = null;
@@ -127,8 +129,8 @@ export class FakeApi {
         ordered_at: this.ordersAt.get(id) ?? new Date().toISOString(),
         ordered_by: ME.id,
         overdue: false,
-        bought_since_at: null,
-        bought_since_by: null,
+        bought_since_at: this.boughtSince.get(id)?.at ?? null,
+        bought_since_by: this.boughtSince.get(id)?.by ?? null,
       }));
   }
 
@@ -192,6 +194,12 @@ export class FakeApi {
       for (const op of ops)
         if (op.op === "mark_ordered") this.ordersAt.set(op.args.order_id as string, new Date().toISOString());
       const results = this.server.apply(ops, ME.id);
+      ops.forEach((op, i) => {
+        if (op.op !== "buy" || results[i]?.result !== "applied") return;
+        for (const [id, o] of this.server.orders)
+          if (o.item === op.target && o.status === "open" && !this.boughtSince.has(id))
+            this.boughtSince.set(id, { at: new Date().toISOString(), by: ME.id });
+      });
       // The engine answers with the item's full payload; the model answers with its state only.
       for (const r of results) if (r.item) r.item = this.payload(r.item.id);
       return [200, { results }];

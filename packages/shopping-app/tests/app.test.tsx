@@ -277,6 +277,67 @@ describe("the to-buy list", () => {
     expect(within(screen.getByRole("dialog")).getByRole("alert").textContent).toContain("already has an open order");
   });
 
+  it("S15: with two open orders, Arrived asks which one and the other stays open", async () => {
+    await boot();
+    for (const [n, ref] of [
+      ["1", "A-1"],
+      ["2", "B-2"],
+    ] as const) {
+      fireEvent.click(screen.getByRole("button", { name: "Mark Protein as ordered" }));
+      const d = screen.getByRole("dialog");
+      fireEvent.change(within(d).getByLabelText("Quantity"), { target: { value: n } });
+      fireEvent.change(within(d).getByLabelText("Reference (shop, order number)"), { target: { value: ref } });
+      fireEvent.click(within(d).getByRole("button", { name: "Mark ordered" }));
+      // Sequential on purpose: the second order is placed after the first is answered.
+      // oxlint-disable-next-line no-await-in-loop
+      await settle();
+    }
+    expect(screen.getByRole("region", { name: "On the way · 2" })).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: "Protein: the order arrived" })[0]!);
+    const dialog = screen.getByRole("dialog");
+    const choices = within(within(dialog).getByRole("group", { name: "Which order" })).getAllByRole("radio");
+    expect(choices).toHaveLength(2);
+    // The fake API keeps no reference: the orders are told apart by quantity (×1 and ×2).
+    fireEvent.click(choices.find((r) => r.closest("label")!.textContent!.includes("×2"))!);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Arrived" }));
+    await settle();
+    const arrived = api.ops().find((o) => o.op === "arrived")!;
+    const b2 = api.ops().find((o) => o.op === "mark_ordered" && o.args.reference === "B-2")!;
+    expect(arrived.args).toMatchObject({ order_id: b2.args.order_id, quantity: 2 });
+    const left = screen.getByRole("region", { name: "On the way · 1" });
+    expect(within(left).getByText("×1")).toBeTruthy();
+  });
+
+  it("S64: A buys it offline while B orders it; the order stays open, marked bought since, with an offer to cancel", async () => {
+    await boot();
+    api.fail = { status: 502 };
+    fireEvent.click(screen.getByRole("checkbox", { name: "Wipes: bought" }));
+    await waitFor(() => expect(controller.get().queue.failure?.kind).toBe("server"));
+    const orderId = newUuid();
+    api.server.apply(
+      [
+        {
+          v: 1,
+          client_op_id: newUuid(),
+          queue_id: null,
+          target: WIPES,
+          op: "mark_ordered",
+          args: { order_id: orderId, quantity: 3 },
+        },
+      ],
+      BO.id
+    );
+    api.fail = null;
+    await act(async () => controller.retry());
+    await settle();
+    expect(api.server.orders.get(orderId)!.status).toBe("open");
+    const row = screen.getByRole("region", { name: /On the way/ });
+    expect(within(row).getByText(/Ana bought it .*after it was ordered\./)).toBeTruthy();
+    fireEvent.click(within(row).getByRole("button", { name: "Wipes: cancel the order" }));
+    await settle();
+    expect(api.server.orders.get(orderId)!.status).toBe("cancelled");
+  });
+
   it("grouping by urgency puts out first and pinned last", async () => {
     await boot();
     fireEvent.change(screen.getByRole("combobox", { name: /Group/ }), { target: { value: "urgency" } });
@@ -410,6 +471,24 @@ describe("item sheet", () => {
     await settle();
     const change = api.ops().find((o) => o.op === "change_mode")!;
     expect(change.args).toEqual({ mode: "units", quantity: 2 });
+  });
+
+  it("S11: units → level → units asks the quantity again and never offers the old number", async () => {
+    await boot(catalog(), `#/item/${WIPES}`);
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "Wipes" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Track Wipes as: Levels" }));
+    const toLevel = screen.queryByRole("dialog");
+    if (toLevel) fireEvent.click(within(toLevel).getByRole("button", { name: "Save" }));
+    await settle();
+    expect(api.server.items.get(WIPES)!.mode).toBe("level");
+    fireEvent.click(screen.getByRole("button", { name: "Track Wipes as: Units" }));
+    const dialog = screen.getByRole("dialog");
+    const field = within(dialog).getByLabelText("How many are at home now?") as HTMLInputElement;
+    expect(field.value).toBe("");
+    fireEvent.change(field, { target: { value: "4" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await settle();
+    expect(api.server.items.get(WIPES)).toMatchObject({ mode: "units", quantity: 4 });
   });
 
   it("a data field saves when it is left, online, never through the queue", async () => {
