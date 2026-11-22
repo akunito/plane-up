@@ -88,8 +88,27 @@ test.describe("shopping app offline @shopping-offline", () => {
   }) => {
     await openControlled(page);
     await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
-    // The snapshot is written a moment after the list loads.
-    await page.waitForTimeout(500);
+    // The snapshot is written a moment after the list loads: polled, not a fixed wait (phase 9 review).
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            new Promise<boolean>((resolve) => {
+              const open = indexedDB.open("plane-shopping");
+              open.addEventListener("error", () => resolve(false));
+              open.addEventListener("success", () => {
+                const db = open.result;
+                if (!db.objectStoreNames.contains("kv")) return resolve(false);
+                const keys = db.transaction("kv", "readonly").objectStore("kv").getAllKeys();
+                keys.addEventListener("success", () =>
+                  resolve(keys.result.some((k) => String(k).startsWith("plane-shopping-snapshot:")))
+                );
+                keys.addEventListener("error", () => resolve(false));
+              });
+            })
+        )
+      )
+      .toBe(true);
     // The shell must be in the worker's cache: if setOffline did not reach the worker's own fetch, its
     // network fallback could pass this test while a phone in airplane mode gets nothing (phase 6 audit).
     expect(

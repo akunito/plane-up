@@ -263,6 +263,11 @@ test.describe("inventory in the main app @inventory-main", () => {
     try {
       await gus.page.goto("/qa-inv/");
       await expect(gus.page.getByText("QA Inventory").first()).toBeVisible();
+      // Absence proves something only once the projects are in: wait for the guest's own project in the sidebar
+      // (phase 9 review: the check could run before the project store loaded).
+      await expect(
+        gus.page.getByRole("complementary", { name: "Main sidebar" }).getByText("Home", { exact: true }).first()
+      ).toBeVisible();
       await expect(gus.page.getByTestId("shopping-widget")).toHaveCount(0);
       await expect(gus.page.getByTestId("sidebar-shopping")).toHaveCount(0);
       const res = await gus.page.request.get("/api/workspaces/qa-inv/home-preferences/");
