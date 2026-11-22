@@ -81,6 +81,13 @@ class _Invalid(Exception):
     pass
 
 
+class _Outside(Exception):
+    """A refusal found under the lock that the unlocked check would have answered (gone, forbidden)."""
+
+    def __init__(self, reason):
+        self.reason = reason
+
+
 class _Rejected(Exception):
     def __init__(self, reason):
         super().__init__(reason)
@@ -503,8 +510,9 @@ def _answer(event, duplicate=False, item=None):
 
 
 def _record_outside(ctx, parsed, raw, result, reason, item=None):
-    """Record a refusal that touched no state. A duplicate delivery of one is answered afresh, after the
-    authorisation check, so nothing old is replayed to someone who has lost access."""
+    """Record a refusal that touched no state. A duplicate delivery of one is answered afresh after the
+    authorisation check while access is still missing, so nothing old is replayed to someone who lost it; once
+    access is back, the stored refusal (no item) answers it as duplicate_id — still a refusal."""
     try:
         with transaction.atomic():
             _record(ctx, parsed, raw, result, reason, item=item)
@@ -564,7 +572,18 @@ def apply_operation(raw, ctx):
         with transaction.atomic():
             # of=("self",): without it FOR UPDATE also locks the joined Plane project row, and inventory
             # operations would queue behind every project-scoped write (phase 2 re-review).
-            locked = InventoryItem.objects.select_for_update(of=("self",)).select_related("project").get(pk=item.pk)
+            locked = (
+                InventoryItem.objects.select_for_update(of=("self",))
+                .select_related("project", "inventory_list")
+                .filter(pk=item.pk)
+                .first()
+            )
+            # Re-checked under the lock (phase 9 review): the item can be deleted or moved to another project
+            # between the unlocked authorisation above and here, and authorisation is against its CURRENT project.
+            if locked is None or locked.inventory_list.deleted_at is not None or locked.project.deleted_at is not None:
+                raise _Outside("gone")
+            if locked.project_id != item.project_id and not can_use_project(ctx.user, locked.project):
+                raise _Outside("forbidden")
             before = _snapshot(locked)
             op = parsed["op"]
             if op in CAS and _changed_by_someone_else(locked, parsed["base_rev"], ctx, parsed["queue_id"]):
@@ -587,6 +606,8 @@ def apply_operation(raw, ctx):
                 order=order,
             )
             return _answer(event, item=locked)
+    except _Outside as e:
+        return _record_outside(ctx, parsed, raw, "rejected", e.reason)
     except _Stale:
         try:
             with transaction.atomic():

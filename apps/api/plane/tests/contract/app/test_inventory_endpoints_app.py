@@ -662,3 +662,71 @@ def test_s31_the_history_shows_a_step_made_through_the_api(workspace, people, ho
     assert result["result"] == "applied", result
     body = _client(people["bob"]).get(proj(workspace.slug, home, f"items/{item.pk}/history/")).json()
     assert [(e["op"], e["source"]) for e in body] == [("set_needed", "web"), ("buy", "api")]
+
+
+# ---------------------------------------------------------------- phase 9 full review (server)
+
+
+def test_review_malformed_member_input_is_a_400_never_a_500(workspace, people, home, groceries):
+    item = _item(groceries, "Milk", "on_demand", needed=True)
+    client = _client(people["bob"])
+    calls = [
+        ("patch", proj(workspace.slug, home, f"items/{item.pk}/"), {"last_price": "NaN"}),
+        ("patch", proj(workspace.slug, home, f"items/{item.pk}/"), {"name": "Mi\x00lk"}),
+        ("patch", proj(workspace.slug, home, f"items/{item.pk}/"), {"category": "Da\x00iry"}),
+        ("patch", proj(workspace.slug, home, f"items/{item.pk}/"), {"sort_order": 10**400}),
+        ("patch", proj(workspace.slug, home, f"lists/{groceries.pk}/"), {"sort_order": 10**400}),
+        ("patch", proj(workspace.slug, home, f"lists/{groceries.pk}/"), ["name"]),
+        ("post", proj(workspace.slug, home, "lists/"), ["name"]),
+        ("post", ws(workspace.slug, "categories/rename/"), ["from"]),
+        ("put", ws(workspace.slug, "preferences/"), ["x"]),
+    ]
+    for method, url, body in calls:
+        response = getattr(client, method)(url, body, format="json")
+        assert response.status_code == 400, (
+            method,
+            url,
+            body if not isinstance(body, dict) else list(body),
+            response.status_code,
+        )
+    item.refresh_from_db()
+    assert (item.name, item.category, item.last_price) == ("Milk", "", None)
+
+
+def test_review_an_items_list_shows_no_open_order_of_a_deleted_item(workspace, people, home, groceries):
+    gone = _item(groceries, "Coffee", "level", level="out")
+    InventoryOrder.objects.create(item=gone, project=home, ordered_at=timezone.now())
+    InventoryItem.all_objects.filter(pk=gone.pk).update(deleted_at=timezone.now())
+    body = _client(people["bob"]).get(proj(workspace.slug, home, f"lists/{groceries.pk}/items/")).json()
+    assert body["open_orders"] == [] and [i["name"] for i in body["items"]] == []
+
+
+def test_review_authorisation_is_checked_again_under_the_lock(workspace, people, home, groceries, monkeypatch):
+    """Between the unlocked check and the lock the item moves to a project bob is not in, or is deleted."""
+    from plane.app.inventory import engine
+
+    elsewhere = Project.objects.create(name="Away", identifier="AWAY", workspace=workspace, inventory_view=True)
+    ProjectMember.objects.create(project=elsewhere, member=people["alice"], role=20)
+    away = InventoryList.objects.create(name="Away list", project=elsewhere)
+    client = _client(people["bob"])
+    real = engine.can_use_project
+    for move in ("project", "delete"):
+        item = _item(groceries, f"Water {move}", "units", quantity=1, min_quantity=2)
+        state = {"first": True}
+
+        def racing(user, project, item=item, move=move):
+            allowed = real(user, project)
+            if state["first"]:
+                state["first"] = False
+                if move == "project":
+                    InventoryItem.objects.filter(pk=item.pk).update(project=elsewhere, inventory_list=away)
+                else:
+                    InventoryItem.all_objects.filter(pk=item.pk).update(deleted_at=timezone.now())
+            return allowed
+
+        monkeypatch.setattr(engine, "can_use_project", racing)
+        op = {"v": 1, "client_op_id": str(uuid.uuid4()), "target": str(item.pk), "op": "buy", "args": {"quantity": 1}}
+        result = client.post(ws(workspace.slug, "ops/"), {"ops": [op]}, format="json").json()["results"][0]
+        assert (result["result"], result["reason"]) == ("rejected", "forbidden" if move == "project" else "gone"), move
+        assert "item" not in result
+        assert InventoryItem.all_objects.get(pk=item.pk).quantity == 1

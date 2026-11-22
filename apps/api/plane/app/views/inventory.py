@@ -279,6 +279,8 @@ class InventoryCategoryRenameEndpoint(InventoryBaseView):
         workspace = self._workspace(slug)
         if workspace is None or not is_inventory_member(request.user, workspace.pk):
             return _forbidden()
+        if not isinstance(request.data, dict):
+            return _bad("body")
         source, target = request.data.get("from"), request.data.get("to")
         if not isinstance(source, str) or not source.strip() or len(source) > 255:
             return _bad("from")
@@ -393,6 +395,8 @@ class InventoryPreferenceEndpoint(InventoryBaseView):
         workspace = self._workspace(slug)
         if workspace is None or not is_inventory_member(request.user, workspace.pk):
             return _forbidden()
+        if not isinstance(request.data, dict):
+            return _bad("body")
         order = request.data.get("category_order", [])
         grouping = request.data.get("default_grouping", "category")
         if (
@@ -412,6 +416,9 @@ class InventoryPreferenceEndpoint(InventoryBaseView):
 # ---------------------------------------------------------------- project level
 
 
+SORT_ORDER_MAX = 1e15
+
+
 def _clean_item_data(data, current=None):
     """Validate data fields (never state). Returns (cleaned, error_response)."""
     if not isinstance(data, dict):
@@ -428,9 +435,12 @@ def _clean_item_data(data, current=None):
             if not isinstance(value, str) or not value.strip() or len(value) > 255:
                 return None, _bad(field)
             value = " ".join(value.split())
+            if "\x00" in value:
+                return None, _bad(field)
         elif field in ("category", "store", "variant", "barcode", "currency"):
             limit = {"barcode": 64, "currency": 3}.get(field, 255)
-            if not isinstance(value, str) or len(value) > limit:
+            # Postgres refuses NUL in text; the engine walks its strings for it, the data fields did not (phase 9).
+            if not isinstance(value, str) or len(value) > limit or "\x00" in value:
                 return None, _bad(field)
             value = value.strip()
         elif field == "purchase_url":
@@ -449,7 +459,8 @@ def _clean_item_data(data, current=None):
             ):
                 return None, _bad(field)
         elif field == "sort_order":
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
+            # A float column: an integer past its range is a DataError (500) at the save (phase 9 review).
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not abs(value) <= SORT_ORDER_MAX:
                 return None, _bad(field)
         elif field == "last_price":
             if value is not None:
@@ -457,7 +468,7 @@ def _clean_item_data(data, current=None):
                     value = Decimal(str(value))
                 except InvalidOperation:
                     return None, _bad(field)
-                if value < 0 or value >= Decimal("1e10"):
+                if not value.is_finite() or value < 0 or value >= Decimal("1e10"):
                     return None, _bad(field)
         elif field == "expires_on":
             if value is not None:
@@ -506,6 +517,8 @@ class ProjectInventoryListsEndpoint(ProjectInventoryBaseView):
         project = self._project(request, slug, project_id)
         if project is None:
             return _forbidden()
+        if not isinstance(request.data, dict):
+            return _bad("body")
         name = request.data.get("name")
         mode = request.data.get("default_mode", InventoryMode.ON_DEMAND)
         if not isinstance(name, str) or not name.strip() or len(name) > 255:
@@ -527,6 +540,8 @@ class ProjectInventoryListDetailEndpoint(ProjectInventoryBaseView):
         lst = InventoryList.objects.filter(pk=pk, project=project).first()
         if lst is None:
             return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        if not isinstance(request.data, dict):
+            return _bad("body")
         if "name" in request.data:
             name = request.data["name"]
             if not isinstance(name, str) or not name.strip() or len(name) > 255:
@@ -537,7 +552,8 @@ class ProjectInventoryListDetailEndpoint(ProjectInventoryBaseView):
                 return _bad("default_mode")
             lst.default_mode = request.data["default_mode"]
         if "sort_order" in request.data:
-            if isinstance(request.data["sort_order"], bool) or not isinstance(request.data["sort_order"], (int, float)):
+            value = request.data["sort_order"]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not abs(value) <= SORT_ORDER_MAX:
                 return _bad("sort_order")
             lst.sort_order = request.data["sort_order"]
         lst.save()
@@ -566,8 +582,10 @@ class ProjectInventoryItemsEndpoint(ProjectInventoryBaseView):
             return Response({"error": "not found"}, status=status.HTTP_404_NOT_FOUND)
         items = with_orders(InventoryItem.objects.filter(inventory_list=lst)).order_by("sort_order", "name_normalised")
         now = timezone.now()
+        # The soft-delete manager does not apply across the join: an item deleted moments ago keeps its open
+        # orders until the cascade runs (phase 9 review).
         orders = InventoryOrder.objects.filter(
-            item__inventory_list=lst, status=InventoryOrderStatus.OPEN
+            item__inventory_list=lst, item__deleted_at__isnull=True, status=InventoryOrderStatus.OPEN
         ).select_related("item")
         return Response(
             {
