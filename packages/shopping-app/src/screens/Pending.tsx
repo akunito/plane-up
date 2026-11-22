@@ -8,6 +8,7 @@ import type { AppState } from "../controller";
 import type { Key, T } from "../i18n";
 import { personName } from "../model";
 import { Ago, Icon, Rich, useCtx } from "../ui";
+import { updateApp } from "../update";
 
 export function describeEntry(e: Entry, t: T): string {
   const a = e.op.args;
@@ -61,8 +62,13 @@ export function Pending({ s }: { s: AppState }) {
                 </a>
               ) : null}
               {failure.kind === "outdated" ? (
-                // A new worker serves the new build on the next load (brief, "Worker").
-                <button type="button" className="primary" onClick={() => window.location.reload()}>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() =>
+                    void updateApp({ container: navigator.serviceWorker, reload: () => window.location.reload() })
+                  }
+                >
                   {t("reload_app")}
                 </button>
               ) : (
@@ -74,7 +80,8 @@ export function Pending({ s }: { s: AppState }) {
                 {t("discard_first")}
               </button>
             </div>
-            <p className="muted small">{t("may_have_applied")}</p>
+            {/* A format refusal is answered before the server's ledger: nothing of it was applied. */}
+            {failure.kind !== "outdated" ? <p className="muted small">{t("may_have_applied")}</p> : null}
           </section>
         ) : null}
 

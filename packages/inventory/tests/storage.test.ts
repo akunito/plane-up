@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { OP_VERSION } from "../src/ops";
 import { createQueue } from "../src/queue";
 import { load, parse, serialize, STORAGE_VERSION } from "../src/storage";
 import type { Migration } from "../src/storage";
@@ -20,6 +21,18 @@ describe("storage", () => {
     };
     expect(load(v1, migrations, 2)).toMatchObject({ ok: true, state: { known: {}, done: {} } });
     expect(load(v1, migrations, 3)).toMatchObject({ ok: true, state: { known: {}, notices: [], recent: [] } });
+  });
+
+  it("a queue stored by every past version loads with its operations in this build's format (S25)", () => {
+    // Written as storage version 1 wrote it, operation format 1. Raising OP_VERSION without a migration that
+    // rewrites queued operations fails here: the new build would send the old format, be refused again and
+    // stay blocked behind "Update the app" (queue.ts, outdated; phase 9 audit).
+    const op = { v: 1, client_op_id: "c1", queue_id: "q", target: "milk", op: "buy", args: {} };
+    const entry = { op, tappedAt: 1, transmission: "never", attempts: 0 };
+    const v1 = JSON.stringify({ version: 1, state: { ...createQueue("ana", "q"), entries: [entry] } });
+    const loaded = load(v1);
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) expect(loaded.state.entries.map((e) => e.op.v)).toEqual([OP_VERSION]);
   });
 
   it("keeps a queue from a newer app instead of discarding it, and never guesses a missing step", () => {

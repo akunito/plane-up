@@ -1,7 +1,7 @@
 // The service worker's logic (src/worker-core.ts). Its build helper is tested in apps/web (Node).
 import { describe, expect, it } from "vitest";
 import type { QueueState } from "@plane/inventory";
-import { createQueue, makeLock, refreshed, tap } from "@plane/inventory";
+import { createQueue, makeLock, OP_VERSION, refreshed, tap } from "@plane/inventory";
 import { memoryStore } from "../src/store";
 import type { AppStore } from "../src/store";
 import { StoredQueueError } from "../src/store";
@@ -233,6 +233,15 @@ describe("sendQueues (background sync)", () => {
     stores.set(`${ANA}:home`, memoryStore(old));
     expect(await sendQueues(deps)).toEqual({ kind: "sent", waiting: 1 });
     expect(sent).toHaveLength(0);
+  });
+
+  it("a queue the server refused for its format waits for the updated app: nothing sent, no retry (S25)", async () => {
+    const { deps, stores, sent } = setup({ status: 200, id: ANA });
+    const outdated = queueWithTap(ANA, { kind: "outdated", attempts: 1, nextTryAt: 0, opVersion: OP_VERSION });
+    stores.set(`${ANA}:home`, memoryStore(outdated));
+    expect(await sendQueues(deps)).toEqual({ kind: "sent", waiting: 1 });
+    expect(sent).toHaveLength(0);
+    expect((await stores.get(`${ANA}:home`)!.read()).failure?.kind).toBe("outdated");
   });
 
   it("one unreadable queue is skipped; the person's other queues are still sent", async () => {

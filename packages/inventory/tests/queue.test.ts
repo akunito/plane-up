@@ -11,6 +11,7 @@ import {
   DISCARD_ONLY_AFTER_MS,
   heldEntries,
   HOLD_AFTER_MS,
+  isHeld,
   MAX_BATCH,
   nextBatch,
   onDelivered,
@@ -102,6 +103,78 @@ describe("sending", () => {
     const s = onRestart(sent.state);
     expect(s.sending).toBe(false);
     expect(s.entries[0]!.transmission).toBe("transmitted");
+  });
+});
+
+describe("phase 9 scenario matrix (APLANE-67)", () => {
+  it("S09: a mixed answer applies the good ones, empties the queue and shows each refusal", () => {
+    const items = ["a", "b", "c", "d"].map((id) => item({ id, mode: "on_demand", quantity: null, min_quantity: null }));
+    let s = start(items);
+    for (const id of ["a", "b", "c", "d"]) s = tap(s, "buy", id, {}, t());
+    const sent = nextBatch(s, 1_000_000, "ana")!;
+    const [a, b, c, d] = sent.batch;
+    s = onDelivered(sent.state, [
+      { client_op_id: a!.client_op_id, result: "applied", item: items[0]! },
+      { client_op_id: b!.client_op_id, result: "rejected", reason: "gone" },
+      { client_op_id: c!.client_op_id, result: "rejected", reason: "forbidden" },
+      { client_op_id: d!.client_op_id, result: "rejected", reason: "invalid_for_mode" },
+    ]);
+    expect(s.entries).toHaveLength(0);
+    expect(s.notices.map((x) => [x.kind, x.reason])).toEqual([
+      ["rejected", "gone"],
+      ["rejected", "forbidden"],
+      ["rejected", "invalid_for_mode"],
+    ]);
+    expect(s.failure).toBeNull();
+  });
+
+  it("S38: two offline taps both refused as stale are both shown", () => {
+    const lvl = item({ mode: "level", level: "ok", quantity: null, min_quantity: null });
+    let s = tap(start([lvl]), "set_level", "milk", { level: "low" }, t());
+    s = tap(s, "set_level", "milk", { level: "out" }, t());
+    const sent = nextBatch(s, 1_000_000, "ana")!;
+    const fresh = { ...lvl, rev: 9, level: "ok" as const };
+    s = onDelivered(
+      sent.state,
+      sent.batch.map((o) => ({ client_op_id: o.client_op_id, result: "stale" as const, item: fresh }))
+    );
+    expect(s.entries).toHaveLength(0);
+    expect(s.notices.map((x) => x.kind)).toEqual(["stale", "stale"]);
+    expect(view(s).milk!.level).toBe("ok");
+  });
+
+  it("S59: a queue of 250 is delivered in order, in three requests", () => {
+    let s = start();
+    for (let i = 0; i < 250; i++) s = tap(s, "adjust", "milk", { delta: 1 }, t());
+    const order = ids(s);
+    const delivered: string[] = [];
+    let requests = 0;
+    for (;;) {
+      const sent = nextBatch(s, 1_000_000, "ana");
+      if (!sent) break;
+      requests++;
+      delivered.push(...sent.batch.map((o) => o.client_op_id));
+      s = onDelivered(
+        sent.state,
+        sent.batch.map((o) => ({ client_op_id: o.client_op_id, result: "applied" as const }))
+      );
+    }
+    expect(requests).toBe(3);
+    expect(delivered).toEqual(order);
+    expect(waiting(s)).toBe(0);
+  });
+
+  it("S27: a phone clock wrong by days changes only the shown age and whether it asks first", () => {
+    const day = 24 * 60 * 60 * 1000;
+    // Tapped with the clock 3 days AHEAD, delivered after it was corrected: the age is never negative and
+    // nothing is held.
+    let s = tap(start(), "adjust", "milk", { delta: 1 }, t(1_000_000 + 3 * day));
+    expect(isHeld(s.entries[0]!, 1_000_000)).toBe(false);
+    expect(nextBatch(s, 1_000_000, "ana")!.batch[0]!.age_ms).toBe(0);
+    // Tapped with the clock 3 days BEHIND: after the correction it looks old, so the phone asks first.
+    s = tap(start(), "adjust", "milk", { delta: 1 }, t(1_000_000 - 3 * day));
+    expect(isHeld(s.entries[0]!, 1_000_000)).toBe(true);
+    expect(nextBatch(s, 1_000_000, "ana")).toBeNull();
   });
 });
 
