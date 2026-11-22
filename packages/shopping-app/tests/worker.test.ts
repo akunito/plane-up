@@ -244,6 +244,19 @@ describe("sendQueues (background sync)", () => {
     expect((await stores.get(`${ANA}:home`)!.read()).failure?.kind).toBe("outdated");
   });
 
+  it("a held queue that last failed offline does not make the browser retry: the person must answer first", async () => {
+    const { deps, stores, sent } = setup({ status: 200, id: ANA });
+    const old = queueWithTap(ANA, { kind: "offline", attempts: 4, nextTryAt: 0 });
+    old.entries = old.entries.map((e) => ({
+      ...e,
+      transmission: "transmitted",
+      tappedAt: Date.now() - 3 * 60 * 60 * 1000,
+    }));
+    stores.set(`${ANA}:home`, memoryStore(old));
+    expect(await sendQueues(deps)).toEqual({ kind: "sent", waiting: 1 });
+    expect(sent).toHaveLength(0);
+  });
+
   it("one unreadable queue is skipped; the person's other queues are still sent", async () => {
     const { deps, stores, sent } = setup({ status: 200, id: ANA });
     stores.set(`${ANA}:work`, memoryStore(queueWithTap(ANA)));

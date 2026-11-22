@@ -173,6 +173,8 @@ export const pl: Dictionary = {
   pending_title: "Zmiany oczekujące",
   held_title: "Niewysłane od ponad dwóch godzin",
   held_hint: "Serwer nie wie, czy to nadal prawda. Wyślij lub odrzuć: do tego czasu nic za nimi nie zostanie wysłane.",
+  held_waiting: "Czekają na Ciebie, sprzed ponad dwóch godzin: {n}. Wyślij je lub odrzuć.",
+  held_maybe_sent: "Wcześniejsza próba mogła już dotrzeć do serwera.",
   send: "Wyślij",
   discard: "Odrzuć",
   send_all: "Wyślij wszystkie",

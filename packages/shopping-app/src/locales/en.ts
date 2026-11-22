@@ -174,6 +174,8 @@ export const en = {
   held_title: "Not sent for more than two hours",
   held_hint:
     "The server cannot know whether these are still true. Send or discard them: nothing behind them is sent until you do.",
+  held_waiting: "Waiting for you, older than two hours: {n}. Send or discard them.",
+  held_maybe_sent: "An earlier attempt may already have reached the server.",
   send: "Send",
   discard: "Discard",
   send_all: "Send all",

@@ -2,7 +2,8 @@
 // Hash routes because the server answers unknown paths with the main app's shell (brief: Why a
 // standalone app). The marker the gate looks for is in index.html, not here.
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { heldEntries } from "@plane/inventory";
 import type { Controller } from "./controller";
 import type { Locale } from "./i18n";
 import { makeT } from "./i18n";
@@ -70,9 +71,17 @@ export function App({
 }
 
 function Root() {
-  const { c, t } = useCtx();
+  const { c, t, now } = useCtx();
   const s = useSyncExternalStore(c.subscribe, c.get);
   const route = useRoute();
+  // Changes held by the two-hour rule are listed as soon as the app opens (brief): once per start, and only
+  // from the to-buy list, never over a screen the person opened by link.
+  const askedHeld = useRef(false);
+  useEffect(() => {
+    if (askedHeld.current || s.phase !== "ready") return;
+    askedHeld.current = true;
+    if (route.name === "list" && heldEntries(s.queue, now()).length > 0) globalThis.location.hash = "#/pending";
+  }, [s.phase, s.queue, route.name, now]);
 
   if (s.phase !== "ready") {
     const message =

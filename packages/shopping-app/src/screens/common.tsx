@@ -45,11 +45,14 @@ export function QueueStatus({ s }: { s: AppState }) {
   if (s.connection === "offline" || (s.offlineSince !== null && s.connection))
     text =
       s.offlineSince !== null ? t("offline_since", { when: ago(locale, s.offlineSince, now()) }) : t("offline_now");
+  // A held head is why nothing goes, whatever failure the queue last recorded (decision 3 audit: an offline
+  // failure stayed on screen after coverage returned, saying the changes would be sent).
+  else if (held > 0) text = t("held_waiting", { n: held });
   else if (failure && n > 0)
     text = t(`failure_${failure.kind}`, { error: failure.error ?? String(failure.status ?? "") });
   else if (s.connection) text = t("refresh_failed");
   return (
-    <div className={`status${failure || s.connection ? " warn" : ""}`} role="status">
+    <div className={`status${failure || s.connection || held > 0 ? " warn" : ""}`} role="status">
       <span className="grow">
         {text ? <span className="block">{text}</span> : null}
         {n > 0 ? <span className="block">{t("waiting", { n })}</span> : null}

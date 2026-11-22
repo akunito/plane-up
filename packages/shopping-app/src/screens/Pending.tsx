@@ -3,7 +3,7 @@
 
 import type { ReactNode } from "react";
 import type { Entry, Notice } from "@plane/inventory";
-import { heldEntries, isDiscardOnly } from "@plane/inventory";
+import { heldEntries, isDiscardOnly, isHeld } from "@plane/inventory";
 import type { AppState } from "../controller";
 import type { Key, T } from "../i18n";
 import { personName } from "../model";
@@ -50,7 +50,8 @@ export function Pending({ s }: { s: AppState }) {
         <h1 className="title">{t("pending_title")}</h1>
       </header>
       <main className="scroll">
-        {failure && s.queue.entries.length > 0 ? (
+        {/* Not while the head is held: the last failure is not why nothing goes (decision 3 audit). */}
+        {failure && s.queue.entries.length > 0 && !(s.queue.entries[0] && isHeld(s.queue.entries[0], now())) ? (
           <section className="notice warn" aria-label={t("failure_title")}>
             <h2 className="group">{t("failure_title")}</h2>
             <p>{t(`failure_${failure.kind}`, { error: failure.error ?? String(failure.status ?? "") })}</p>
@@ -95,6 +96,7 @@ export function Pending({ s }: { s: AppState }) {
                 <span className="grow">
                   {line(e)}
                   {isDiscardOnly(e, now()) ? <span className="sub block">{t("discard_only")}</span> : null}
+                  {e.transmission !== "never" ? <span className="sub block">{t("held_maybe_sent")}</span> : null}
                 </span>
                 {!isDiscardOnly(e, now()) ? (
                   <button type="button" className="secondary" onClick={() => void c.approve([e.op.client_op_id])}>

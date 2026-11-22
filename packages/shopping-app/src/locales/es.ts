@@ -174,6 +174,8 @@ export const es: Dictionary = {
   held_title: "Sin enviar desde hace más de dos horas",
   held_hint:
     "El servidor no puede saber si siguen siendo ciertos. Envíalos o descártalos: hasta entonces no se envía nada de lo que hay detrás.",
+  held_waiting: "Esperan tu respuesta, de hace más de dos horas: {n}. Envíalos o descártalos.",
+  held_maybe_sent: "Un intento anterior puede haber llegado ya al servidor.",
   send: "Enviar",
   discard: "Descartar",
   send_all: "Enviar todos",

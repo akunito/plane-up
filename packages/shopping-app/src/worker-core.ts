@@ -10,7 +10,7 @@
 // server would apply them as whoever holds the session cookie).
 
 import type { ClientOptions, Lock } from "@plane/inventory";
-import { replay, requestJson, retryNow, waiting } from "@plane/inventory";
+import { isHeld, replay, requestJson, retryNow, waiting } from "@plane/inventory";
 import type { AppStore } from "./store";
 
 export const SHELL_MARKER = 'name="plane-shopping-shell"';
@@ -140,7 +140,15 @@ export async function sendQueues(deps: SendDeps): Promise<SendOutcome> {
       const after = await store.read();
       const n = waiting(after);
       left += n;
-      if (n > 0 && (after.failure?.kind === "offline" || after.failure?.kind === "server")) retry = true;
+      // Not when the head is held: the person must answer first, and a retry would only burn the browser's
+      // background-sync attempts (decision 3 audit).
+      const head = after.entries[0];
+      if (
+        n > 0 &&
+        !(head && isHeld(head, deps.now())) &&
+        (after.failure?.kind === "offline" || after.failure?.kind === "server")
+      )
+        retry = true;
     } catch {
       // skipped, see above
     }

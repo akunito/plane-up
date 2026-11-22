@@ -23,8 +23,9 @@
 //
 // Accepted, not fixed (phase 3 audit): an entry whose answer was lost and whose effect a later refresh
 // already shows is previewed twice until its retry is answered (seconds when online) — or, once it is held
-// by the two-hour rule, until the person answers the hold (decision 3, 2026-11-22; the app lists held
-// entries as soon as it opens). The device
+// by the two-hour rule, until the person answers the hold (decision 3, 2026-11-22; the app opens the held
+// list when it starts on the to-buy list, and the status line says they wait). An approval is the person's
+// answer and stays: approved while still offline, the entry goes when coverage returns (decision 3 audit). The device
 // cannot tell its own applied-but-unanswered step from someone else's. And an undo (other than of a ±n)
 // is previewed only when the device held the item's state right before that step (serverBefore), which
 // is what the server restores: not after someone else changed the item in between, nor after a

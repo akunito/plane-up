@@ -200,6 +200,56 @@ describe("the to-buy list", () => {
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
   });
 
+  it("S01: A and B tick in different stores; A finishing leaves B's Done and items alone", async () => {
+    await boot();
+    const b = new Controller({
+      base: "",
+      fetchImpl: (input, init) => api.fetch(input, init),
+      lock: makeLock(undefined),
+      openStore: async (userId) => memoryStore(createQueue(userId, newUuid())),
+    });
+    await b.start();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Milk: bought" }));
+    await b.act("buy", BREAD, {}, { tick: true });
+    await settle();
+    await waitFor(() => expect(b.get().queue.entries).toHaveLength(0));
+    const sent = api.ops().length;
+    const before = structuredClone([...api.server.items.values()]);
+    await act(async () => controller.finishShopping());
+    expect(Object.keys(controller.get().queue.done)).toEqual([]);
+    expect(Object.keys(b.get().queue.done)).toEqual([BREAD]);
+    // Finishing is the device's own: nothing is sent and no item changes.
+    expect(api.ops()).toHaveLength(sent);
+    expect([...api.server.items.values()]).toEqual(before);
+  });
+
+  it("S06: unticking after B changed the item is refused, the tick stays under Done, and A is told why", async () => {
+    await boot();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Detergent: bought" }));
+    await settle();
+    const rev = api.server.items.get(DETERGENT)!.rev;
+    api.server.apply(
+      [
+        {
+          v: 1,
+          client_op_id: newUuid(),
+          queue_id: null,
+          target: DETERGENT,
+          op: "set_level",
+          args: { level: "low" },
+          base_rev: rev,
+        },
+      ],
+      "bea-id"
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "Detergent: not bought after all" }));
+    await waitFor(() => expect(controller.get().queue.notices).toHaveLength(1));
+    expect(api.server.items.get(DETERGENT)!.level).toBe("low");
+    expect(screen.getByRole("checkbox", { name: "Detergent: not bought after all" })).toBeTruthy();
+    await go("#/pending");
+    expect(screen.getByText("Detergent: not applied (someone changed it first).")).toBeTruthy();
+  });
+
   it("S17: a pinned item someone else bought stays on the list, saying who bought it and when", async () => {
     // The model server keeps no last_bought_*: the item arrives as the engine sends it after B's purchase.
     const items = catalog();
@@ -609,7 +659,12 @@ describe("phases and failures", () => {
     const failed = api.ops().length; // the 502 attempts are recorded too
     await act(async () => controller.retry());
     expect(api.ops()).toHaveLength(failed);
+    // The status says why nothing goes, not the old failure (decision 3 audit).
+    expect(screen.getByText("Waiting for you, older than two hours: 2. Send or discard them.")).toBeTruthy();
+    expect(screen.queryByText(/did not answer properly/)).toBeNull();
     await go("#/pending");
+    expect(screen.queryByRole("region", { name: "Sending is failing" })).toBeNull();
+    expect(screen.getAllByText("An earlier attempt may already have reached the server.")).toHaveLength(2);
     const held = within(screen.getByRole("region", { name: "Not sent for more than two hours" }));
     const rows = held.getAllByRole("button", { name: "Send" });
     expect(rows).toHaveLength(2);
@@ -620,6 +675,36 @@ describe("phases and failures", () => {
     expect(api.ops()).toHaveLength(failed + 1);
     expect(api.server.items.get(MILK)!.needed).toBe(false);
     expect(api.server.items.get(WIPES)!.quantity).toBe(1);
+    expect(controller.get().queue.notices.map((n) => [n.kind, n.mayHaveApplied])).toEqual([["discarded", true]]);
+  });
+
+  it("S35: an app opened with held changes shows them at once, from the to-buy list only", async () => {
+    let clock = Date.now();
+    const store = memoryStore(createQueue(ME.id, newUuid()));
+    api = new FakeApi(catalog());
+    const start = async (hash: string) => {
+      cleanup();
+      window.location.hash = hash;
+      controller = new Controller({
+        base: "",
+        fetchImpl: (input, init) => api.fetch(input, init),
+        lock: makeLock(undefined),
+        openStore: async () => store,
+        now: () => clock,
+      });
+      await controller.start();
+      render(<App controller={controller} locale="en" now={() => clock} />);
+    };
+    await start("#/");
+    api.fail = { status: 502 };
+    fireEvent.click(screen.getByRole("checkbox", { name: "Milk: bought" }));
+    await waitFor(() => expect(controller.get().queue.failure?.kind).toBe("server"));
+    api.fail = null;
+    clock += 3 * 60 * 60 * 1000;
+    await start(`#/item/${SALT}`);
+    expect(window.location.hash).toBe(`#/item/${SALT}`);
+    await start("#/");
+    await waitFor(() => expect(window.location.hash).toBe("#/pending"));
   });
 
   it("S41: an operation the server keeps failing on blocks the queue until it is discarded; the rest then goes", async () => {
