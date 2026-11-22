@@ -48,6 +48,26 @@ test.describe("shopping app offline @shopping-offline", () => {
     expect(await page.evaluate(async () => !!(await navigator.serviceWorker.getRegistration("/qa-inv/")))).toBe(false);
   });
 
+  test("S55: two tabs open when the network returns deliver each tap once", async ({ page, context }) => {
+    await openControlled(page);
+    const other = await context.newPage();
+    await openControlled(other);
+    await context.setOffline(true);
+    // Wipes: 1 at home, minimum 3: a tick buys 2. Delivered twice it would read 5.
+    await page.getByRole("checkbox", { name: "Wipes: bought" }).click();
+    await expect(page.getByText("Waiting to be sent: 1")).toBeVisible();
+    // Both tabs see the stored queue and both try to send it the moment the network is back.
+    await other.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await context.setOffline(false);
+    await Promise.all([
+      page.evaluate(() => window.dispatchEvent(new Event("online"))),
+      other.evaluate(() => window.dispatchEvent(new Event("online"))),
+    ]);
+    await expect(page.getByText(/Waiting to be sent/)).toHaveCount(0, { timeout: 20_000 });
+    await server(page, "Wipes", "quantity").toBe(3);
+    await other.close();
+  });
+
   test("taps with the network cut are kept, counted, and sent when it returns", async ({ page, context }) => {
     await openControlled(page);
     await context.setOffline(true);

@@ -74,8 +74,8 @@ function Root() {
   const { c, t, now } = useCtx();
   const s = useSyncExternalStore(c.subscribe, c.get);
   const route = useRoute();
-  // Changes held by the two-hour rule are listed as soon as the app opens (brief): once per start, and only
-  // from the to-buy list, never over a screen the person opened by link.
+  // Changes held by the two-hour rule are listed as soon as the app opens (brief): once per page load, and
+  // only from the to-buy list (an unparsable hash counts as the list), never over another screen opened by link.
   const askedHeld = useRef(false);
   useEffect(() => {
     if (askedHeld.current || s.phase !== "ready") return;

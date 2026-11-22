@@ -652,6 +652,29 @@ describe("phases and failures", () => {
     expect(api.server.items.get(MILK)!.needed).toBe(true);
   });
 
+  it("S40: after server errors the app retries by itself; both taps arrive once each, in order", async () => {
+    await boot();
+    api.fail = { status: 502 };
+    fireEvent.click(screen.getByRole("checkbox", { name: "Milk: bought" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Wipes: bought" }));
+    // The backoff's own retries (1 s, then 2 s) keep failing; nobody taps anything.
+    await waitFor(() => expect(controller.get().queue.failure?.attempts ?? 0).toBeGreaterThanOrEqual(2), {
+      timeout: 4000,
+    });
+    api.fail = null;
+    await waitFor(() => expect(controller.get().queue.entries).toHaveLength(0), { timeout: 6000 });
+    const delivered = api.ops().filter((o) => api.server.effects.get(o.client_op_id));
+    expect(new Set(delivered.map((o) => o.target))).toEqual(new Set([MILK, WIPES]));
+    for (const o of delivered) expect(api.server.effects.get(o.client_op_id)).toBe(1);
+    expect(
+      api
+        .ops()
+        .map((o) => o.target)
+        .filter((t, i, all) => all.indexOf(t) === i)
+    ).toEqual([MILK, WIPES]);
+    expect(api.server.items.get(WIPES)!.quantity).toBe(3);
+  }, 15_000);
+
   it("a change refused as stale is listed with Apply anyway", async () => {
     await boot(catalog(), "#/capture");
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "deter" } });

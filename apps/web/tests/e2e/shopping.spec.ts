@@ -286,6 +286,33 @@ test.describe("shopping app @shopping", () => {
     await bo.context.close();
   });
 
+  test("S51: /shopping without the slash lands on the app", async ({ page }) => {
+    await page.goto("/shopping");
+    await expect(page).toHaveURL(/\/shopping\/(#.*)?$/);
+    await expect(page.locator('meta[name="plane-shopping-shell"]')).toHaveCount(1);
+  });
+
+  test("S62: the same person on two devices: the tick shows on both, Done only where it was ticked", async ({
+    browser,
+  }, info) => {
+    const phone = await contextFor(browser, info, "qa-inv-ana");
+    const desk = await contextFor(browser, info, "qa-inv-ana");
+    try {
+      await open(phone.page);
+      await open(desk.page);
+      await phone.page.getByRole("checkbox", { name: "Milk: bought" }).click();
+      await settled(phone.page);
+      await server(phone.page, "Milk", "needed").toBe(false);
+      await expect(phone.page.getByRole("checkbox", { name: "Milk: not bought after all" })).toBeVisible();
+      await desk.page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await expect(desk.page.getByRole("checkbox", { name: "Milk: bought" })).toHaveCount(0);
+      await expect(desk.page.getByRole("checkbox", { name: "Milk: not bought after all" })).toHaveCount(0);
+    } finally {
+      await phone.context.close();
+      await desk.context.close();
+    }
+  });
+
   test("a workspace guest has no access", async ({ browser }, info) => {
     const gus = await contextFor(browser, info, "qa-inv-gus");
     await gus.page.goto("/shopping/");
