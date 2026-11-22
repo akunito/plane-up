@@ -168,6 +168,8 @@ Built 2026-11-20 (APLANE-64), branch `akunito/inventory-phase6` on phase 5; dev 
 5. Inventory enabled on the chosen projects, seed imported, and **a read of the to-buy list as a real member** (the smoke's user is a guest, so the smoke only ever proves a 403 and would pass over a 500 on real data).
 6. The icon installed on both phones from the hostnames decision 8 fixed; the owner's checks.
 
+Progress (2026-11-22): the catalogue was mapped against the tests (`docs/INVENTORY_SCENARIO_MATRIX.md`: 34 covered, 35 partial, 3 none). The mapping found one missing behaviour, S25 (an operation refused for its format version was dropped), now built; a probe while closing S35 found the two-hour rule exempting changes whose attempt failed offline, now held (decision 3 clarified). Tests added for S03, S04, S09, S18, S20, S21, S22, S27, S28, S31, S35, S38, S41, S50, S59. Installing from the internal hostname leaves a pinned web-app shortcut the test phone's launcher does not show; a browser shortcut works (M2/M11 to confirm on the public hostname).
+
 ## Gate changes
 
 A check must not learn from the thing it checks whether to run. **Expectation** — "this image should contain the feature" — is derived from the tag of the image under test: the tag is the commit it was built from, and that commit's tree either has the shopping package or does not. It is not stored: the deployed-ref marker is written after the checks that would need it and deleted by a rollback, so a stored value would always describe the previous deploy. When the feature is expected, every check below is mandatory.
@@ -284,7 +286,7 @@ Taken by the owner on 2026-11-19:
 
 1. Ticks apply at once instead of at "Finish shopping"; "Done" is kept on each device.
 2. Without coverage: shop and capture, not create or edit — and what was done offline must be sent by itself when the connection returns (M10 decides how far that reaches with the app closed).
-3. Changes older than two hours ask before being sent.
+3. Changes older than two hours ask before being sent. Clarified in phase 9: every change not yet answered, including one whose attempt failed without network (it had been exempt).
 4. A purchase always counts when it syncs, whatever was said about the item before.
 5. A recount does not know about changes waiting on the other phone. When the two shop together without coverage they talk; not a problem.
 6. Guests get no access, and only a project's members see that project's lists.
