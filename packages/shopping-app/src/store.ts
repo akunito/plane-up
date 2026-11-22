@@ -100,11 +100,26 @@ export async function discardStored(userId: string, workspace: string, factory: 
 }
 
 /** For tests, and when IndexedDB is unavailable (a private window may refuse it). */
+/**
+ * Keeps the queue serialized, as IndexedDB does: every update and read gets a freshly parsed copy, so code that
+ * compares queue objects by identity fails here as it does on the phone (phase 9 review: the tests ran on a store
+ * that kept identity and missed exactly that).
+ */
 export function memoryStore(initial: QueueState): AppStore {
-  let state = initial;
+  let stored = serialize(initial);
+  const fresh = (): QueueState => {
+    const loaded = parse(stored);
+    if (!loaded.ok) throw new StoredQueueError(loaded.reason);
+    return loaded.state;
+  };
   return {
-    update: async (fn) => (state = fn(state)),
-    read: async () => state,
+    update: async (fn) => {
+      const state = fresh();
+      const next = fn(state);
+      if (next !== state) stored = serialize(next);
+      return next;
+    },
+    read: async () => fresh(),
   };
 }
 

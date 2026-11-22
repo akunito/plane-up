@@ -239,6 +239,27 @@ export function undo(state: QueueState, clientOpId: string, t: Omit<Tap, "queueI
   };
 }
 
+/**
+ * By kind and id, never by identity: the IndexedDB store parses the queue afresh in every transaction, so the
+ * notice the screen holds is never the object in the stored state (phase 9 review: OK and "apply anyway" did
+ * nothing on the phone, while every test, on the in-memory store, passed).
+ */
+function withoutNotice(notices: Notice[], notice: Notice): Notice[] {
+  return notices.filter((n) => !(n.kind === notice.kind && n.clientOpId === notice.clientOpId));
+}
+
+/** Two failures are the same one: compared by content, for the same reason as withoutNotice. */
+export function sameFailure(a: Failure | null, b: Failure | null): boolean {
+  if (a === null || b === null) return a === b;
+  return (
+    a.kind === b.kind &&
+    a.attempts === b.attempts &&
+    a.nextTryAt === b.nextTryAt &&
+    a.status === b.status &&
+    a.error === b.error
+  );
+}
+
 /** Approve held entries (never one older than 60 days, which can only be discarded). */
 export function approve(state: QueueState, clientOpIds: string[], now: number): QueueState {
   const ids = new Set(clientOpIds);
@@ -279,14 +300,14 @@ export function applyAnyway(state: QueueState, notice: Notice, t: Omit<Tap, "que
   if (notice.kind !== "stale" || !notice.item) throw new Error("apply anyway exists only for stale results");
   const known = { ...state.known };
   keepNewer(known, notice.item);
-  const next = { ...state, known, notices: state.notices.filter((n) => n !== notice) };
+  const next = { ...state, known, notices: withoutNotice(state.notices, notice) };
   const options: { orderQuantity?: number } = {};
   if (notice.entry.orderQuantity !== undefined) options.orderQuantity = notice.entry.orderQuantity;
   return tap(next, notice.entry.op.op, notice.item.id, notice.entry.op.args, t, options);
 }
 
 export function dismiss(state: QueueState, notice: Notice): QueueState {
-  return { ...state, notices: state.notices.filter((n) => n !== notice) };
+  return { ...state, notices: withoutNotice(state.notices, notice) };
 }
 
 // ---------------------------------------------------------------- sending

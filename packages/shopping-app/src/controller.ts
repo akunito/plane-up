@@ -28,6 +28,7 @@ import {
   approve,
   browserImageEnv,
   removePhoto,
+  sameFailure,
   shrinkPhoto,
   uploadPhoto,
   BACKOFF_MAX_MS,
@@ -755,11 +756,13 @@ export class Controller {
     } catch {
       // replay already marked the failure on the queue; the screen shows it.
     }
-    // onFailed always makes a new failure object; the other queue changes carry the old one forward.
+    // A failure this replay recorded: onFailed always counts another attempt. Compared by content: the IndexedDB
+    // store hands back a freshly parsed queue on every update, so an unchanged failure was never the same object
+    // and an old "signed out" made every flush forget the person and restart (phase 9 review).
     const failure = this.state.queue.failure;
     if (
       failure &&
-      failure !== failureBefore &&
+      !sameFailure(failure, failureBefore) &&
       (failure.kind === "signed_out_app" ||
         failure.kind === "signed_out_proxy" ||
         // The server: the session is not this queue's owner (the device changed hands without a sign-out

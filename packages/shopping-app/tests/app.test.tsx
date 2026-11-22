@@ -701,6 +701,57 @@ describe("phases and failures", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply anyway" }));
     await settle();
     expect(api.server.items.get(DETERGENT)!.level).toBe("low");
+    // The notice leaves with it, on a store that parses the queue afresh as IndexedDB does (phase 9 review:
+    // compared by identity, it stayed and every tap queued another operation).
+    expect(controller.get().queue.notices).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "Apply anyway" })).toBeNull();
+    expect(api.ops().filter((o) => o.target === DETERGENT && o.op === "set_level")).toHaveLength(2);
+  });
+
+  it("OK takes a notice away (phase 9 review: it did nothing on the phone)", async () => {
+    await boot(catalog(), "#/capture");
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "deter" } });
+    await screen.findByRole("button", { name: "Detergent: Running low" });
+    api.server.apply(
+      [
+        {
+          v: 1,
+          client_op_id: newUuid(),
+          queue_id: null,
+          target: DETERGENT,
+          op: "set_level",
+          args: { level: "ok" },
+          base_rev: 0,
+        },
+      ],
+      "someone-else"
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Detergent: Running low" }));
+    await waitFor(() => expect(controller.get().queue.notices).toHaveLength(1));
+    await go("#/pending");
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    await waitFor(() => expect(controller.get().queue.notices).toHaveLength(0));
+  });
+
+  it("an old 'signed out' behind a held head does not restart the app over and over (phase 9 review)", async () => {
+    let clock = Date.now();
+    await boot(catalog(), "#/", () => clock);
+    api.fail = { status: 401, json: { error: "unauthorized" } };
+    fireEvent.click(screen.getByRole("checkbox", { name: "Milk: bought" }));
+    await waitFor(() => expect(controller.get().queue.failure?.kind).toBe("signed_out_app"));
+    api.fail = null;
+    // Signed in again the next day: the tap is now held, and the queue still carries the old failure.
+    clock += 20 * 60 * 60 * 1000;
+    await act(async () => controller.start());
+    const starts = () => api.calls.filter((c) => c.path === "/api/users/me/workspaces/").length;
+    const before = starts();
+    await act(async () => {
+      await controller.flush();
+      await controller.refresh();
+      await controller.flush();
+      await new Promise((r) => setTimeout(r, 300));
+    });
+    expect(starts() - before).toBeLessThanOrEqual(1);
   });
 
   /** Phase 9 matrix (S03, S04): A's level set while the send fails; B changes the item on the server. */
