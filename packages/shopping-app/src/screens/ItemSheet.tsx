@@ -67,8 +67,8 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
     return () => window.removeEventListener("online", retry);
   }, []);
   // "online" fires once, often before DNS/Tailscale answer, and never when the network drops without the device
-  // going offline: a failed history is also tried on focus, on showing the page and every 30 s, as the list is
-  // (phase 8 camera-fix audit).
+  // going offline: while it has failed, the history is also tried on focus, on showing the page and every 30 s
+  // (the list recovers the same way through the controller's focus/visibility/poll; phase 8 camera-fix audit).
   useEffect(() => {
     if (!historyFailed) return;
     const retry = () => {
