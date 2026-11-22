@@ -199,6 +199,9 @@ export const en = {
   failure_signed_out_app: "You are signed out. Sign in again; your changes are kept.",
   failure_signed_out_proxy: "The sign-in in front of Plane expired. Sign in again; your changes are kept.",
   failure_refused: "The server refused the changes ({error}). You may have lost access.",
+  failure_outdated:
+    "The server no longer accepts this version of the app. Update it: your changes are kept and sent afterwards.",
+  reload_app: "Update the app",
   retry_now: "Retry now",
   discard_first: "Discard the first change",
   sign_in: "Sign in",

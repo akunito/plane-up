@@ -28,6 +28,7 @@
 // device has seen no action on are previewed as applied.
 
 import type { Entry } from "./ops";
+import { OP_VERSION } from "./ops";
 import { applyLocal, buildOp, NOT_REVERTIBLE, predictRefused } from "./ops";
 import type { Tap } from "./ops";
 import type { ItemState, OpResult, Operation } from "./types";
@@ -43,9 +44,10 @@ const RECENT = 50;
  * offline: no answer. server: 5xx, non-JSON, or an answer that matched none of the batch.
  * signed_out_app / signed_out_proxy: M4. refused: the whole request was refused (403 when the person
  * lost access to inventory, 400 for a malformed body) — retried like the others, but the screen must
- * say so: discarding the head does not help.
+ * say so: discarding the head does not help. outdated: the server refused an operation's format version;
+ * the queue keeps it and sends nothing until this app is a newer build (S25, brief "Queue ownership").
  */
-export type FailureKind = "offline" | "server" | "signed_out_app" | "signed_out_proxy" | "refused";
+export type FailureKind = "offline" | "server" | "signed_out_app" | "signed_out_proxy" | "refused" | "outdated";
 
 export interface Failure {
   kind: FailureKind;
@@ -53,6 +55,8 @@ export interface Failure {
   nextTryAt: number;
   status?: number;
   error?: string;
+  /** outdated only: the OP_VERSION of the build that was refused; a newer build sends again. */
+  opVersion?: number;
 }
 
 export interface Notice {
@@ -295,6 +299,7 @@ export function nextBatch(
 ): { state: QueueState; batch: Operation[] } | null {
   if (state.userId !== currentUserId || state.sending) return null;
   const f = state.failure;
+  if (f?.kind === "outdated" && f.opVersion === OP_VERSION) return null;
   if (f && now < f.nextTryAt && f.nextTryAt - now <= BACKOFF_MAX_MS) return null;
   const batch: Operation[] = [];
   const entries = [...state.entries];
@@ -329,9 +334,17 @@ export function onDelivered(state: QueueState, results: OpResult[]): QueueState 
   const notices = [...state.notices];
   const entries: Entry[] = [];
   let recent = [...state.recent];
+  let outdated = false;
   for (const entry of state.entries) {
     const r = byId.get(entry.op.client_op_id.toLowerCase());
     if (!r) {
+      entries.push(entry);
+      continue;
+    }
+    // Not a refusal of the change itself: kept, and nothing more is sent until the app is updated. The
+    // server answers this before its ledger, so the same client_op_id is accepted after the update.
+    if (r.result === "rejected" && r.reason === "unsupported_version") {
+      outdated = true;
       entries.push(entry);
       continue;
     }
@@ -372,7 +385,10 @@ export function onDelivered(state: QueueState, results: OpResult[]): QueueState 
       }
     }
   }
-  return { ...state, entries, known, done, notices, sending: false, failure: null, recent: recent.slice(-RECENT) };
+  const failure: Failure | null = outdated
+    ? { kind: "outdated", attempts: (state.failure?.attempts ?? 0) + 1, nextTryAt: 0, opVersion: OP_VERSION }
+    : null;
+  return { ...state, entries, known, done, notices, sending: false, failure, recent: recent.slice(-RECENT) };
 }
 
 /** The request failed as a whole: keep every entry, transmitted ones as transmitted, and back off. */

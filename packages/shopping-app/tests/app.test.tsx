@@ -452,6 +452,23 @@ describe("phases and failures", () => {
     expect(screen.queryByText(/Waiting to be sent/)).toBeNull();
   });
 
+  it("a server that no longer accepts this app's format: the tap is kept and the app asks to be updated (S25)", async () => {
+    await boot();
+    api.outdatedOps = true;
+    fireEvent.click(screen.getByRole("checkbox", { name: "Milk: bought" }));
+    await waitFor(() => expect(controller.get().queue.failure?.kind).toBe("outdated"));
+    expect(screen.getByText("Waiting to be sent: 1")).toBeTruthy();
+    expect(screen.getByText(/no longer accepts this version of the app/)).toBeTruthy();
+    // A retry sends nothing: only an updated app does.
+    const sent = api.ops().length;
+    await act(async () => controller.retry());
+    expect(api.ops()).toHaveLength(sent);
+    await go("#/pending");
+    expect(screen.getByRole("button", { name: "Update the app" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry now" })).toBeNull();
+    expect(api.server.items.get(MILK)!.needed).toBe(true);
+  });
+
   it("a change refused as stale is listed with Apply anyway", async () => {
     await boot(catalog(), "#/capture");
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "deter" } });

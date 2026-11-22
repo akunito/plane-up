@@ -199,6 +199,9 @@ export const es: Dictionary = {
   failure_signed_out_app: "Has cerrado sesión. Vuelve a entrar; tus cambios se guardan.",
   failure_signed_out_proxy: "El acceso previo a Plane ha caducado. Vuelve a entrar; tus cambios se guardan.",
   failure_refused: "El servidor rechazó los cambios ({error}). Puede que hayas perdido el acceso.",
+  failure_outdated:
+    "Esta versión de la app ya no vale para el servidor. Actualízala: tus cambios se guardan y se envían después.",
+  reload_app: "Actualizar la app",
   retry_now: "Reintentar ahora",
   discard_first: "Descartar el primer cambio",
   sign_in: "Iniciar sesión",

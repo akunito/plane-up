@@ -46,6 +46,11 @@ export function newUuid(): string {
   return globalThis.crypto.randomUUID();
 }
 
+/** The operation format this build writes; the server refuses one it does not know (`unsupported_version`).
+ * Raising it needs a storage migration that rewrites queued operations: without one the new build sends the
+ * old format again and blocks again (queue.ts, "outdated"). */
+export const OP_VERSION = 1;
+
 export function buildOp(
   name: OpName,
   item: ItemState,
@@ -54,7 +59,7 @@ export function buildOp(
   options: { tick?: boolean; shown?: ItemState; orderQuantity?: number } = {}
 ): Entry {
   const op: Operation = {
-    v: 1,
+    v: OP_VERSION,
     client_op_id: tap.newId(),
     queue_id: tap.queueId,
     target: item.id,

@@ -198,6 +198,9 @@ export const pl: Dictionary = {
   failure_signed_out_app: "Wylogowano. Zaloguj się ponownie; zmiany są zachowane.",
   failure_signed_out_proxy: "Logowanie przed Plane wygasło. Zaloguj się ponownie; zmiany są zachowane.",
   failure_refused: "Serwer odrzucił zmiany ({error}). Możliwe, że straciłeś(-aś) dostęp.",
+  failure_outdated:
+    "Serwer nie przyjmuje już tej wersji aplikacji. Zaktualizuj ją: zmiany są zachowane i zostaną wysłane potem.",
+  reload_app: "Zaktualizuj aplikację",
   retry_now: "Spróbuj teraz",
   discard_first: "Odrzuć pierwszą zmianę",
   sign_in: "Zaloguj się",

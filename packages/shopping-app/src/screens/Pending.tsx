@@ -60,9 +60,16 @@ export function Pending({ s }: { s: AppState }) {
                   {t("sign_in")}
                 </a>
               ) : null}
-              <button type="button" className="secondary" onClick={() => void c.retry()}>
-                {t("retry_now")}
-              </button>
+              {failure.kind === "outdated" ? (
+                // A new worker serves the new build on the next load (brief, "Worker").
+                <button type="button" className="primary" onClick={() => window.location.reload()}>
+                  {t("reload_app")}
+                </button>
+              ) : (
+                <button type="button" className="secondary" onClick={() => void c.retry()}>
+                  {t("retry_now")}
+                </button>
+              )}
               <button type="button" className="secondary" onClick={() => void c.discardHead()}>
                 {t("discard_first")}
               </button>

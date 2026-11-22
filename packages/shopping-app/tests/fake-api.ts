@@ -67,6 +67,8 @@ export class FakeApi {
   pendingPhotos = new Set<string>();
   /** Runs while storage "receives" a photo, before it answers: a refresh racing the upload. */
   onStorage: (() => Promise<unknown>) | null = null;
+  /** Every operation is refused for its format version, as a newer server would (S25). */
+  outdatedOps = false;
   /** History requests fail as a dropped network does (offline). */
   dropHistory = false;
   constructor(items: { state: ItemState; data: Data }[]) {
@@ -173,6 +175,17 @@ export class FakeApi {
     }
     if (p.endsWith("/inventory/ops/")) {
       const ops = (body as { ops: Operation[] }).ops;
+      if (this.outdatedOps)
+        return [
+          200,
+          {
+            results: ops.map((o) => ({
+              client_op_id: o.client_op_id,
+              result: "rejected",
+              reason: "unsupported_version",
+            })),
+          },
+        ];
       for (const op of ops)
         if (op.op === "mark_ordered") this.ordersAt.set(op.args.order_id as string, new Date().toISOString());
       const results = this.server.apply(ops, ME.id);

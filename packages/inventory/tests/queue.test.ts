@@ -23,6 +23,7 @@ import {
   waiting,
 } from "../src/queue";
 import type { QueueState } from "../src/queue";
+import { OP_VERSION } from "../src/ops";
 import type { ItemState } from "../src/types";
 
 const item = (over: Partial<ItemState> = {}): ItemState => ({
@@ -101,6 +102,27 @@ describe("sending", () => {
     const s = onRestart(sent.state);
     expect(s.sending).toBe(false);
     expect(s.entries[0]!.transmission).toBe("transmitted");
+  });
+});
+
+describe("a server that no longer accepts this build's format (S25)", () => {
+  it("keeps the refused entries, sends nothing more until the app is a newer build, and the rest still applies", () => {
+    let s = tap(start(), "adjust", "milk", { delta: 1 }, t());
+    s = tap(s, "adjust", "milk", { delta: -1 }, t());
+    const sent = nextBatch(s, 2_000_000, "ana")!;
+    const [first, second] = sent.batch;
+    s = onDelivered(sent.state, [
+      { client_op_id: first!.client_op_id, result: "rejected", reason: "unsupported_version" },
+      { client_op_id: second!.client_op_id, result: "applied", item: item({ rev: 4 }) },
+    ]);
+    expect(ids(s)).toEqual([first!.client_op_id]);
+    expect(s.notices).toHaveLength(0);
+    expect(s.failure).toMatchObject({ kind: "outdated", opVersion: OP_VERSION });
+    // Not by backoff, retry or restart: only a newer build sends again.
+    expect(nextBatch(s, 3_000_000, "ana")).toBeNull();
+    expect(nextBatch(onRestart(s), 3_000_000, "ana")).toBeNull();
+    const updated = { ...s, failure: { ...s.failure!, opVersion: OP_VERSION - 1 } };
+    expect(nextBatch(updated, 3_000_000, "ana")!.batch.map((o) => o.client_op_id)).toEqual([first!.client_op_id]);
   });
 });
 
