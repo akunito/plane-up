@@ -370,7 +370,7 @@ test.describe("shopping app @shopping", () => {
       }
       return out;
     });
-    expect(result["1"]!.badgeShort, "badge shrunk at 100 %").toBe(0);
+    expect(result["1"]!.badgeShort, "badge wrapped at 100 %").toBe(0);
     for (const k of ["1", "1.3", "2"]) {
       expect(result[k]!.name, `name width at ${k}`).toBeGreaterThan(60);
       expect(result[k]!.overlap, `list name over the item name at ${k}`).toBe(0);
