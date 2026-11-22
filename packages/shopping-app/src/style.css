@@ -525,8 +525,11 @@ select {
    a pinned row's "Pinned · bought …" took the whole width and squeezed the name to one letter per line (phase 9,
    measured on the Realme). */
 .row > .sub.inline {
-  flex: 0 1 auto;
-  min-width: 0;
+  /* Shrinks 100x faster than the badge, so the list name gives way first and the badge keeps its natural width
+     at normal sizes (an equal factor wrapped 'Running low' at 100 % with a long list name — phase 9 review); a
+     small floor so its text never spills over the badge. Measured in Brave at 360 px, app font and DejaVu. */
+  flex: 0 100 auto;
+  min-width: min(2.5em, 15%);
   flex-wrap: wrap;
   /* safe: a word wider than its box stays inside it instead of spilling left over the name, and anywhere lets it
      break. Measured on the Realme with a long name + long list + badge: plain flex-end overlapped the name by
@@ -541,8 +544,9 @@ select {
   min-width: min(5em, 30%);
 }
 
-/* The badge gives way last: it shrinks and, at 200 % text with a classic scrollbar (330 px), breaks inside a word
-   rather than leave the row ('Needed' stuck out 5 px, 'Running low' 7 px). At normal sizes nothing changes. */
+/* The badge gives way after the list name: only when that is at its floor does it shrink and, at 200 % text with a
+   classic scrollbar (330 px), break inside a word rather than leave the row ('Needed' stuck out 5 px, 'Running
+   low' 7 px). */
 .row > .badge {
   flex: 0 1 auto;
   min-width: 0;

@@ -318,8 +318,12 @@ test.describe("shopping app @shopping", () => {
       const meta = row.querySelector(":scope > .sub.inline")!;
       name.firstChild!.textContent = "Washing-up liquid concentrate lemon";
       meta.firstChild!.textContent = "Groceries and household";
-      const out: Record<string, { name: number; overlap: number; out: number; sideways: number; edge: number }> = {};
-      for (const k of [1.3, 2]) {
+      const badge = row.querySelector(":scope > .badge")!;
+      const out: Record<
+        string,
+        { name: number; overlap: number; out: number; sideways: number; edge: number; badgeShort: number }
+      > = {};
+      for (const k of [1, 1.3, 2]) {
         for (const [r, px] of base) r.style.fontSize = `${px * k}px`;
         // Sequential on purpose: each scale is measured after the previous one is replaced.
         // oxlint-disable-next-line no-await-in-loop
@@ -349,6 +353,15 @@ test.describe("shopping app @shopping", () => {
             rows.filter((x) => x.scrollWidth > x.clientWidth + 1).length +
             (document.scrollingElement!.scrollWidth > innerWidth ? 1 : 0),
           // The top bar's counter and the workspace picker stay inside the screen (both widened the page at 200 %).
+          // At normal size the badge keeps its natural width: the list name gives way first.
+          badgeShort: (() => {
+            const clone = badge.cloneNode(true) as HTMLElement;
+            clone.style.cssText = "position:absolute;visibility:hidden;width:max-content;white-space:nowrap";
+            row.append(clone);
+            const natural = clone.getBoundingClientRect().width;
+            clone.remove();
+            return Math.max(0, Math.round(natural - badge.getBoundingClientRect().width));
+          })(),
           edge: Array.from(document.querySelectorAll(".topbar > *, .select.workspace")).filter(
             (e) => e.getBoundingClientRect().right > document.documentElement.clientWidth + 1
           ).length,
@@ -356,7 +369,8 @@ test.describe("shopping app @shopping", () => {
       }
       return out;
     });
-    for (const k of ["1.3", "2"]) {
+    expect(result["1"]!.badgeShort, "badge shrunk at 100 %").toBe(0);
+    for (const k of ["1", "1.3", "2"]) {
       expect(result[k]!.name, `name width at ${k}`).toBeGreaterThan(60);
       expect(result[k]!.overlap, `list name over the item name at ${k}`).toBe(0);
       expect(result[k]!.out, `badges off the row at ${k}`).toBe(0);
