@@ -522,6 +522,7 @@ select {
   /* safe: a word wider than its box stays inside it instead of spilling left over the name, and anywhere lets it
      break. Measured on the Realme with a long name + long list + badge: plain flex-end overlapped the name by
      40 px at 130 % text and 100 px at 200 %, and a 7em floor pushed the badge 10 px off the row at 200 %. */
+  justify-content: flex-end; /* where `safe` is unknown the next line is dropped: keep the right alignment */
   justify-content: safe flex-end;
   text-align: end;
   overflow-wrap: anywhere;

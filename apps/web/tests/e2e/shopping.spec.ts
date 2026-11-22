@@ -148,7 +148,7 @@ test.describe("shopping app @shopping", () => {
     // An order action has no undo (brief): the toast offers none.
     await expect(page.getByRole("button", { name: "Undo" })).toHaveCount(0);
     await page.getByRole("button", { name: "Protein: the order arrived" }).click();
-    await page.getByRole("dialog").getByRole("button", { name: "Protein: cancel the order" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Protein: Cancel order" }).click();
     await expect(page.getByRole("region", { name: "On the way · 2" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Protein: Mark ordered" })).toBeVisible();
     await settled(page);
@@ -337,14 +337,17 @@ test.describe("shopping app @shopping", () => {
             rect.bottom > nr.top
           )
             overlap = Math.max(overlap, nr.right - rect.left);
-        const rows = Array.from(document.querySelectorAll("label.row"));
+        const labelled = Array.from(document.querySelectorAll("label.row"));
+        const rows = Array.from(document.querySelectorAll(".row"));
         out[String(k)] = {
           name: Math.round(nr.width),
           overlap: Math.round(overlap),
-          out: rows.filter(
+          out: labelled.filter(
             (x) => x.lastElementChild!.getBoundingClientRect().right > x.getBoundingClientRect().right + 1
           ).length,
-          sideways: rows.filter((x) => x.scrollWidth > x.clientWidth + 1).length,
+          sideways:
+            rows.filter((x) => x.scrollWidth > x.clientWidth + 1).length +
+            (document.scrollingElement!.scrollWidth > innerWidth ? 1 : 0),
         };
       }
       return out;
