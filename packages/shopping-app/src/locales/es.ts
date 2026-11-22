@@ -242,4 +242,22 @@ export const es: Dictionary = {
   offline_since: "Sin conexión: es la lista de {when}. Los cambios se guardan y se envían cuando vuelva.",
   item_missing: "Este artículo ya no existe o no puedes verlo.",
   unknown_item: "un artículo",
+  storage_volatile:
+    "Este dispositivo no puede guardar cambios (ventana privada o almacenamiento lleno): se envían mientras la app esté abierta y se pierden si se cierra antes.",
+  storage_write_failed:
+    "Un cambio no se pudo guardar en el dispositivo y no se ha conservado. Inténtalo de nuevo; si se repite, libera espacio.",
+  send_label: "{item}: enviar este cambio",
+  discard_label: "{item}: descartar este cambio",
+  discard_first_label: "{item}: descartar el primer cambio",
+  apply_anyway_label: "{item}: aplicar de todos modos",
+  dismiss_label: "{item}: vale",
+  photo_take_label: "{item}: hacer una foto",
+  photo_gallery_label: "{item}: elegir una foto de la galería",
+  photo_add_label: "{item}: añadir una foto",
+  photo_replace_label: "{item}: cambiar la foto",
+  photo_remove_label: "{item}: quitar la foto",
+  err_offline: "sin conexión",
+  err_server: "el servidor no respondió bien",
+  err_signed_out: "has cerrado sesión",
+  err_exists: "ese nombre ya existe en la lista",
 };

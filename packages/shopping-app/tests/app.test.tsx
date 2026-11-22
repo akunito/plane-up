@@ -527,7 +527,7 @@ describe("item sheet", () => {
     expect(api.ops()).toHaveLength(0);
     expect(screen.getByLabelText("Change photo")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove photo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salt: remove the photo" }));
     await waitFor(() => expect(screen.queryByAltText("Photo of Salt")).toBeNull());
     expect(screen.getByLabelText("Add photo")).toBeTruthy();
   });
@@ -607,6 +607,102 @@ describe("item sheet", () => {
     await waitFor(() => expect(screen.getByText("Not saved: the photo is too large")).toBeTruthy());
     expect(api.calls.filter((c) => c.path.includes("/photo/") || c.path === STORAGE)).toHaveLength(0);
     encodedSize = 300_000;
+  });
+});
+
+describe("phase 9 device review", () => {
+  async function bootWith(openStore: (userId: string) => Promise<AppStore>, hash = "#/", now?: () => number) {
+    window.location.hash = hash;
+    api = new FakeApi(catalog());
+    controller = new Controller({
+      base: "",
+      fetchImpl: (input, init) => api.fetch(input, init),
+      lock: makeLock(undefined),
+      openStore,
+      ...(now ? { now } : {}),
+    });
+    await controller.start();
+    render(<App controller={controller} locale="en" {...(now ? { now } : {})} />);
+  }
+
+  it("a store that cannot keep changes is said on screen", async () => {
+    await bootWith(async (userId) => ({ ...memoryStore(createQueue(userId, newUuid())), volatile: true }));
+    expect(screen.getByText(/This device cannot keep changes/)).toBeTruthy();
+  });
+
+  it("a tap that cannot be written is said, not lost silently", async () => {
+    let broken = false;
+    await bootWith(async (userId) => {
+      const inner = memoryStore(createQueue(userId, newUuid()));
+      return {
+        read: inner.read,
+        update: async (fn) => {
+          if (broken) throw new DOMException("quota", "QuotaExceededError");
+          return inner.update(fn);
+        },
+      };
+    });
+    broken = true;
+    fireEvent.click(screen.getByRole("checkbox", { name: "Milk: bought" }));
+    expect(await screen.findByText(/A change could not be saved on this device/)).toBeTruthy();
+    expect(api.ops()).toHaveLength(0);
+  });
+
+  it("a double tap on a row buys once", async () => {
+    await boot();
+    const box = screen.getByRole("checkbox", { name: "Wipes: bought" });
+    fireEvent.click(box);
+    fireEvent.click(box);
+    await settle();
+    expect(api.ops().filter((o) => o.target === WIPES && o.op === "buy")).toHaveLength(1);
+    expect(api.server.items.get(WIPES)!.quantity).toBe(3);
+  });
+
+  it("an edit that fails says why in the person's words, not a code", async () => {
+    await boot(catalog(), `#/item/${SALT}`);
+    const field = await screen.findByLabelText("Category / aisle");
+    api.fail = { status: 502 };
+    fireEvent.change(field, { target: { value: "Spices" } });
+    fireEvent.blur(field);
+    expect(await screen.findByText("Not saved: the server did not answer properly")).toBeTruthy();
+    api.fail = null;
+  });
+
+  it("a held change on an item off the to-buy list shows its name, and discarding it re-reads its list", async () => {
+    let clock = Date.now();
+    const store = memoryStore(createQueue(ME.id, newUuid()));
+    await bootWith(
+      async () => store,
+      "#/capture",
+      () => clock
+    );
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "salt" } });
+    const needed = await screen.findByRole("button", { name: "Salt: needed" });
+    api.fail = { status: 502 };
+    fireEvent.click(needed);
+    await waitFor(() => expect(controller.get().queue.failure?.kind).toBe("server"));
+    api.fail = null;
+    clock += 3 * 60 * 60 * 1000;
+    // An online start the next time: the app knows only the to-buy list, and Salt is not on it.
+    cleanup();
+    controller = new Controller({
+      base: "",
+      fetchImpl: (input, init) => api.fetch(input, init),
+      lock: makeLock(undefined),
+      openStore: async () => store,
+      now: () => clock,
+    });
+    window.location.hash = "#/";
+    await controller.start();
+    render(<App controller={controller} locale="en" now={() => clock} />);
+    await waitFor(() => expect(window.location.hash).toBe("#/pending"));
+    const held = within(await screen.findByRole("region", { name: "Not sent for more than two hours" }));
+    expect(await held.findByText(/^Salt:/)).toBeTruthy();
+    const reads = () => api.calls.filter((c) => c.path.endsWith(`/lists/${GROCERIES}/items/`)).length;
+    const before = reads();
+    fireEvent.click(held.getByRole("button", { name: "Salt: discard this change" }));
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
+    expect(controller.get().queue.needsRefresh).toEqual([]);
   });
 });
 
@@ -697,14 +793,14 @@ describe("phases and failures", () => {
     fireEvent.click(screen.getByRole("button", { name: "Detergent: Running low" }));
     await waitFor(() => expect(controller.get().queue.notices).toHaveLength(1));
     await go("#/pending");
-    expect(screen.getByRole("button", { name: "Apply anyway" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Apply anyway" }));
+    expect(screen.getByRole("button", { name: "Detergent: apply anyway" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Detergent: apply anyway" }));
     await settle();
     expect(api.server.items.get(DETERGENT)!.level).toBe("low");
     // The notice leaves with it, on a store that parses the queue afresh as IndexedDB does (phase 9 review:
     // compared by identity, it stayed and every tap queued another operation).
     expect(controller.get().queue.notices).toHaveLength(0);
-    expect(screen.queryByRole("button", { name: "Apply anyway" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Detergent: apply anyway" })).toBeNull();
     expect(api.ops().filter((o) => o.target === DETERGENT && o.op === "set_level")).toHaveLength(2);
   });
 
@@ -729,7 +825,7 @@ describe("phases and failures", () => {
     fireEvent.click(screen.getByRole("button", { name: "Detergent: Running low" }));
     await waitFor(() => expect(controller.get().queue.notices).toHaveLength(1));
     await go("#/pending");
-    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    fireEvent.click(screen.getByRole("button", { name: "Detergent: OK" }));
     await waitFor(() => expect(controller.get().queue.notices).toHaveLength(0));
   });
 
@@ -819,11 +915,11 @@ describe("phases and failures", () => {
     expect(screen.queryByRole("region", { name: "Sending is failing" })).toBeNull();
     expect(screen.getAllByText("An earlier attempt may already have reached the server.")).toHaveLength(2);
     const held = within(screen.getByRole("region", { name: "Not sent for more than two hours" }));
-    const rows = held.getAllByRole("button", { name: "Send" });
+    const rows = held.getAllByRole("button", { name: /: send this change$/ });
     expect(rows).toHaveLength(2);
     fireEvent.click(rows[0]!);
     await waitFor(() => expect(api.ops()).toHaveLength(failed + 1));
-    fireEvent.click(held.getByRole("button", { name: "Discard" }));
+    fireEvent.click(held.getByRole("button", { name: /: discard this change$/ }));
     await waitFor(() => expect(controller.get().queue.entries).toHaveLength(0));
     expect(api.ops()).toHaveLength(failed + 1);
     expect(api.server.items.get(MILK)!.needed).toBe(false);
@@ -869,7 +965,7 @@ describe("phases and failures", () => {
     await act(async () => controller.retry());
     expect(controller.get().queue.entries).toHaveLength(2);
     await go("#/pending");
-    fireEvent.click(screen.getByRole("button", { name: "Discard the first change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Milk: discard the first change" }));
     await act(async () => controller.retry());
     await waitFor(() => expect(controller.get().queue.entries).toHaveLength(0));
     expect(api.server.items.get(WIPES)!.quantity).toBe(3);

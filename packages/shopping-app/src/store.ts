@@ -9,6 +9,8 @@ import { load, newQueue, parse, serialize, storageKey } from "@plane/inventory";
 export interface AppStore extends QueueStore {
   /** The stored state, without changing it. */
   read(): Promise<QueueState>;
+  /** Nothing survives the page (IndexedDB refused): the screen says so (phase 9 review). */
+  volatile?: boolean;
 }
 
 export class StoredQueueError extends Error {

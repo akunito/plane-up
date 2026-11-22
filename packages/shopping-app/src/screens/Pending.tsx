@@ -1,6 +1,7 @@
 // Waiting and unapplied changes: entries held by the two-hour rule (send or discard, one by one or all),
 // results the server did not apply ("stale" with "apply anyway"), and a failing queue (brief: Surfaces).
 
+import { useEffect } from "react";
 import type { ReactNode } from "react";
 import type { Entry, Notice } from "@plane/inventory";
 import { heldEntries, isDiscardOnly, isHeld } from "@plane/inventory";
@@ -32,7 +33,7 @@ export function Pending({ s }: { s: AppState }) {
   const { c, t, now } = useCtx();
   const held = heldEntries(s.queue, now());
   const failure = s.queue.failure;
-  const name = (target: string) => s.known[target]?.data.name ?? s.queue.known[target]?.id ?? t("unknown_item");
+  const name = (target: string) => s.known[target]?.data.name ?? t("unknown_item");
   const line = (e: Entry) => (
     <Rich
       k="entry_line"
@@ -40,6 +41,19 @@ export function Pending({ s }: { s: AppState }) {
     />
   );
   const held_ids = held.filter((e) => !isDiscardOnly(e, now())).map((e) => e.op.client_op_id);
+  // Names for items this device does not know (after an online start the app knows only the to-buy list): read
+  // their lists, so the person choosing to send or discard sees a name, not an id (phase 9 review).
+  const unnamed = [...s.queue.entries.map((e) => e.op.target), ...s.queue.notices.map((n) => n.entry.op.target)]
+    .filter((id) => !s.known[id])
+    .map((id) => s.queue.known[id]?.list?.id)
+    .filter((id): id is string => !!id);
+  // sort() on a fresh copy; toSorted is past the es2022 lib the web build targets.
+  // oxlint-disable-next-line unicorn/no-array-sort
+  const unnamedKey = [...new Set(unnamed)].sort().join(",");
+  useEffect(() => {
+    if (!unnamedKey) return;
+    for (const list of unnamedKey.split(",")) void c.loadList(list);
+  }, [c, unnamedKey]);
 
   return (
     <div className="screen">
@@ -77,7 +91,16 @@ export function Pending({ s }: { s: AppState }) {
                   {t("retry_now")}
                 </button>
               )}
-              <button type="button" className="secondary" onClick={() => void c.discardHead()}>
+              <button
+                type="button"
+                className="secondary"
+                aria-label={
+                  s.queue.entries[0]
+                    ? t("discard_first_label", { item: name(s.queue.entries[0].op.target) })
+                    : undefined
+                }
+                onClick={() => void c.discardHead()}
+              >
                 {t("discard_first")}
               </button>
             </div>
@@ -99,11 +122,21 @@ export function Pending({ s }: { s: AppState }) {
                   {e.transmission !== "never" ? <span className="sub block">{t("held_maybe_sent")}</span> : null}
                 </span>
                 {!isDiscardOnly(e, now()) ? (
-                  <button type="button" className="secondary" onClick={() => void c.approve([e.op.client_op_id])}>
+                  <button
+                    type="button"
+                    className="secondary"
+                    aria-label={t("send_label", { item: name(e.op.target) })}
+                    onClick={() => void c.approve([e.op.client_op_id])}
+                  >
                     {t("send")}
                   </button>
                 ) : null}
-                <button type="button" className="secondary" onClick={() => void c.discard(e.op.client_op_id)}>
+                <button
+                  type="button"
+                  className="secondary"
+                  aria-label={t("discard_label", { item: name(e.op.target) })}
+                  onClick={() => void c.discard(e.op.client_op_id)}
+                >
                   {t("discard")}
                 </button>
               </div>
@@ -187,11 +220,21 @@ function NoticeRow({ notice, s }: { notice: Notice; s: AppState }) {
         <span className="sub block">{describeEntry(notice.entry, t)}</span>
       </span>
       {notice.kind === "stale" ? (
-        <button type="button" className="secondary" onClick={() => void c.applyAnyway(notice)}>
+        <button
+          type="button"
+          className="secondary"
+          aria-label={t("apply_anyway_label", { item })}
+          onClick={() => void c.applyAnyway(notice)}
+        >
           {t("apply_anyway")}
         </button>
       ) : null}
-      <button type="button" className="secondary" onClick={() => void c.dismiss(notice)}>
+      <button
+        type="button"
+        className="secondary"
+        aria-label={t("dismiss_label", { item })}
+        onClick={() => void c.dismiss(notice)}
+      >
         {t("dismiss")}
       </button>
     </div>

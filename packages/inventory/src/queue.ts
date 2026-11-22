@@ -284,6 +284,8 @@ export function discard(state: QueueState, clientOpId: string): QueueState {
   return {
     ...state,
     ...removed,
+    // Nothing left to send: no failure is left to report or to block new taps (phase 9 review, "outdated").
+    failure: removed.entries.length === 0 ? null : state.failure,
     notices: [...state.notices, notice],
     needsRefresh: transmitted ? [...new Set([...state.needsRefresh, entry.op.target])] : state.needsRefresh,
   };
@@ -435,7 +437,11 @@ export function retryNow(state: QueueState): QueueState {
 
 /** After loading from storage: a replay that was running when the app died is not running any more. */
 export function onRestart(state: QueueState): QueueState {
-  return retryNow({ ...state, sending: false });
+  // "outdated" is tried once more per start (phase 9 review): a server fixed after refusing this build's format
+  // (a deploy-order mistake, a rollback) would otherwise leave the queue blocked behind a button that reloads
+  // the same build. Still refused, it is outdated again after one request.
+  const failure = state.failure?.kind === "outdated" ? null : state.failure;
+  return retryNow({ ...state, sending: false, failure });
 }
 
 /** A fresh snapshot from the server (polling, reopening, a list's items): newer states replace older. */

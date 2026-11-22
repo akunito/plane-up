@@ -103,6 +103,8 @@ export interface AppState {
   lastTickAt: number;
   /** When what is shown was read from the server; set when the app opened from a saved snapshot. */
   offlineSince: number | null;
+  /** The device cannot keep changes: the queue lives in memory, or a write to it failed (phase 9 review). */
+  storageProblem: "volatile" | "write_failed" | null;
 }
 
 export interface Deps {
@@ -141,6 +143,8 @@ export class Controller {
    * across switches (phase 4 re-review).
    */
   private stores = new Map<string, AppStore>();
+  /** Items whose tick is being written (act): a second tick meanwhile is ignored. */
+  private ticking = new Set<string>();
   private readonly now: () => number;
   private readonly lock: Lock | undefined;
   private readonly imageEnv: ImageEnv;
@@ -178,6 +182,7 @@ export class Controller {
       toast: null,
       lastTickAt: Number(prefs.get("lastTickAt") ?? 0),
       offlineSince: null,
+      storageProblem: null,
     };
   }
 
@@ -317,6 +322,7 @@ export class Controller {
         }
         this.store = store;
         this.storeKey = key;
+        if (store.volatile) this.set({ storageProblem: "volatile" });
       } catch (error) {
         if (error instanceof StoredQueueError)
           return this.set({ phase: error.reason === "newer" ? "newer" : "corrupt", lists: lists.body });
@@ -367,6 +373,7 @@ export class Controller {
       }
       this.store = store;
       this.storeKey = key;
+      if (store.volatile) this.set({ storageProblem: "volatile" });
     } catch (error) {
       if (error instanceof StoredQueueError) {
         this.set({ phase: error.reason === "newer" ? "newer" : "corrupt", lists: snap.lists as Lists });
@@ -637,15 +644,29 @@ export class Controller {
     options: { tick?: boolean; orderQuantity?: number; toast?: string } = {}
   ): Promise<string | null> {
     if (!this.state.queue.known[itemId]) return null;
+    // A second tick on the same row while the first is still being written: the checkbox has not turned yet,
+    // and both would buy (phase 9 review: a double tap bought twice).
+    if (options.tick) {
+      if (this.ticking.has(itemId)) return null;
+      this.ticking.add(itemId);
+    }
     let id: string | null = null;
     const tapOptions: { tick?: boolean; orderQuantity?: number } = {};
     if (options.tick !== undefined) tapOptions.tick = options.tick;
     if (options.orderQuantity !== undefined) tapOptions.orderQuantity = options.orderQuantity;
-    await this.updateQueue((s) => {
-      const next = tap(s, name, itemId, args, { now: this.now(), newId: newUuid }, tapOptions);
-      id = next.entries[next.entries.length - 1]!.op.client_op_id;
-      return next;
-    });
+    try {
+      await this.updateQueue((s) => {
+        const next = tap(s, name, itemId, args, { now: this.now(), newId: newUuid }, tapOptions);
+        id = next.entries[next.entries.length - 1]!.op.client_op_id;
+        return next;
+      });
+    } catch {
+      // The tap was not stored (quota, a browser error): say so instead of losing it silently (phase 9 review).
+      this.set({ storageProblem: "write_failed" });
+      return null;
+    } finally {
+      if (options.tick) this.ticking.delete(itemId);
+    }
     if (options.tick) {
       prefs.set("lastTickAt", String(this.now()));
       this.set({ lastTickAt: this.now() });
@@ -690,17 +711,33 @@ export class Controller {
   async discard(id: string): Promise<void> {
     await this.updateQueue((s) => discard(s, id));
     void this.flush();
+    void this.refreshDoubtful();
   }
 
   /** "Discard all": one atomic change, so a replay cannot slip between two discards. */
   async discardMany(ids: string[]): Promise<void> {
     await this.updateQueue((s) => ids.reduce((acc, id) => discard(acc, id), s));
     void this.flush();
+    void this.refreshDoubtful();
   }
 
   async discardHead(): Promise<void> {
     await this.updateQueue((s) => discardHead(s));
     void this.flush();
+    void this.refreshDoubtful();
+  }
+
+  /**
+   * Items a discarded, possibly applied entry left doubtful (queue needsRefresh): their lists are read again,
+   * which also reaches items not on the to-buy list (phase 9 review: needsRefresh was kept but never acted on).
+   */
+  async refreshDoubtful(): Promise<void> {
+    const lists = new Set<string>();
+    for (const id of this.state.queue.needsRefresh) {
+      const list = this.state.known[id]?.data.list.id ?? this.state.queue.known[id]?.list?.id;
+      if (list) lists.add(list);
+    }
+    await Promise.all([...lists].map((list) => this.loadList(list)));
   }
 
   async applyAnyway(notice: Notice): Promise<void> {
@@ -966,8 +1003,9 @@ async function defaultStore(userId: string, workspace: string): Promise<AppStore
     return await idbStore(userId, workspace);
   } catch (error) {
     if (error instanceof StoredQueueError) throw error;
-    // IndexedDB refused (a private window): keep working, in memory.
-    return memoryStore(newQueue(userId));
+    // IndexedDB refused (a private window, storage full, a browser error): keep working, in memory, and say so —
+    // silently, a page kill lost every tap and the worker could not send them (phase 9 review).
+    return { ...memoryStore(newQueue(userId)), volatile: true };
   }
 }
 

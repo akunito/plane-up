@@ -241,4 +241,22 @@ export const pl: Dictionary = {
   offline_since: "Brak połączenia: to lista z {when}. Zmiany są zachowane i zostaną wysłane po jego powrocie.",
   item_missing: "Ten produkt już nie istnieje albo nie masz do niego dostępu.",
   unknown_item: "produkt",
+  storage_volatile:
+    "To urządzenie nie może zapisywać zmian (okno prywatne lub pełna pamięć): są wysyłane, gdy aplikacja jest otwarta, i giną, jeśli zostanie zamknięta wcześniej.",
+  storage_write_failed:
+    "Nie udało się zapisać zmiany na urządzeniu i nie została zachowana. Spróbuj ponownie; jeśli to się powtarza, zwolnij miejsce.",
+  send_label: "{item}: wyślij tę zmianę",
+  discard_label: "{item}: odrzuć tę zmianę",
+  discard_first_label: "{item}: odrzuć pierwszą zmianę",
+  apply_anyway_label: "{item}: zastosuj mimo to",
+  dismiss_label: "{item}: OK",
+  photo_take_label: "{item}: zrób zdjęcie",
+  photo_gallery_label: "{item}: wybierz zdjęcie z galerii",
+  photo_add_label: "{item}: dodaj zdjęcie",
+  photo_replace_label: "{item}: zmień zdjęcie",
+  photo_remove_label: "{item}: usuń zdjęcie",
+  err_offline: "brak połączenia",
+  err_server: "serwer nie odpowiedział poprawnie",
+  err_signed_out: "jesteś wylogowany",
+  err_exists: "ta nazwa już istnieje na liście",
 };

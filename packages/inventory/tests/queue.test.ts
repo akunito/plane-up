@@ -18,6 +18,7 @@ import {
   onFailed,
   onRestart,
   refreshed,
+  retryNow,
   tap,
   undo,
   view,
@@ -191,9 +192,11 @@ describe("a server that no longer accepts this build's format (S25)", () => {
     expect(ids(s)).toEqual([first!.client_op_id]);
     expect(s.notices).toHaveLength(0);
     expect(s.failure).toMatchObject({ kind: "outdated", opVersion: OP_VERSION });
-    // Not by backoff, retry or restart: only a newer build sends again.
+    // Not by backoff or retry: a newer build sends again — and each start tries once more, so a server fixed
+    // after refusing this build's format does not leave the queue blocked for good (phase 9 review, M3).
     expect(nextBatch(s, 3_000_000, "ana")).toBeNull();
-    expect(nextBatch(onRestart(s), 3_000_000, "ana")).toBeNull();
+    expect(nextBatch(retryNow(s), 3_000_000, "ana")).toBeNull();
+    expect(nextBatch(onRestart(s), 3_000_000, "ana")!.batch.map((o) => o.client_op_id)).toEqual([first!.client_op_id]);
     const updated = { ...s, failure: { ...s.failure!, opVersion: OP_VERSION - 1 } };
     expect(nextBatch(updated, 3_000_000, "ana")!.batch.map((o) => o.client_op_id)).toEqual([first!.client_op_id]);
   });

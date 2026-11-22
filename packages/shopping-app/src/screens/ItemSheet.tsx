@@ -143,6 +143,16 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
     if (error === "too_large") return t("photo_too_large");
     if (error === "photo_unreadable") return t("photo_unreadable");
     if (error === "pending") return t("photo_pending");
+    return errorText(error);
+  }
+
+  /** The app's own codes in the person's language; a server's own error text stays as it came (phase 9 review). */
+  function errorText(error: string): string {
+    if (error === "offline") return t("err_offline");
+    if (error === "server") return t("err_server");
+    if (error === "signed_out_app" || error === "signed_out_proxy") return t("err_signed_out");
+    if (error === "gone") return t("reason_gone");
+    if (error === "exists") return t("err_exists");
     return error;
   }
 
@@ -164,7 +174,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
         : "");
     if (String(current ?? "") === String(value ?? "")) return;
     const out = await c.updateItem(id, { [field]: value });
-    setMessage(out.ok ? t("saved") : t("save_failed", { error: out.error }));
+    setMessage(out.ok ? t("saved") : t("save_failed", { error: errorText(out.error) }));
   }
 
   function changeMode(mode: Mode) {
@@ -297,7 +307,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
             value={data.list.id}
             onChange={async (e) => {
               const out = await c.updateItem(id, { inventory_list: e.target.value });
-              setMessage(out.ok ? t("saved") : t("save_failed", { error: out.error }));
+              setMessage(out.ok ? t("saved") : t("save_failed", { error: errorText(out.error) }));
             }}
           >
             {(s.lists?.lists ?? []).map((l) => (
@@ -317,7 +327,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
             checked={data.buy_online}
             onChange={async (e) => {
               const out = await c.updateItem(id, { buy_online: e.target.checked });
-              setMessage(out.ok ? t("saved") : t("save_failed", { error: out.error }));
+              setMessage(out.ok ? t("saved") : t("save_failed", { error: errorText(out.error) }));
             }}
           />
           <span>{t("buy_online")}</span>
@@ -352,6 +362,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
                 <input
                   type="file"
                   accept="image/*"
+                  aria-label={t("photo_take_label", { item })}
                   capture="environment"
                   hidden
                   disabled={photoBusy}
@@ -361,18 +372,28 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
             ) : null}
             <label className={`secondary${photoBusy ? " disabled" : ""}`}>
               {t(camera ? "photo_gallery" : data.photo ? "photo_replace" : "photo_add")}
-              <input type="file" accept="image/*" hidden disabled={photoBusy} onChange={pickPhoto} />
+              <input
+                type="file"
+                accept="image/*"
+                aria-label={t(camera ? "photo_gallery_label" : data.photo ? "photo_replace_label" : "photo_add_label", {
+                  item,
+                })}
+                hidden
+                disabled={photoBusy}
+                onChange={pickPhoto}
+              />
             </label>
             {data.photo ? (
               <button
                 type="button"
                 className="text-button"
+                aria-label={t("photo_remove_label", { item })}
                 disabled={photoBusy}
                 onClick={async () => {
                   setPhotoBusy(true);
                   const out = await c.removePhoto(id);
                   setPhotoBusy(false);
-                  setMessage(out.ok ? t("saved") : t("save_failed", { error: out.error }));
+                  setMessage(out.ok ? t("saved") : t("save_failed", { error: errorText(out.error) }));
                 }}
               >
                 {t("photo_remove")}

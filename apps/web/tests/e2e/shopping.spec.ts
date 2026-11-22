@@ -190,11 +190,11 @@ test.describe("shopping app @shopping", () => {
     const touch = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
     // Pinned to the project: if touch emulation stopped matching, the phone would quietly test the desktop path.
     expect(touch).toBe(info.project.name === "android");
-    const input = page.getByLabel(touch ? "Take photo" : "Add photo");
+    const input = page.getByLabel(touch ? "Salt: take a photo" : "Salt: add a photo");
     await expect(input).toHaveCount(1);
     if (touch) {
       await expect(input).toHaveAttribute("capture", "environment");
-      await expect(page.getByLabel("Gallery")).toHaveCount(1);
+      await expect(page.getByLabel("Salt: choose a photo from the gallery")).toHaveCount(1);
     }
     // A real JPEG larger than the 1600 px the app shrinks to, made by the browser itself, with an EXIF block
     // spliced in the way a phone writes one: orientation 6 (stored landscape, shown portrait). The stored
@@ -249,7 +249,7 @@ test.describe("shopping app @shopping", () => {
     } finally {
       await gus.context.close();
     }
-    await page.getByRole("button", { name: "Remove photo" }).click();
+    await page.getByRole("button", { name: "Salt: remove the photo" }).click();
     await expect(photo).toHaveCount(0);
     await server(page, "Salt", "photo").toBeNull();
   });

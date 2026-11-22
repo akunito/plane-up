@@ -39,7 +39,7 @@ export function QueueStatus({ s }: { s: AppState }) {
   const held = heldEntries(s.queue, now()).length;
   const failure = s.queue.failure;
   const notices = s.queue.notices.length;
-  if (n === 0 && notices === 0 && !failure && !s.connection) return null;
+  if (n === 0 && notices === 0 && !failure && !s.connection && !s.storageProblem) return null;
   let text: string | null = null;
   // No network is said plainly, with the age of what is shown when the app opened from its snapshot.
   if (s.connection === "offline" || (s.offlineSince !== null && s.connection))
@@ -52,8 +52,9 @@ export function QueueStatus({ s }: { s: AppState }) {
     text = t(`failure_${failure.kind}`, { error: failure.error ?? String(failure.status ?? "") });
   else if (s.connection) text = t("refresh_failed");
   return (
-    <div className={`status${failure || s.connection || held > 0 ? " warn" : ""}`} role="status">
+    <div className={`status${failure || s.connection || held > 0 || s.storageProblem ? " warn" : ""}`} role="status">
       <span className="grow">
+        {s.storageProblem ? <span className="block">{t(`storage_${s.storageProblem}`)}</span> : null}
         {text ? <span className="block">{text}</span> : null}
         {n > 0 ? <span className="block">{t("waiting", { n })}</span> : null}
       </span>
