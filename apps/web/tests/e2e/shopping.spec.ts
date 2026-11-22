@@ -318,7 +318,7 @@ test.describe("shopping app @shopping", () => {
       const meta = row.querySelector(":scope > .sub.inline")!;
       name.firstChild!.textContent = "Washing-up liquid concentrate lemon";
       meta.firstChild!.textContent = "Groceries and household";
-      const out: Record<string, { name: number; overlap: number; out: number; sideways: number }> = {};
+      const out: Record<string, { name: number; overlap: number; out: number; sideways: number; edge: number }> = {};
       for (const k of [1.3, 2]) {
         for (const [r, px] of base) r.style.fontSize = `${px * k}px`;
         // Sequential on purpose: each scale is measured after the previous one is replaced.
@@ -348,6 +348,10 @@ test.describe("shopping app @shopping", () => {
           sideways:
             rows.filter((x) => x.scrollWidth > x.clientWidth + 1).length +
             (document.scrollingElement!.scrollWidth > innerWidth ? 1 : 0),
+          // The top bar's counter and the workspace picker stay inside the screen (both widened the page at 200 %).
+          edge: Array.from(document.querySelectorAll(".topbar > *, .select.workspace")).filter(
+            (e) => e.getBoundingClientRect().right > document.documentElement.clientWidth + 1
+          ).length,
         };
       }
       return out;
@@ -357,6 +361,7 @@ test.describe("shopping app @shopping", () => {
       expect(result[k]!.overlap, `list name over the item name at ${k}`).toBe(0);
       expect(result[k]!.out, `badges off the row at ${k}`).toBe(0);
       expect(result[k]!.sideways, `rows scrolling sideways at ${k}`).toBe(0);
+      expect(result[k]!.edge, `top bar or workspace picker past the edge at ${k}`).toBe(0);
     }
   });
 

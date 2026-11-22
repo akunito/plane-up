@@ -134,6 +134,9 @@ select {
 
 .topbar {
   display: flex;
+  /* At 200 % text on a 360 px screen the tabs and the counter do not fit on one line: the counter goes below
+     instead of widening the page (phase 9, S34 E2E on the desktop project). */
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 8px 16px;
@@ -220,6 +223,12 @@ select {
 .select.workspace {
   margin: 8px 16px 16px;
   align-self: flex-start;
+  max-width: calc(100% - 32px);
+}
+
+.select.workspace select {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .bottombar {
@@ -530,6 +539,16 @@ select {
 
 .row > .name.grow {
   min-width: min(5em, 30%);
+}
+
+/* The badge gives way last: it shrinks and, at 200 % text with a classic scrollbar (330 px), breaks inside a word
+   rather than leave the row ('Needed' stuck out 5 px, 'Running low' 7 px). At normal sizes nothing changes. */
+.row > .badge {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .block {
