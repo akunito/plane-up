@@ -294,7 +294,7 @@ Taken by the owner on 2026-11-19:
 
 Not objected to, and not asked one by one: categories and stores as free text with the aisle order per person; a need flagged on an item already on order being cleared on arrival; a wrong phone clock only affecting shown times; photo last.
 
-8. The app is installed from both hostnames if that is possible, otherwise from the public one only (M11). The owner chose this knowing that two installs are two separate apps, each with its own waiting changes and its own "Done".
+8. The app is installed from both hostnames if that is possible, otherwise from the public one only (M11). The owner chose this knowing that two installs are two separate apps, each with its own waiting changes and its own "Done". **Settled 2026-11-22: the public hostname only** — installing from the internal hostname left a pinned web-app shortcut the test phone's launcher never shows.
 9. The empty inventory tables go to the main branch and prod in phase 1, **provided the service keeps working** (phase 1 says what that means).
 10. The mockups are approved as they stand.
 11. The corrections made after review round 4 are not reviewed on paper again; each is reviewed when the phase that builds it is reviewed.
