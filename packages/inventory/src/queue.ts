@@ -443,8 +443,9 @@ export function onRestart(state: QueueState): QueueState {
 /**
  * The page, once per load and workspace, tries an "outdated" queue once more: a server fixed after refusing this
  * build's format (a deploy-order mistake, a rollback) would otherwise leave it blocked behind a button that reloads
- * the same build. Not in onRestart: every store open runs that, and the worker opens the store on every sync
- * (phase 9 re-review). Still refused, it is outdated again after one request.
+ * the same build. Explicit here rather than inside onRestart (which the page's first open also runs) so the
+ * worker, which opens the store without a restart, can never clear it. Still refused, it is outdated again after one
+ * request.
  */
 export function retryOutdated(state: QueueState): QueueState {
   return state.failure?.kind === "outdated" ? { ...state, failure: null } : state;

@@ -664,10 +664,11 @@ export class Controller {
         return next;
       });
     } catch (error) {
-      // The tap was not stored (quota, a browser error): say so instead of losing it silently (phase 9 review).
-      // Only IndexedDB's own errors; anything else (no store yet, a corrupt queue) keeps its own handling.
-      if (!(error instanceof DOMException)) throw error;
-      this.set({ storageProblem: "write_failed" });
+      // The tap was not stored: say so instead of losing it silently (phase 9 review). A stored queue another tab
+      // left unreadable or newer gets its own screen; anything else (quota, a browser error) is "not saved".
+      // Never rethrown: every caller is `void c.act(...)`, so a rejection would be unhandled and the tap lost unseen.
+      if (error instanceof StoredQueueError) this.set({ phase: error.reason === "newer" ? "newer" : "corrupt" });
+      else this.set({ storageProblem: "write_failed" });
       return null;
     } finally {
       if (options.tick) this.ticking.delete(itemId);
