@@ -5,7 +5,7 @@ import { useState } from "react";
 import { newUuid, waiting, heldEntries } from "@plane/inventory";
 import type { AppState } from "../controller";
 import type { Order, Row } from "../model";
-import { audience, projectOf } from "../model";
+import { audience, personName, projectOf } from "../model";
 import { ago, listNames } from "../i18n";
 import { Ago, Dialog, Icon, NumberField, Rich, parseIntStrict, useCtx } from "../ui";
 
@@ -218,5 +218,17 @@ export function ArrivalDialog({
         </div>
       </form>
     </Dialog>
+  );
+}
+
+/** "bought 3 days ago", and by whom when that was someone else (S17: the other person sees who bought it). */
+export function BoughtAgo({ at, by }: { at: string; by: string | null }) {
+  const { c, t } = useCtx();
+  const lists = c.get().lists;
+  const who = by && lists && by !== lists.me.id ? (personName(lists, by) ?? t("someone")) : null;
+  return who ? (
+    <Rich k="bought_ago_by" vars={{ when: <Ago at={at} />, who }} />
+  ) : (
+    <Rich k="bought_ago" vars={{ when: <Ago at={at} /> }} />
   );
 }

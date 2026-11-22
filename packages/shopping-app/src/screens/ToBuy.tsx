@@ -8,7 +8,7 @@ import { shortDate } from "../i18n";
 import type { Key } from "../i18n";
 import { prefs } from "../store";
 import { Ago, Icon, Rich, StateBadge, useCtx, useTick } from "../ui";
-import { ArrivalDialog, BottomBar, OrderDialog, QueueStatus, Tabs } from "./common";
+import { ArrivalDialog, BottomBar, BoughtAgo, OrderDialog, QueueStatus, Tabs } from "./common";
 
 const GROUPINGS: readonly Grouping[] = ["category", "store", "list", "urgency"];
 
@@ -184,7 +184,7 @@ function ToBuyRow({ row }: { row: Row }) {
         {row.state.last_bought_at ? (
           <>
             {" · "}
-            <Ago at={row.state.last_bought_at} />
+            <BoughtAgo at={row.state.last_bought_at} by={row.state.last_bought_by} />
           </>
         ) : null}
       </>

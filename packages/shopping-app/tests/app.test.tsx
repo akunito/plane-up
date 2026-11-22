@@ -8,7 +8,7 @@ import { Controller, DONE_RESET_MS } from "../src/controller";
 import { memoryStore } from "../src/store";
 import type { AppStore } from "../src/store";
 import type { ImageEnv } from "@plane/inventory";
-import { BABY, FakeApi, GROCERIES, STORAGE, SUPPLEMENTS, state, uid } from "./fake-api";
+import { BABY, BO, FakeApi, GROCERIES, ME, STORAGE, SUPPLEMENTS, state, uid } from "./fake-api";
 import type { Data } from "./fake-api";
 import type { ItemState } from "@plane/inventory";
 
@@ -196,6 +196,23 @@ describe("the to-buy list", () => {
     expect(api.ops().find((o) => o.op === "arrived")!.args).toMatchObject({ quantity: 1 });
     expect(api.server.items.get(PROTEIN)!.quantity).toBe(1);
     expect(screen.queryByRole("region", { name: /On the way/ })).toBeNull();
+    // S71: an order action has no Undo, the arrival included (brief: Orders).
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  });
+
+  it("S17: a pinned item someone else bought stays on the list, saying who bought it and when", async () => {
+    // The model server keeps no last_bought_*: the item arrives as the engine sends it after B's purchase.
+    const items = catalog();
+    const bread = items.find((i) => i.state.id === BREAD)!;
+    bread.state.last_bought_by = BO.id;
+    await boot(items);
+    const row = screen.getByRole("checkbox", { name: "Bread: bought" }).closest("label")!;
+    expect(row.textContent).toMatch(/Pinned · bought .* by Bo$/);
+    // Bought by the viewer: no name.
+    cleanup();
+    bread.state.last_bought_by = ME.id;
+    await boot(items);
+    expect(screen.getByRole("checkbox", { name: "Bread: bought" }).closest("label")!.textContent).not.toMatch(/ by /);
   });
 
   it("marking ordered warns when the item already has an open order", async () => {
@@ -216,6 +233,10 @@ describe("the to-buy list", () => {
     await settle();
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
     expect(headings.slice(0, 4)).toEqual(["Out", "Running low", "Needed", "Pinned"]);
+    // S60: Wipes (units, 1 of minimum 3) is below its minimum, so it sits with "Running low".
+    expect(within(screen.getByRole("region", { name: "Running low" })).getByText("Wipes")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Out" })).getByText("Detergent")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Needed" })).getByText("Milk")).toBeTruthy();
     expect(api.calls.some((c) => c.method === "PUT" && c.path.endsWith("/preferences/"))).toBe(true);
   });
 });

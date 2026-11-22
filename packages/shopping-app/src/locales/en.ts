@@ -23,6 +23,7 @@ export const en = {
   badge_recount: "Recount",
   badge_below: "{have} / min {min}",
   bought_ago: "bought {when}",
+  bought_ago_by: "bought {when} by {who}",
   flagged_by: "{name} flagged it {when}",
   tick_label: "{item}: bought",
   mark_ordered: "Mark ordered",

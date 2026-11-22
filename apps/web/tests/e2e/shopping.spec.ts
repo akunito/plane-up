@@ -341,7 +341,8 @@ test.describe("@visual-shopping", () => {
   test("VS-01 to-buy list", async ({ page }) => {
     await open(page);
     await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
-    await shot(page, "vs-01-list");
+    // Renamed when pinned rows gained "bought … (by …)" (APLANE-67, S17): the new name creates its baseline.
+    await shot(page, "vs-01-list-bought");
   });
 
   test("VS-02 shopping mode", async ({ page }) => {

@@ -23,6 +23,7 @@ export const pl: Dictionary = {
   badge_recount: "Przelicz",
   badge_below: "{have} / min {min}",
   bought_ago: "kupione {when}",
+  bought_ago_by: "kupione {when} przez {who}",
   flagged_by: "dodane przez: {name}, {when}",
   tick_label: "{item}: kupione",
   mark_ordered: "Zamówione",

@@ -9,19 +9,8 @@ import { fetchHistory, photoUrl, view } from "@plane/inventory";
 import type { AppState } from "../controller";
 import { MODES, board, personName, shownQuantity } from "../model";
 import type { Key } from "../i18n";
-import {
-  Ago,
-  Dialog,
-  Icon,
-  LevelSwitch,
-  NeededButton,
-  NumberField,
-  Rich,
-  Stepper,
-  parseIntStrict,
-  useCtx,
-} from "../ui";
-import { AudienceText, OrderDialog } from "./common";
+import { Ago, Dialog, Icon, LevelSwitch, NeededButton, NumberField, Stepper, parseIntStrict, useCtx } from "../ui";
+import { AudienceText, BoughtAgo, OrderDialog } from "./common";
 import { RecountDialog } from "./Inventory";
 
 type Field =
@@ -295,7 +284,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
         ) : null}
         {state.mode === "pinned" && state.last_bought_at ? (
           <p className="sub pad">
-            <Rich k="bought_ago" vars={{ when: <Ago at={state.last_bought_at} /> }} />
+            <BoughtAgo at={state.last_bought_at} by={state.last_bought_by} />
           </p>
         ) : null}
         {toBuyRow ? <p className="notice warn">{t("on_list_with", { n: toBuyRow.quantity })}</p> : null}
