@@ -115,9 +115,17 @@ function run(seed: number) {
     const shown = view(state);
     const copy = server.clone();
     const stale = new Set<string>();
+    // Accepted (queue.ts header): an entry the server already applied with the answer lost, whose effect a
+    // later answer already brought (the device knows a revision at or past the one it produced), is previewed
+    // twice until its retry is answered. Holds (decision 3) can keep that retry waiting for the person: an
+    // entry ahead of it is approved and answered while it is still held.
+    const heldApplied = new Set<string>();
     for (const e of state.entries) {
       const [res] = copy.apply([e.op as Operation], "me");
       if (res!.result === "stale") stale.add(e.op.target);
+      const appliedAt = server.ledger.get(e.op.client_op_id)?.rev;
+      if (res!.duplicate && appliedAt != null && appliedAt <= (state.known[e.op.target]?.rev ?? -1))
+        heldApplied.add(e.op.target);
     }
     // Accepted (queue.ts header): an undo (other than of a ±n) of a step whose prior server state the
     // device never held is not previewed until answered.
@@ -140,7 +148,7 @@ function run(seed: number) {
     );
     for (const item of server.snapshot()) {
       if (state.known[item.id]?.rev !== item.rev || stale.has(item.id) || unknownUndo.has(item.id)) continue;
-      if (unknownOrder.has(item.id)) continue;
+      if (unknownOrder.has(item.id) || heldApplied.has(item.id)) continue;
       const why = () =>
         JSON.stringify({
           known: pick(state.known[item.id]!),

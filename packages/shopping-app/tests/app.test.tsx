@@ -10,7 +10,7 @@ import type { AppStore } from "../src/store";
 import type { ImageEnv } from "@plane/inventory";
 import { BABY, FakeApi, GROCERIES, STORAGE, SUPPLEMENTS, state, uid } from "./fake-api";
 import type { Data } from "./fake-api";
-import type { ItemState, QueueState } from "@plane/inventory";
+import type { ItemState } from "@plane/inventory";
 
 const MILK = uid();
 const BREAD = uid();
@@ -582,14 +582,7 @@ describe("phases and failures", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Milk: bought" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Wipes: bought" }));
     await waitFor(() => expect(controller.get().queue.entries).toHaveLength(2));
-    // A failed attempt marks entries transmitted, and transmitted entries are never held (queue.ts isHeld;
-    // open question to the owner, APLANE-67): this test covers the screen for never-sent ones, as a cold start
-    // offline leaves them (controller flush: openedOffline sends nothing).
-    await act(async () =>
-      (controller as unknown as { updateQueue: (fn: (q: QueueState) => QueueState) => Promise<unknown> }).updateQueue(
-        (q) => ({ ...q, entries: q.entries.map((e) => ({ ...e, transmission: "never" as const })), failure: null })
-      )
-    );
+    // The failed attempt marked them transmitted: they are held all the same (decision 3, 2026-11-22).
     api.fail = null;
     clock += 3 * 60 * 60 * 1000;
     const failed = api.ops().length; // the 502 attempts are recorded too

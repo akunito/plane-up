@@ -210,10 +210,17 @@ describe("holds (S35, S66, S68)", () => {
     expect(nextBatch(s, now, "ana")!.batch).toHaveLength(2);
   });
 
-  it("a transmitted entry is never held: it was already sent", () => {
+  it("an entry whose attempt failed offline is held too after two hours, and once approved goes with its id", () => {
+    // Decision 3 (owner 2026-11-22): the failed attempt marked it transmitted; it must still ask.
     let s = tap(start(), "buy", "milk", {}, t(0));
-    s = onFailed(nextBatch(s, 0, "ana")!.state, "offline", 0);
-    expect(heldEntries(s, HOLD_AFTER_MS * 2)).toEqual([]);
+    const first = nextBatch(s, 0, "ana")!;
+    s = onFailed(first.state, "offline", 0);
+    expect(heldEntries(s, HOLD_AFTER_MS * 2).map((e) => e.op.client_op_id)).toEqual(ids(s));
+    expect(nextBatch(onRestart(s), HOLD_AFTER_MS * 2, "ana")).toBeNull();
+    s = approve(s, ids(s), HOLD_AFTER_MS * 2);
+    expect(nextBatch(onRestart(s), HOLD_AFTER_MS * 2, "ana")!.batch[0]!.client_op_id).toBe(
+      first.batch[0]!.client_op_id
+    );
   });
 
   it("an entry older than 60 days can only be discarded", () => {

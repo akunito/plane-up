@@ -7,9 +7,11 @@
 //   later with the SAME ids, so an operation the server applied is recognised and not applied twice.
 // - "Not yet answered" is not "not sent": undo removes only a never-transmitted entry; anything
 //   transmitted is undone by queueing a revert behind it.
-// - Entries tapped more than two hours ago and never sent are held until the person approves them, and a
-//   held entry blocks everything behind it. Older than 60 days, sent or not: discard only (the server
-//   prunes its ledger at 90, after which a retry would apply twice).
+// - Entries tapped more than two hours ago and not yet answered are held until the person approves them,
+//   whether or not an attempt already went out (decision 3, owner 2026-11-22: a failed attempt offline marks
+//   an entry transmitted, and exempting those let a tap from days ago go out by itself); a held entry blocks
+//   everything behind it. Resending keeps the id, so a lost-answer one is not applied twice. Older than 60
+//   days, sent or not: discard only (the server prunes its ledger at 90, after which a retry would apply twice).
 // - Only the user can unblock a failing queue, by discarding its first entry, and is told it may have
 //   been applied. A discard takes what depends on it, and a discarded, undone or refused tick leaves
 //   "Done"; a tick comes back only when its undo is refused or removed, and never from before the last
@@ -20,7 +22,9 @@
 //   a newer answer (phase 3 audit).
 //
 // Accepted, not fixed (phase 3 audit): an entry whose answer was lost and whose effect a later refresh
-// already shows is previewed twice until its retry is answered (seconds when online). The device
+// already shows is previewed twice until its retry is answered (seconds when online) — or, once it is held
+// by the two-hour rule, until the person answers the hold (decision 3, 2026-11-22; the app lists held
+// entries as soon as it opens). The device
 // cannot tell its own applied-but-unanswered step from someone else's. And an undo (other than of a ±n)
 // is previewed only when the device held the item's state right before that step (serverBefore), which
 // is what the server restores: not after someone else changed the item in between, nor after a
@@ -119,7 +123,6 @@ export function isDiscardOnly(entry: Entry, now: number): boolean {
 
 export function isHeld(entry: Entry, now: number): boolean {
   if (isDiscardOnly(entry, now)) return true;
-  if (entry.transmission !== "never") return false; // sent ones keep their ids and follow the normal rules
   return !entry.approved && ageOf(entry, now) > HOLD_AFTER_MS;
 }
 
