@@ -303,7 +303,8 @@ select {
   font-weight: 500;
 }
 
-.primary:disabled {
+.primary:disabled,
+.text-button:disabled {
   opacity: 0.5;
 }
 
@@ -351,6 +352,9 @@ select {
 
 .text-button {
   padding: 0 8px;
+  border: 0;
+  /* As a <button> it otherwise keeps the browser's grey fill and reads as disabled (Realme, 2026-11-22). */
+  background: transparent;
   color: var(--text-2);
 }
 

@@ -67,6 +67,8 @@ export class FakeApi {
   pendingPhotos = new Set<string>();
   /** Runs while storage "receives" a photo, before it answers: a refresh racing the upload. */
   onStorage: (() => Promise<unknown>) | null = null;
+  /** History requests fail as a dropped network does (offline). */
+  dropHistory = false;
   constructor(items: { state: ItemState; data: Data }[]) {
     this.server = new ModelServer(items.map((i) => i.state));
     for (const i of items) this.data.set(i.state.id, i.data);
@@ -248,6 +250,7 @@ export class FakeApi {
     const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
     this.calls.push({ method, path, body });
     if (path === STORAGE && this.onStorage) await this.onStorage();
+    if (this.dropHistory && path.endsWith("/history/")) throw new TypeError("Failed to fetch");
     if (this.fail) {
       const json = this.fail.json;
       return new Response(json === undefined ? "<html></html>" : JSON.stringify(json), {

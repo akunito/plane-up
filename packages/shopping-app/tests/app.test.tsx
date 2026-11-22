@@ -53,9 +53,10 @@ const fakeImages: ImageEnv = {
   encode: async () => new Blob([new Uint8Array(encodedSize)], { type: "image/jpeg" }),
 };
 
-async function boot(items = catalog(), hash = "#/", now?: () => number) {
+async function boot(items = catalog(), hash = "#/", now?: () => number, setup?: (a: FakeApi) => void) {
   window.location.hash = hash;
   api = new FakeApi(items);
+  setup?.(api);
   controller = new Controller({
     base: "",
     fetchImpl: (input, init) => api.fetch(input, init),
@@ -346,6 +347,57 @@ describe("item sheet", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove photo" }));
     await waitFor(() => expect(screen.queryByAltText("Photo of Salt")).toBeNull());
     expect(screen.getByLabelText("Add photo")).toBeTruthy();
+  });
+
+  it("on a touch screen the camera has its own button, and both buttons upload (Android's picker has no camera)", async () => {
+    encodedSize = 300_000;
+    const real = window.matchMedia;
+    window.matchMedia = ((q: string) => ({ matches: q === "(pointer: coarse)", media: q })) as typeof window.matchMedia;
+    try {
+      await boot(catalog(), `#/item/${SALT}`);
+      const camera = (await screen.findByLabelText("Take photo")) as HTMLInputElement;
+      const gallery = screen.getByLabelText("Gallery") as HTMLInputElement;
+      expect(camera.getAttribute("capture")).toBe("environment");
+      expect(gallery.hasAttribute("capture")).toBe(false);
+      expect(screen.queryByLabelText("Add photo")).toBeNull();
+      fireEvent.change(camera, {
+        target: { files: [new File([new Uint8Array(10)], "c.jpg", { type: "image/jpeg" })] },
+      });
+      const first = ((await screen.findByAltText("Photo of Salt")) as HTMLImageElement).getAttribute("src");
+      fireEvent.change(screen.getByLabelText("Gallery"), {
+        target: { files: [new File([new Uint8Array(10)], "g.jpg", { type: "image/jpeg" })] },
+      });
+      await waitFor(() =>
+        expect((screen.getByAltText("Photo of Salt") as HTMLImageElement).getAttribute("src")).not.toBe(first)
+      );
+      expect(api.calls.filter((c) => c.method === "PATCH" && c.path.includes("/photo/"))).toHaveLength(2);
+    } finally {
+      window.matchMedia = real;
+    }
+  });
+
+  it("a history that cannot load offline says so, and loads when the network returns", async () => {
+    await boot(catalog(), `#/item/${SALT}`, undefined, (a) => {
+      a.dropHistory = true;
+    });
+    expect(await screen.findByText("The history cannot be loaded now.")).toBeTruthy();
+    api.dropHistory = false;
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(await screen.findByText("Nothing yet.")).toBeTruthy();
+  });
+
+  it("a history that failed is tried again on focus, without an online event (the network dropped silently)", async () => {
+    await boot(catalog(), `#/item/${SALT}`, undefined, (a) => {
+      a.dropHistory = true;
+    });
+    expect(await screen.findByText("The history cannot be loaded now.")).toBeTruthy();
+    api.dropHistory = false;
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(await screen.findByText("Nothing yet.")).toBeTruthy();
   });
 
   it("a refresh that runs during the upload does not hide the photo once it is confirmed (audit F1)", async () => {

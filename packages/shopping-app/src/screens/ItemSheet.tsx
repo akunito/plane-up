@@ -3,6 +3,7 @@
 // state changes are operations.
 
 import { useEffect, useMemo, useState } from "react";
+import type { ChangeEvent } from "react";
 import type { HistoryEntry, Mode } from "@plane/inventory";
 import { fetchHistory, photoUrl, view } from "@plane/inventory";
 import type { AppState } from "../controller";
@@ -36,6 +37,8 @@ type Field =
   | "min_quantity"
   | "restock_to";
 
+const touchScreen = () => typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+
 export function ItemSheet({ s, id }: { s: AppState; id: string }) {
   const { c, t } = useCtx();
   const k = s.known[id];
@@ -44,6 +47,8 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
   const row = useMemo(() => board(s.known, s.queue, s.orders, s.covered), [s.known, s.queue, s.orders, s.covered]);
   const toBuyRow = row.toBuy.find((r) => r.id === id) ?? null;
   const [history, setHistory] = useState<HistoryEntry[] | null>(null);
+  const [historyFailed, setHistoryFailed] = useState(false);
+  const [historyTry, setHistoryTry] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const [modeDialog, setModeDialog] = useState<Mode | null>(null);
   const [recount, setRecount] = useState(false);
@@ -51,12 +56,33 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
   const [missing, setMissing] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoBroken, setPhotoBroken] = useState<string | null>(null);
-  // A photo that failed to load (offline: photos are never cached) is tried again when the network returns.
+  const [camera] = useState(touchScreen);
+  // A photo or a history that failed to load (offline: neither is cached) is tried again when the network returns.
   useEffect(() => {
-    const retry = () => setPhotoBroken(null);
+    const retry = () => {
+      setPhotoBroken(null);
+      setHistoryTry((n) => n + 1);
+    };
     window.addEventListener("online", retry);
     return () => window.removeEventListener("online", retry);
   }, []);
+  // "online" fires once, often before DNS/Tailscale answer, and never when the network drops without the device
+  // going offline: a failed history is also tried on focus, on showing the page and every 30 s, as the list is
+  // (phase 8 camera-fix audit).
+  useEffect(() => {
+    if (!historyFailed) return;
+    const retry = () => {
+      if (document.visibilityState === "visible") setHistoryTry((n) => n + 1);
+    };
+    window.addEventListener("focus", retry);
+    document.addEventListener("visibilitychange", retry);
+    const timer = window.setInterval(retry, 30_000);
+    return () => {
+      window.removeEventListener("focus", retry);
+      document.removeEventListener("visibilitychange", retry);
+      window.clearInterval(timer);
+    };
+  }, [historyFailed]);
   const projectId = k?.data.project.id;
   const listId = k?.data.list.id;
   const rev = state?.rev;
@@ -86,13 +112,16 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
     if (!projectId) return;
     let live = true;
     void fetchHistory(c.client(), projectId, id).then((out) => {
-      if (live && out.kind === "ok") setHistory(out.body);
+      if (!live) return undefined;
+      // A failed refetch keeps the history already shown; one never loaded says so instead of "Loading…" for ever.
+      if (out.kind === "ok") setHistory(out.body);
+      setHistoryFailed(out.kind !== "ok");
       return undefined;
     });
     return () => {
       live = false;
     };
-  }, [c, id, projectId, rev]);
+  }, [c, id, projectId, rev, historyTry]);
 
   if (!k || !state) {
     return (
@@ -110,6 +139,16 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
   }
   const data = k.data;
   const item = data.name;
+  async function pickPhoto(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setPhotoBusy(true);
+    setMessage(t("photo_uploading"));
+    const out = await c.setPhoto(id, file);
+    setPhotoBusy(false);
+    setMessage(out.ok ? t("saved") : t("save_failed", { error: photoError(out.error) }));
+  }
 
   function photoError(error: string): string {
     if (error === "too_large") return t("photo_too_large");
@@ -316,25 +355,24 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
             />
           ) : null}
           <div className="photo-actions">
-            {/* No `capture`: it forces the camera on Android, and a photo already on the phone is as good. */}
+            {/* Android's photo picker (Edge Canary 152, Android 15) offers no camera for accept=image/*: a capture
+                input is the only way to it (measured 2026-11-22). Touch screens only: elsewhere capture is ignored. */}
+            {camera ? (
+              <label className={`secondary${photoBusy ? " disabled" : ""}`}>
+                {t("photo_take")}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  hidden
+                  disabled={photoBusy}
+                  onChange={pickPhoto}
+                />
+              </label>
+            ) : null}
             <label className={`secondary${photoBusy ? " disabled" : ""}`}>
-              {t(data.photo ? "photo_replace" : "photo_add")}
-              <input
-                type="file"
-                accept="image/*"
-                hidden
-                disabled={photoBusy}
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = "";
-                  if (!file) return;
-                  setPhotoBusy(true);
-                  setMessage(t("photo_uploading"));
-                  const out = await c.setPhoto(id, file);
-                  setPhotoBusy(false);
-                  setMessage(out.ok ? t("saved") : t("save_failed", { error: photoError(out.error) }));
-                }}
-              />
+              {t(camera ? "photo_gallery" : data.photo ? "photo_replace" : "photo_add")}
+              <input type="file" accept="image/*" hidden disabled={photoBusy} onChange={pickPhoto} />
             </label>
             {data.photo ? (
               <button
@@ -361,7 +399,9 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
         ) : null}
 
         <h2 className="group">{t("history")}</h2>
-        {history === null ? <p className="muted small pad">{t("loading")}</p> : null}
+        {history === null ? (
+          <p className="muted small pad">{t(historyFailed ? "history_unavailable" : "loading")}</p>
+        ) : null}
         {history?.length === 0 ? <p className="muted small pad">{t("history_empty")}</p> : null}
         <ul className="history">
           {history?.map((e) => (

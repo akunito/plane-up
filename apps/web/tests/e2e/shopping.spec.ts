@@ -185,8 +185,17 @@ test.describe("shopping app @shopping", () => {
     browser,
   }, info) => {
     await open(page, `#/item/${items.Salt}`);
-    const input = page.getByLabel("Add photo");
+    // A touch screen gets the camera as its own button (Android's photo picker has none): the phone project
+    // uploads through it, the desktop through the single file button.
+    const touch = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
+    // Pinned to the project: if touch emulation stopped matching, the phone would quietly test the desktop path.
+    expect(touch).toBe(info.project.name === "android");
+    const input = page.getByLabel(touch ? "Take photo" : "Add photo");
     await expect(input).toHaveCount(1);
+    if (touch) {
+      await expect(input).toHaveAttribute("capture", "environment");
+      await expect(page.getByLabel("Gallery")).toHaveCount(1);
+    }
     // A real JPEG larger than the 1600 px the app shrinks to, made by the browser itself, with an EXIF block
     // spliced in the way a phone writes one: orientation 6 (stored landscape, shown portrait). The stored
     // photo must come out upright (1200 × 1600) and without the EXIF block (phase 8 audit: both were assumed).
@@ -358,8 +367,9 @@ test.describe("@visual-shopping", () => {
     // Nappy cream: no workflow above touches it, so its history is the same on every project.
     await open(page, `#/item/${items["Nappy cream"]}`);
     await expect(page.getByText(/set it to: In stock/)).toBeVisible();
-    // Renamed with the photo field (APLANE-66), which changed this screen: the new name creates its baseline.
-    await shot(page, "vs-05-item-photo");
+    // Renamed with each change to this screen (APLANE-66 photo field, then the camera button on touch screens):
+    // the new name creates its baseline.
+    await shot(page, "vs-05-item-camera");
   });
 
   test("VS-06 order dialog", async ({ page }) => {
