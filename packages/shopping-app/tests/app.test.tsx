@@ -644,6 +644,17 @@ describe("phase 9 device review", () => {
     expect(controller.get().queue.failure).toBeNull();
   });
 
+  it("the item sheet's footer actions name their item (S34: TalkBack read a bare 'Mark ordered')", async () => {
+    await boot(catalog(), `#/item/${SALT}`);
+    expect(await screen.findByRole("button", { name: "Salt: Mark ordered" })).toBeTruthy();
+  });
+
+  it("the workspace picker is in the list's scroll area, not under the full-height screen", async () => {
+    await boot(catalog(), "#/", undefined, (a) => a.workspaces.push({ slug: "other", name: "Other" }));
+    const picker = await screen.findByRole("combobox", { name: /Workspace/ });
+    expect(picker.closest("main.scroll")).not.toBeNull();
+  });
+
   it("a store that cannot keep changes is said on screen", async () => {
     await bootWith(async (userId) => ({ ...memoryStore(createQueue(userId, newUuid())), volatile: true }));
     expect(screen.getByText(/This device cannot keep changes/)).toBeTruthy();

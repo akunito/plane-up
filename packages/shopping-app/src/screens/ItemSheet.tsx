@@ -430,12 +430,23 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
       </main>
       <footer className="bottombar">
         {data.purchase_url ? (
-          <a href={data.purchase_url} target="_blank" rel="noopener noreferrer" className="secondary wide">
+          <a
+            href={data.purchase_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="secondary wide"
+            aria-label={t("item_action", { item, action: t("open_link") })}
+          >
             {Icon.external()}
             {t("open_link")}
           </a>
         ) : null}
-        <button type="button" className="primary wide" onClick={() => setOrdering(true)}>
+        <button
+          type="button"
+          className="primary wide"
+          aria-label={t("item_action", { item, action: t("mark_ordered") })}
+          onClick={() => setOrdering(true)}
+        >
           {Icon.truck()}
           {t("mark_ordered")}
         </button>

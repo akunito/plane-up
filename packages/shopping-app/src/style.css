@@ -512,6 +512,21 @@ select {
   flex: none;
 }
 
+/* In a row the list name and hint shrink and wrap, right-aligned, and the name keeps a floor: with text at 130 %
+   a pinned row's "bought … by …" took the whole width and squeezed the name to one letter per line (phase 9,
+   measured on the Realme). */
+.row > .sub.inline {
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  text-align: end;
+}
+
+.row > .name.grow {
+  min-width: min(7em, 40%);
+}
+
 .block {
   display: block;
 }

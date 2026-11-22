@@ -8,7 +8,7 @@ import { shortDate } from "../i18n";
 import type { Key } from "../i18n";
 import { prefs } from "../store";
 import { Ago, Icon, Rich, StateBadge, useCtx, useTick } from "../ui";
-import { ArrivalDialog, BottomBar, BoughtAgo, OrderDialog, QueueStatus, Tabs } from "./common";
+import { ArrivalDialog, BottomBar, BoughtAgo, OrderDialog, QueueStatus, Tabs, WorkspacePicker } from "./common";
 
 const GROUPINGS: readonly Grouping[] = ["category", "store", "list", "urgency"];
 
@@ -166,6 +166,7 @@ export function ToBuy({ s }: { s: AppState }) {
           </section>
         ) : null}
         <DoneSection rows={done} />
+        <WorkspacePicker />
       </main>
       <BottomBar />
       {ordering ? <OrderDialog row={ordering} onClose={() => setOrdering(null)} /> : null}

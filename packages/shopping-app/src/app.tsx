@@ -14,6 +14,7 @@ import { ItemSheet } from "./screens/ItemSheet";
 import { Pending } from "./screens/Pending";
 import { Shop } from "./screens/Shop";
 import { ToBuy } from "./screens/ToBuy";
+import { WorkspacePicker } from "./screens/common";
 
 export type Route =
   | { name: "list" }
@@ -160,7 +161,6 @@ function Root() {
     <>
       {screen}
       <ToastView />
-      {route.name === "list" ? <WorkspacePicker /> : null}
     </>
   );
 }
@@ -186,24 +186,5 @@ function ToastView() {
         </button>
       ) : null}
     </div>
-  );
-}
-
-/** Shown only to someone in more than one workspace. */
-function WorkspacePicker() {
-  const { c, t } = useCtx();
-  const s = useSyncExternalStore(c.subscribe, c.get);
-  if (s.workspaces.length < 2) return null;
-  return (
-    <label className="select workspace">
-      <span className="muted small">{t("workspace")}</span>
-      <select value={s.slug} onChange={(e) => void c.switchWorkspace(e.target.value)}>
-        {s.workspaces.map((w) => (
-          <option key={w.slug} value={w.slug}>
-            {w.name}
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }

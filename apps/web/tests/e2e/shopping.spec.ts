@@ -286,6 +286,37 @@ test.describe("shopping app @shopping", () => {
     await bo.context.close();
   });
 
+  test("S34: with text at 130 % no row squeezes its name and nothing scrolls sideways", async ({ page }) => {
+    await page.goto("/shopping/");
+    await expect(page.getByRole("checkbox", { name: "Bread: bought" })).toBeVisible();
+    // Android's font scale multiplies every font size; the app's sizes are px rules, so scaling the rules is the
+    // same thing (scaling elements instead compounds through nesting).
+    await page.evaluate(() => {
+      // Inside evaluate: it runs in the page, so it cannot move out.
+      // oxlint-disable-next-line unicorn/consistent-function-scoping
+      const walk = (rules: CSSRuleList) => {
+        for (const r of Array.from(rules)) {
+          if ("cssRules" in r) walk((r as CSSGroupingRule).cssRules);
+          const style = (r as CSSStyleRule).style;
+          if (style?.fontSize?.endsWith("px")) style.fontSize = `${parseFloat(style.fontSize) * 1.3}px`;
+        }
+      };
+      for (const sheet of Array.from(document.styleSheets)) walk(sheet.cssRules);
+    });
+    const width = (name: string) =>
+      page
+        .locator(`[data-item]`, { has: page.getByRole("checkbox", { name: `${name}: bought` }) })
+        .locator(".name")
+        .evaluate((e) => e.getBoundingClientRect().width);
+    // Bread is pinned and was bought by someone else: the longest hint on the list.
+    expect(await width("Bread")).toBeGreaterThan(60);
+    expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= innerWidth)).toBe(true);
+    const sideways = await page.evaluate(
+      () => Array.from(document.querySelectorAll(".row")).filter((r) => r.scrollWidth > r.clientWidth + 1).length
+    );
+    expect(sideways).toBe(0);
+  });
+
   test("S51: /shopping without the slash lands on the app", async ({ page }) => {
     await page.goto("/shopping");
     await expect(page).toHaveURL(/\/shopping\/(#.*)?$/);

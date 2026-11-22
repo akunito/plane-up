@@ -61,6 +61,7 @@ export class FakeApi {
   server: ModelServer;
   data = new Map<string, Data>();
   calls: Call[] = [];
+  workspaces = [{ slug: "home", name: "Home" }];
   /** Answer every request with this instead (a status and an optional JSON body). */
   fail: { status: number; json?: unknown } | null = null;
   ordersAt = new Map<string, string>();
@@ -139,7 +140,7 @@ export class FakeApi {
     const p = url.pathname;
     if (p === "/api/users/me/settings/")
       return [200, { workspace: { last_workspace_slug: "home", fallback_workspace_slug: "home" } }];
-    if (p === "/api/users/me/workspaces/") return [200, [{ slug: "home", name: "Home" }]];
+    if (p === "/api/users/me/workspaces/") return [200, this.workspaces];
     if (p.endsWith("/inventory/lists/") && !p.includes("/projects/"))
       return [
         200,

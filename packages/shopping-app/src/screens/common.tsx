@@ -1,7 +1,7 @@
 // Pieces several screens share: the header tabs, the queue's status line, the bottom bar, the order and
 // arrival dialogs.
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { newUuid, waiting, heldEntries, isHeld } from "@plane/inventory";
 import type { AppState } from "../controller";
 import type { Order, Row } from "../model";
@@ -234,5 +234,27 @@ export function BoughtAgo({ at, by }: { at: string; by: string | null }) {
     <Rich k="bought_ago_by" vars={{ when: <Ago at={at} />, who }} />
   ) : (
     <Rich k="bought_ago" vars={{ when: <Ago at={at} /> }} />
+  );
+}
+
+/**
+ * Shown only to someone in more than one workspace. Inside the list's scroll area: drawn after the 100 %-high screen
+ * it sat below the fold for every such person (phase 9, measured on the Realme).
+ */
+export function WorkspacePicker() {
+  const { c, t } = useCtx();
+  const s = useSyncExternalStore(c.subscribe, c.get);
+  if (s.workspaces.length < 2) return null;
+  return (
+    <label className="select workspace">
+      <span className="muted small">{t("workspace")}</span>
+      <select value={s.slug} onChange={(e) => void c.switchWorkspace(e.target.value)}>
+        {s.workspaces.map((w) => (
+          <option key={w.slug} value={w.slug}>
+            {w.name}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
