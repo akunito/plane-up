@@ -97,7 +97,7 @@ export function ToBuy({ s }: { s: AppState }) {
                   <button
                     type="button"
                     className="secondary"
-                    aria-label={t("mark_ordered_label", { item: row.data.name })}
+                    aria-label={t("item_action", { item: row.data.name, action: t("mark_ordered") })}
                     onClick={() => setOrdering(row)}
                   >
                     {t("mark_ordered")}
@@ -135,7 +135,7 @@ export function ToBuy({ s }: { s: AppState }) {
                         <button
                           type="button"
                           className="link"
-                          aria-label={t("cancel_order_label", { item: name })}
+                          aria-label={t("item_action", { item: name, action: t("cancel_order") })}
                           onClick={() =>
                             void c.act(
                               "cancel",

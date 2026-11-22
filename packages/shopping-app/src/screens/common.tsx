@@ -208,7 +208,7 @@ export function ArrivalDialog({
           <button
             type="button"
             className="secondary"
-            aria-label={t("cancel_order_label", { item: name })}
+            aria-label={t("item_action", { item: name, action: t("cancel_order") })}
             onClick={() => {
               void c.act("cancel", itemId, { order_id: order.id }, { toast: t("toast_cancelled", { item: name }) });
               onClose();

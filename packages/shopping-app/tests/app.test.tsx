@@ -169,7 +169,7 @@ describe("the to-buy list", () => {
 
   it("an item bought online is marked ordered through the order dialog, and then shown On the way", async () => {
     await boot();
-    fireEvent.click(screen.getByRole("button", { name: "Mark Protein as ordered" }));
+    fireEvent.click(screen.getByRole("button", { name: "Protein: Mark ordered" }));
     const dialog = screen.getByRole("dialog", { name: "Mark Protein as ordered" });
     expect((within(dialog).getByLabelText("Quantity") as HTMLInputElement).value).toBe("3");
     fireEvent.change(within(dialog).getByLabelText("Reference (shop, order number)"), { target: { value: "A-17" } });
@@ -178,14 +178,14 @@ describe("the to-buy list", () => {
     const order = api.ops().find((o) => o.op === "mark_ordered")!;
     expect(order.args).toMatchObject({ quantity: 3, reference: "A-17" });
     expect(screen.getByRole("region", { name: "On the way · 1" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Mark Protein as ordered" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Protein: Mark ordered" })).toBeNull();
     // An order action has no Undo (brief: Orders).
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
   });
 
   it("Arrived asks how much came and closes the order; the stock goes up by that much", async () => {
     await boot();
-    fireEvent.click(screen.getByRole("button", { name: "Mark Protein as ordered" }));
+    fireEvent.click(screen.getByRole("button", { name: "Protein: Mark ordered" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Mark ordered" }));
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Protein: the order arrived" }));
@@ -267,13 +267,13 @@ describe("the to-buy list", () => {
 
   it("marking ordered warns when the item already has an open order", async () => {
     await boot();
-    fireEvent.click(screen.getByRole("button", { name: "Mark Protein as ordered" }));
+    fireEvent.click(screen.getByRole("button", { name: "Protein: Mark ordered" }));
     fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Quantity"), { target: { value: "1" } });
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Mark ordered" }));
     await settle();
     // One of three ordered: 0 at home + 1 on order is below the minimum of 2, so it is still to buy,
     // and ordering again warns.
-    fireEvent.click(screen.getByRole("button", { name: "Mark Protein as ordered" }));
+    fireEvent.click(screen.getByRole("button", { name: "Protein: Mark ordered" }));
     expect(within(screen.getByRole("dialog")).getByRole("alert").textContent).toContain("already has an open order");
   });
 
@@ -283,7 +283,7 @@ describe("the to-buy list", () => {
       ["1", "A-1"],
       ["2", "B-2"],
     ] as const) {
-      fireEvent.click(screen.getByRole("button", { name: "Mark Protein as ordered" }));
+      fireEvent.click(screen.getByRole("button", { name: "Protein: Mark ordered" }));
       const d = screen.getByRole("dialog");
       fireEvent.change(within(d).getByLabelText("Quantity"), { target: { value: n } });
       fireEvent.change(within(d).getByLabelText("Reference (shop, order number)"), { target: { value: ref } });
@@ -333,7 +333,7 @@ describe("the to-buy list", () => {
     expect(api.server.orders.get(orderId)!.status).toBe("open");
     const row = screen.getByRole("region", { name: /On the way/ });
     expect(within(row).getByText(/Ana bought it .*after it was ordered\./)).toBeTruthy();
-    fireEvent.click(within(row).getByRole("button", { name: "Wipes: cancel the order" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Wipes: Cancel order" }));
     await settle();
     expect(api.server.orders.get(orderId)!.status).toBe("cancelled");
   });

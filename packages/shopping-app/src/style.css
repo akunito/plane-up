@@ -513,18 +513,22 @@ select {
 }
 
 /* In a row the list name and hint shrink and wrap, right-aligned, and the name keeps a floor: with text at 130 %
-   a pinned row's "bought … by …" took the whole width and squeezed the name to one letter per line (phase 9,
+   a pinned row's "Pinned · bought …" took the whole width and squeezed the name to one letter per line (phase 9,
    measured on the Realme). */
 .row > .sub.inline {
   flex: 0 1 auto;
   min-width: 0;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  /* safe: a word wider than its box stays inside it instead of spilling left over the name, and anywhere lets it
+     break. Measured on the Realme with a long name + long list + badge: plain flex-end overlapped the name by
+     40 px at 130 % text and 100 px at 200 %, and a 7em floor pushed the badge 10 px off the row at 200 %. */
+  justify-content: safe flex-end;
   text-align: end;
+  overflow-wrap: anywhere;
 }
 
 .row > .name.grow {
-  min-width: min(7em, 40%);
+  min-width: min(5em, 30%);
 }
 
 .block {

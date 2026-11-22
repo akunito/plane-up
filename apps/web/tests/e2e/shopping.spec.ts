@@ -60,7 +60,7 @@ test.describe("shopping app @shopping", () => {
       )
     );
     await expect(page.getByRole("checkbox", { name: "Salt: bought" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Mark Protein as ordered" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Protein: Mark ordered" })).toBeVisible();
     const onTheWay = page.getByRole("region", { name: "On the way · 2" });
     await expect(onTheWay.getByText("Overdue")).toHaveCount(1);
     await expect(onTheWay.getByText("Magnesium")).toBeVisible();
@@ -137,7 +137,7 @@ test.describe("shopping app @shopping", () => {
   test("orders: mark ordered, cancel, order again, a partial arrival", async ({ page }) => {
     await open(page);
     const order = async () => {
-      await page.getByRole("button", { name: "Mark Protein as ordered" }).click();
+      await page.getByRole("button", { name: "Protein: Mark ordered" }).click();
       const dialog = page.getByRole("dialog", { name: "Mark Protein as ordered" });
       await expect(dialog.getByLabel("Quantity")).toHaveValue("3");
       await dialog.getByRole("button", { name: "Mark ordered" }).click();
@@ -150,7 +150,7 @@ test.describe("shopping app @shopping", () => {
     await page.getByRole("button", { name: "Protein: the order arrived" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Protein: cancel the order" }).click();
     await expect(page.getByRole("region", { name: "On the way · 2" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Mark Protein as ordered" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Protein: Mark ordered" })).toBeVisible();
     await settled(page);
 
     await order();
@@ -286,35 +286,75 @@ test.describe("shopping app @shopping", () => {
     await bo.context.close();
   });
 
-  test("S34: with text at 130 % no row squeezes its name and nothing scrolls sideways", async ({ page }) => {
+  test("S34: with text at 130 % and 200 % on a 360 px phone, no row squeezes, covers or pushes out", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
     await page.goto("/shopping/");
-    await expect(page.getByRole("checkbox", { name: "Bread: bought" })).toBeVisible();
-    // Android's font scale multiplies every font size; the app's sizes are px rules, so scaling the rules is the
-    // same thing (scaling elements instead compounds through nesting).
-    await page.evaluate(() => {
+    await expect(page.getByRole("checkbox", { name: "Nappies: bought" })).toBeVisible();
+    const result = await page.evaluate(async () => {
+      // oxlint-disable-next-line unicorn/consistent-function-scoping
+      const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      // Android's font scale multiplies every font size; the app's sizes are px rules, so scaling the rules is the
+      // same thing (scaling elements instead compounds through nesting). Original sizes read once.
+      const base: [CSSStyleRule, number][] = [];
       // Inside evaluate: it runs in the page, so it cannot move out.
       // oxlint-disable-next-line unicorn/consistent-function-scoping
       const walk = (rules: CSSRuleList) => {
         for (const r of Array.from(rules)) {
           if ("cssRules" in r) walk((r as CSSGroupingRule).cssRules);
           const style = (r as CSSStyleRule).style;
-          if (style?.fontSize?.endsWith("px")) style.fontSize = `${parseFloat(style.fontSize) * 1.3}px`;
+          if (style?.fontSize?.endsWith("px")) base.push([r as CSSStyleRule, parseFloat(style.fontSize)]);
         }
       };
       for (const sheet of Array.from(document.styleSheets)) walk(sheet.cssRules);
+      // The worst row the seed lacks: a long name, a long list name and a badge (measured on the Realme: the
+      // list name covered the item name by 40 px at 130 % and the badge left the row at 200 %).
+      const box = Array.from(document.querySelectorAll("input[type=checkbox]")).find((b) =>
+        /Nappies/.test(b.getAttribute("aria-label") ?? "")
+      )!;
+      const row = box.closest("label.row")!;
+      const name = row.querySelector(":scope > .name")!;
+      const meta = row.querySelector(":scope > .sub.inline")!;
+      name.firstChild!.textContent = "Washing-up liquid concentrate lemon";
+      meta.firstChild!.textContent = "Groceries and household";
+      const out: Record<string, { name: number; overlap: number; out: number; sideways: number }> = {};
+      for (const k of [1.3, 2]) {
+        for (const [r, px] of base) r.style.fontSize = `${px * k}px`;
+        // Sequential on purpose: each scale is measured after the previous one is replaced.
+        // oxlint-disable-next-line no-await-in-loop
+        await wait(200);
+        const nr = name.getBoundingClientRect();
+        const range = document.createRange();
+        range.selectNodeContents(meta);
+        let overlap = 0;
+        for (const rect of Array.from(range.getClientRects()))
+          if (
+            rect.width &&
+            rect.left < nr.right - 1 &&
+            rect.right > nr.left &&
+            rect.top < nr.bottom &&
+            rect.bottom > nr.top
+          )
+            overlap = Math.max(overlap, nr.right - rect.left);
+        const rows = Array.from(document.querySelectorAll("label.row"));
+        out[String(k)] = {
+          name: Math.round(nr.width),
+          overlap: Math.round(overlap),
+          out: rows.filter(
+            (x) => x.lastElementChild!.getBoundingClientRect().right > x.getBoundingClientRect().right + 1
+          ).length,
+          sideways: rows.filter((x) => x.scrollWidth > x.clientWidth + 1).length,
+        };
+      }
+      return out;
     });
-    const width = (name: string) =>
-      page
-        .locator(`[data-item]`, { has: page.getByRole("checkbox", { name: `${name}: bought` }) })
-        .locator(".name")
-        .evaluate((e) => e.getBoundingClientRect().width);
-    // Bread is pinned and was bought by someone else: the longest hint on the list.
-    expect(await width("Bread")).toBeGreaterThan(60);
-    expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= innerWidth)).toBe(true);
-    const sideways = await page.evaluate(
-      () => Array.from(document.querySelectorAll(".row")).filter((r) => r.scrollWidth > r.clientWidth + 1).length
-    );
-    expect(sideways).toBe(0);
+    for (const k of ["1.3", "2"]) {
+      expect(result[k]!.name, `name width at ${k}`).toBeGreaterThan(60);
+      expect(result[k]!.overlap, `list name over the item name at ${k}`).toBe(0);
+      expect(result[k]!.out, `badges off the row at ${k}`).toBe(0);
+      expect(result[k]!.sideways, `rows scrolling sideways at ${k}`).toBe(0);
+    }
   });
 
   test("S51: /shopping without the slash lands on the app", async ({ page }) => {
@@ -433,7 +473,7 @@ test.describe("@visual-shopping", () => {
 
   test("VS-06 order dialog", async ({ page }) => {
     await open(page);
-    await page.getByRole("button", { name: "Mark Protein as ordered" }).click();
+    await page.getByRole("button", { name: "Protein: Mark ordered" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await shot(page, "vs-06-order", page.getByRole("dialog"));
   });
