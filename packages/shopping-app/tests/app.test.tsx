@@ -4,13 +4,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createQueue, makeLock, newUuid, tap } from "@plane/inventory";
 import { App } from "../src/app";
-import { Controller } from "../src/controller";
+import { Controller, DONE_RESET_MS } from "../src/controller";
 import { memoryStore } from "../src/store";
 import type { AppStore } from "../src/store";
 import type { ImageEnv } from "@plane/inventory";
 import { BABY, FakeApi, GROCERIES, STORAGE, SUPPLEMENTS, state, uid } from "./fake-api";
 import type { Data } from "./fake-api";
-import type { ItemState } from "@plane/inventory";
+import type { ItemState, QueueState } from "@plane/inventory";
 
 const MILK = uid();
 const BREAD = uid();
@@ -66,7 +66,7 @@ async function boot(items = catalog(), hash = "#/", now?: () => number, setup?: 
     ...(now ? { now } : {}),
   });
   await controller.start();
-  render(<App controller={controller} locale="en" />);
+  render(<App controller={controller} locale="en" {...(now ? { now } : {})} />);
 }
 
 /** Wait until every request the app started has been answered and the queue is empty. */
@@ -132,6 +132,39 @@ describe("the to-buy list", () => {
     expect(screen.getByRole("checkbox", { name: "Bread: not bought after all" })).toBeTruthy();
     await act(async () => controller.finishShopping());
     expect(screen.getByRole("checkbox", { name: "Bread: bought" })).toBeTruthy();
+  });
+
+  it("S18: Done survives a reload, and empties after six hours without a tick", async () => {
+    let clock = Date.now();
+    const stores = new Map<string, AppStore>();
+    const openStore = async (userId: string) => {
+      if (!stores.has(userId)) stores.set(userId, memoryStore(createQueue(userId, newUuid())));
+      return stores.get(userId)!;
+    };
+    api = new FakeApi(catalog());
+    const start = async () => {
+      cleanup();
+      controller = new Controller({
+        base: "",
+        fetchImpl: (input, init) => api.fetch(input, init),
+        lock: makeLock(undefined),
+        openStore,
+        now: () => clock,
+      });
+      await controller.start();
+      render(<App controller={controller} locale="en" />);
+    };
+    window.location.hash = "#/";
+    await start();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Bread: bought" }));
+    await settle();
+    // A reload: a new page over the same stored queue.
+    await start();
+    expect(screen.getByRole("checkbox", { name: "Bread: not bought after all" })).toBeTruthy();
+    clock += DONE_RESET_MS + 60_000;
+    await start();
+    expect(screen.getByRole("checkbox", { name: "Bread: bought" })).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: "Bread: not bought after all" })).toBeNull();
   });
 
   it("an item bought online is marked ordered through the order dialog, and then shown On the way", async () => {
@@ -495,6 +528,101 @@ describe("phases and failures", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply anyway" }));
     await settle();
     expect(api.server.items.get(DETERGENT)!.level).toBe("low");
+  });
+
+  /** Phase 9 matrix (S03, S04): A's level set while the send fails; B changes the item on the server. */
+  async function staleWhileFailing(item: string, search: string, mine: string, theirs: Record<string, unknown>) {
+    await boot(catalog(), "#/capture");
+    api.server.names.set("bea-id", "Bea");
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: search } });
+    const button = await screen.findByRole("button", { name: `${item}: ${mine}` });
+    api.fail = { status: 502 };
+    fireEvent.click(button);
+    await waitFor(() => expect(controller.get().queue.failure?.kind).toBe("server"));
+    const id = [...api.data.entries()].find(([, d]) => d.name === item)![0];
+    const rev = api.server.items.get(id)!.rev;
+    const op = Object.keys(theirs)[0]!;
+    api.server.apply(
+      [
+        {
+          v: 1,
+          client_op_id: newUuid(),
+          queue_id: null,
+          target: id,
+          op: op as never,
+          args: theirs[op] as never,
+          base_rev: rev,
+        },
+      ],
+      "bea-id"
+    );
+    api.fail = null;
+    await act(async () => controller.retry());
+    await waitFor(() => expect(controller.get().queue.notices).toHaveLength(1));
+    await go("#/pending");
+    return id;
+  }
+
+  it("S03: A's 'out' sent after B bought it is not applied, and A is told who changed it", async () => {
+    const id = await staleWhileFailing("Nappies", "nap", "Out", { buy: {} });
+    expect(screen.getByText(/Nappies: Bea changed it .*after you looked\. Your change was not applied\./)).toBeTruthy();
+    expect(api.server.items.get(id)!.level).toBe("ok");
+  });
+
+  it("S04: A's 'in stock' sent after B set it low stays low, and A is told who changed it", async () => {
+    const id = await staleWhileFailing("Detergent", "deter", "In stock", { set_level: { level: "low" } });
+    expect(screen.getByText(/Detergent: Bea changed it .*Your change was not applied\./)).toBeTruthy();
+    expect(api.server.items.get(id)!.level).toBe("low");
+  });
+
+  it("S35: changes left unsent for over two hours are listed, each sent or discarded by hand", async () => {
+    let clock = Date.now();
+    await boot(catalog(), "#/", () => clock);
+    api.fail = { status: 502 };
+    fireEvent.click(screen.getByRole("checkbox", { name: "Milk: bought" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Wipes: bought" }));
+    await waitFor(() => expect(controller.get().queue.entries).toHaveLength(2));
+    // A failed attempt marks entries transmitted, and transmitted entries are never held (queue.ts isHeld;
+    // open question to the owner, APLANE-67): this test covers the screen for never-sent ones, as a cold start
+    // offline leaves them (controller flush: openedOffline sends nothing).
+    await act(async () =>
+      (controller as unknown as { updateQueue: (fn: (q: QueueState) => QueueState) => Promise<unknown> }).updateQueue(
+        (q) => ({ ...q, entries: q.entries.map((e) => ({ ...e, transmission: "never" as const })), failure: null })
+      )
+    );
+    api.fail = null;
+    clock += 3 * 60 * 60 * 1000;
+    const failed = api.ops().length; // the 502 attempts are recorded too
+    await act(async () => controller.retry());
+    expect(api.ops()).toHaveLength(failed);
+    await go("#/pending");
+    const held = within(screen.getByRole("region", { name: "Not sent for more than two hours" }));
+    const rows = held.getAllByRole("button", { name: "Send" });
+    expect(rows).toHaveLength(2);
+    fireEvent.click(rows[0]!);
+    await waitFor(() => expect(api.ops()).toHaveLength(failed + 1));
+    fireEvent.click(held.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(controller.get().queue.entries).toHaveLength(0));
+    expect(api.ops()).toHaveLength(failed + 1);
+    expect(api.server.items.get(MILK)!.needed).toBe(false);
+    expect(api.server.items.get(WIPES)!.quantity).toBe(1);
+  });
+
+  it("S41: an operation the server keeps failing on blocks the queue until it is discarded; the rest then goes", async () => {
+    await boot();
+    api.poisonOp = (op) => op.target === MILK;
+    fireEvent.click(screen.getByRole("checkbox", { name: "Milk: bought" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Wipes: bought" }));
+    await waitFor(() => expect(controller.get().queue.failure?.kind).toBe("server"));
+    await act(async () => controller.retry());
+    expect(controller.get().queue.entries).toHaveLength(2);
+    await go("#/pending");
+    fireEvent.click(screen.getByRole("button", { name: "Discard the first change" }));
+    await act(async () => controller.retry());
+    await waitFor(() => expect(controller.get().queue.entries).toHaveLength(0));
+    expect(api.server.items.get(WIPES)!.quantity).toBe(3);
+    expect(api.server.items.get(MILK)!.needed).toBe(true);
+    api.poisonOp = null;
   });
 
   it("a workspace whose projects have no list yet says so", async () => {

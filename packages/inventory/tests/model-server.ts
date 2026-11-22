@@ -59,6 +59,9 @@ export class ModelServer {
     return Array.from(this.items.values(), (i) => Object.assign({}, i));
   }
 
+  /** Display names by actor id, for stale answers (`changed.by_name`). */
+  names = new Map<string, string>();
+
   apply(ops: Operation[], actor: string): OpResult[] {
     return ops.map((op) => this.one(op, actor));
   }
@@ -89,6 +92,13 @@ export class ModelServer {
     }
     const result: OpResult = { client_op_id: op.client_op_id, result: outcome.result, item: { ...item } };
     if (outcome.reason) result.reason = outcome.reason;
+    // As the engine (_last_change): a stale answer says who made the item's last applied step, and when.
+    if (outcome.result === "stale") {
+      const last = [...this.ledger.values()].findLast((r) => r.target === item.id && r.rev !== null);
+      result.changed = last
+        ? { op: last.op.op, by: last.actor, by_name: this.names.get(last.actor) ?? null, at: new Date().toISOString() }
+        : null;
+    }
     if (outcome.result === "applied") result.rev = item.rev;
     this.ledger.set(op.client_op_id, {
       result,

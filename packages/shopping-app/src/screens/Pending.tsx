@@ -80,8 +80,9 @@ export function Pending({ s }: { s: AppState }) {
                 {t("discard_first")}
               </button>
             </div>
-            {/* A format refusal is answered before the server's ledger: nothing of it was applied. */}
-            {failure.kind !== "outdated" ? <p className="muted small">{t("may_have_applied")}</p> : null}
+            {/* Also for "outdated": that refusal wrote nothing, but an attempt before the server's update may have
+                applied with its answer lost (S25 re-review). */}
+            <p className="muted small">{t("may_have_applied")}</p>
           </section>
         ) : null}
 

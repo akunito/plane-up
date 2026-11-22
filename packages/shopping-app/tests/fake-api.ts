@@ -67,6 +67,8 @@ export class FakeApi {
   pendingPhotos = new Set<string>();
   /** Runs while storage "receives" a photo, before it answers: a refresh racing the upload. */
   onStorage: (() => Promise<unknown>) | null = null;
+  /** Answers 500 to any ops/ request carrying an operation this matches (one that always breaks the server). */
+  poisonOp: ((op: Operation) => boolean) | null = null;
   /** Every operation is refused for its format version, as a newer server would (S25). */
   outdatedOps = false;
   /** History requests fail as a dropped network does (offline). */
@@ -175,6 +177,7 @@ export class FakeApi {
     }
     if (p.endsWith("/inventory/ops/")) {
       const ops = (body as { ops: Operation[] }).ops;
+      if (this.poisonOp && ops.some(this.poisonOp)) return [500, { error: "boom" }];
       if (this.outdatedOps)
         return [
           200,
