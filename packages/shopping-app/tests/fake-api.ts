@@ -216,7 +216,8 @@ export class FakeApi {
       const items = [...this.data.entries()]
         // Name or keywords, as the server searches (2026-11-23).
         .filter(([, d]) => {
-          return q && foldAccents(`${d.name}\n${d.keywords ?? ""}`).includes(foldAccents(q));
+          // Each part folded on its own, as search_text: a query never spans the name and the keywords.
+          return q && `${foldAccents(d.name)}\n${foldAccents(d.keywords ?? "")}`.includes(foldAccents(q));
         })
         .map(([id]) => this.payload(id));
       return [200, { items, categories: [], stores: [] }];

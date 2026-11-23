@@ -42,27 +42,6 @@ PHOTO_CHUNK = 500
 
 
 @shared_task
-def refresh_inventory_search_text():
-    """Rewrites every item's search text that differs from search_text(name, keywords) under the CURRENT fold; returns
-    how many. A row saved by an older image (deploy window, rollback and back) keeps that image's fold after the
-    data migration that refilled the others has run, and nothing else would ever fix it (0132 audit). A household
-    has a few hundred items: one pass reads them all; rows already right are not written."""
-    stale = []
-    for item in InventoryItem.all_objects.only("pk", "name", "keywords", "keywords_normalised").iterator(
-        chunk_size=500
-    ):
-        want = search_text(item.name, item.keywords)
-        if item.keywords_normalised != want:
-            item.keywords_normalised = want
-            stale.append(item)
-    for start in range(0, len(stale), 500):
-        InventoryItem.all_objects.bulk_update(stale[start : start + 500], ["keywords_normalised"])
-    if stale:
-        logger.info("inventory search text refreshed for %d items", len(stale))
-    return len(stale)
-
-
-@shared_task
 def purge_removed_inventory_photos():
     """Removed or replaced item photos (soft-deleted INVENTORY_ITEM_PHOTO rows) and uploads never confirmed, older
     than INVENTORY_PHOTO_PURGE_DAYS, lose their row and their storage object. Only photo rows: the live photo
@@ -101,3 +80,26 @@ def purge_removed_inventory_photos():
         cutoff.isoformat(),
     )
     return rows
+
+
+@shared_task
+def refresh_inventory_search_text():
+    """Rewrites every item's search text that differs from search_text(name, keywords) under the CURRENT fold; returns
+    how many. A row saved by an older image (deploy window, rollback and back) keeps that image's fold after the
+    data migration that refilled the others has run, and nothing else would ever fix it (0132 audit). A household
+    has a few hundred items: one pass reads them all; rows already right are not written (normally none are stale).
+    Each write is conditional on the name and keywords it was computed from: an edit saved meanwhile (with its own,
+    current search text) is never overwritten by text built from the old values — Postgres re-checks the WHERE after
+    waiting on that edit's row lock."""
+    fixed = 0
+    for item in InventoryItem.all_objects.only("pk", "name", "keywords", "keywords_normalised").iterator(
+        chunk_size=500
+    ):
+        want = search_text(item.name, item.keywords)
+        if item.keywords_normalised != want:
+            fixed += InventoryItem.all_objects.filter(pk=item.pk, name=item.name, keywords=item.keywords).update(
+                keywords_normalised=want
+            )
+    if fixed:
+        logger.info("inventory search text refreshed for %d items", fixed)
+    return fixed
