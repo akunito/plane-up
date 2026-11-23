@@ -117,8 +117,8 @@ class InventoryItem(ProjectBaseModel):
     expires_on = models.DateField(null=True, blank=True)
     barcode = models.CharField(max_length=64, blank=True, default="")
     # Other names to find the item by (owner, 2026-11-23: names in Spanish and Polish, English and synonyms
-    # here). keywords_normalised is computed in save() like name_normalised, and searched the same way (Python
-    # casefold, not the database's lower(), whose behaviour on Ł/ł depends on the collation).
+    # here). keywords_normalised is computed in save() like name_normalised, for the search to compare the same
+    # way (Python casefold, not the database's lower(), whose behaviour on Ł/ł depends on the collation).
     keywords = models.TextField(blank=True, default="", db_default="")
     keywords_normalised = models.TextField(editable=False, default="", db_default="")
     sort_order = models.FloatField(default=65535)
