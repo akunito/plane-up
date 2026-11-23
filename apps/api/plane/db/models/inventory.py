@@ -61,6 +61,14 @@ def normalise_item_name(name):
     return " ".join(unicodedata.normalize("NFKC", name or "").split()).casefold()
 
 
+def fold_for_search(text):
+    """normalise_item_name without accents, for the keyword search: "jabón" finds a keyword written "jabon". Only
+    combining marks go, so Polish ł (a letter of its own, not l + a mark) stays: keyword lists carry "l" spellings
+    where wanted. Never used for names: their uniqueness keeps accents."""
+    decomposed = unicodedata.normalize("NFKD", normalise_item_name(text))
+    return unicodedata.normalize("NFC", "".join(ch for ch in decomposed if not unicodedata.combining(ch)))
+
+
 class InventoryList(ProjectBaseModel):
     name = models.CharField(max_length=255)
     default_mode = models.CharField(max_length=16, choices=InventoryMode.choices, default=InventoryMode.ON_DEMAND)
@@ -117,8 +125,8 @@ class InventoryItem(ProjectBaseModel):
     expires_on = models.DateField(null=True, blank=True)
     barcode = models.CharField(max_length=64, blank=True, default="")
     # Other names to find the item by (owner, 2026-11-23: names in Spanish and Polish, English and synonyms
-    # here). keywords_normalised is computed in save() like name_normalised, for the search to compare the same
-    # way (Python casefold, not the database's lower(), whose behaviour on Ł/ł depends on the collation).
+    # here). keywords_normalised is computed in save(): casefolded like name_normalised and without accents
+    # (fold_for_search), in Python, not the database's lower(), whose behaviour on Ł/ł depends on the collation.
     keywords = models.TextField(blank=True, default="", db_default="")
     keywords_normalised = models.TextField(editable=False, default="", db_default="")
     sort_order = models.FloatField(default=65535)
@@ -163,7 +171,7 @@ class InventoryItem(ProjectBaseModel):
 
     def save(self, *args, **kwargs):
         self.name_normalised = normalise_item_name(self.name)
-        self.keywords_normalised = normalise_item_name(self.keywords)
+        self.keywords_normalised = fold_for_search(self.keywords)
         update_fields = kwargs.get("update_fields")
         if update_fields is not None:
             extra = [

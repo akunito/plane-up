@@ -772,3 +772,22 @@ def test_keyword_search_stays_inside_what_the_person_can_see(workspace, people, 
     item.save()
     found = _client(people["bob"]).get(ws(workspace.slug, "suggestions/?q=gift")).json()["items"]
     assert found == []
+
+
+def test_keywords_match_without_accents_and_names_come_first(workspace, people, home, groceries):
+    fairy = _item(groceries, "Lavavajillas / Płyn do naczyń", "on_demand", needed=False)
+    fairy.keywords = "dish soap, jabon de fregar"
+    fairy.save()
+    salt = _item(groceries, "Sal / Sól", "on_demand", needed=False)
+    for i in range(25):
+        other = _item(groceries, f"Other {i:02d}", "on_demand", needed=False)
+        other.keywords = "salsa, sal gorda"
+        other.save()
+    client = _client(people["bob"])
+    # Typed with the accent the keyword was written without.
+    assert [i["name"] for i in client.get(ws(workspace.slug, "suggestions/?q=jabón")).json()["items"]] == [
+        "Lavavajillas / Płyn do naczyń"
+    ]
+    # 26 matches for "sal", capped at 20: the item named so is first, not pushed out by keyword hits.
+    found = client.get(ws(workspace.slug, "suggestions/?q=sal")).json()["items"]
+    assert len(found) == 20 and found[0]["id"] == str(salt.pk)

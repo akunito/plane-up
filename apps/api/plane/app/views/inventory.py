@@ -12,7 +12,7 @@ from decimal import Decimal, InvalidOperation
 from botocore.exceptions import BotoCoreError
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Sum, UUIDField, Value
+from django.db.models import Case, Count, IntegerField, OuterRef, Q, Subquery, Sum, UUIDField, Value, When
 from django.db.models.functions import Coalesce
 from django.http import HttpResponseRedirect
 from django.utils import timezone
@@ -48,7 +48,7 @@ from plane.db.models import (
     Workspace,
     WorkspaceMember,
 )
-from plane.db.models.inventory import normalise_item_name
+from plane.db.models.inventory import fold_for_search, normalise_item_name
 from plane.settings.storage import S3Storage
 
 from .base import BaseAPIView
@@ -261,10 +261,15 @@ class InventorySuggestionsEndpoint(InventoryBaseView):
         query = normalise_item_name(request.query_params.get("q", ""))[:100]
         matches = []
         if query:
-            # The keywords too (owner, 2026-11-23): other names, English and synonyms, searched like the name.
-            found = with_orders(
-                items.filter(Q(name_normalised__contains=query) | Q(keywords_normalised__contains=query))
-            ).order_by("name_normalised")[:20]
+            # The keywords too (owner, 2026-11-23): other names, English and synonyms, matched without accents.
+            # Name matches first: a short query ("sal") hits many keywords, and the cap of 20 must not push out the
+            # item whose name it is (keywords audit).
+            folded = fold_for_search(query)
+            found = (
+                with_orders(items.filter(Q(name_normalised__contains=query) | Q(keywords_normalised__contains=folded)))
+                .annotate(keyword_only=Case(When(name_normalised__contains=query, then=Value(0)), default=Value(1)))
+                .order_by("keyword_only", "name_normalised")[:20]
+            )
             matches = [item_payload(i, i.on_order, i.open_count > 0) for i in found]
         # order_by() on the field itself: Meta.ordering would join the DISTINCT and the cap would count
         # items, not values (measured against Django 5.2.15 by the phase 2 audit).

@@ -16,6 +16,9 @@ export const SUPPLEMENTS = "20000000-0000-4000-8000-000000000003";
 let seq = 0;
 export const uid = (prefix = "3") => `${prefix}0000000-0000-4000-8000-${String(++seq).padStart(12, "0")}`;
 
+/** As the server's fold_for_search, for the keyword match. */
+const foldAccents = (t: string) => t.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
+
 export interface Data {
   name: string;
   keywords?: string;
@@ -211,7 +214,9 @@ export class FakeApi {
       const q = (url.searchParams.get("q") ?? "").toLowerCase();
       const items = [...this.data.entries()]
         // Name or keywords, as the server searches (2026-11-23).
-        .filter(([, d]) => q && (d.name.toLowerCase().includes(q) || (d.keywords ?? "").toLowerCase().includes(q)))
+        .filter(([, d]) => {
+          return q && (d.name.toLowerCase().includes(q) || foldAccents(d.keywords ?? "").includes(foldAccents(q)));
+        })
         .map(([id]) => this.payload(id));
       return [200, { items, categories: [], stores: [] }];
     }

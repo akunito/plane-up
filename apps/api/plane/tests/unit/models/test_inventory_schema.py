@@ -176,6 +176,11 @@ def test_keywords_are_normalised_like_names_also_with_update_fields(inventory_li
     item.save(update_fields=["name"])
     item.refresh_from_db()
     assert (item.name_normalised, item.keywords_normalised) == ("mantequilla / masło", "butter ładne")
+    # Accents go for the search (ł is a letter of its own and stays).
+    item.keywords = "Jabón, sól"
+    item.save(update_fields=["keywords"])
+    item.refresh_from_db()
+    assert item.keywords_normalised == "jabon, sol"
 
 
 def test_an_order_needs_a_positive_quantity_and_takes_the_device_id(inventory_list):

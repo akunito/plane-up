@@ -660,6 +660,9 @@ describe("phase 9 device review", () => {
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "sól" } });
     expect(await screen.findByRole("link", { name: "Salt" })).toBeTruthy();
     expect(screen.getByText((_, el) => el?.tagName === "SPAN" && el.textContent === "also: sól")).toBeTruthy();
+    // Without the accent, as the server matches (fold_for_search).
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "sol" } });
+    expect(await screen.findByText((_, el) => el?.tagName === "SPAN" && el.textContent === "also: sól")).toBeTruthy();
   });
 
   it("the workspace picker is in the list's scroll area, not under the full-height screen", async () => {

@@ -21,15 +21,27 @@ function Highlight({ name, query }: { name: string; query: string }) {
   );
 }
 
-/** The keyword a search matched when the name did not: "also: butter" under "Mantequilla / Masło". */
+/** As the server's fold_for_search: NFKC + casefold-ish, whitespace collapsed, accents gone (ł stays). */
+const fold = (text: string) =>
+  text
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .normalize("NFC")
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" ")
+    .toLocaleLowerCase();
+
+/** The keyword a search matched when the name did not: "also: butter" under "Mantequilla / Masło". Compared as the
+ * server compares; when no single keyword holds the query (it spans a comma), the whole list is shown. */
 function matchedKeyword(name: string, keywords: string | undefined, query: string): string | null {
-  const q = query.toLocaleLowerCase();
-  if (!q || !keywords || name.toLocaleLowerCase().includes(q)) return null;
+  const q = fold(query);
+  if (!q || !keywords || fold(name).includes(q)) return null;
   return (
     keywords
       .split(",")
       .map((k) => k.trim())
-      .find((k) => k.toLocaleLowerCase().includes(q)) ?? null
+      .find((k) => fold(k).includes(q)) ?? (fold(keywords).includes(q) ? keywords : null)
   );
 }
 
