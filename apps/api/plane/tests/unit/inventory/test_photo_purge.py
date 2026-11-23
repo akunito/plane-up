@@ -133,3 +133,55 @@ def test_it_is_scheduled_daily():
 
     entry = app.conf.beat_schedule["check-every-day-to-purge-removed-inventory-photos"]
     assert entry["task"] == "plane.bgtasks.inventory_task.purge_removed_inventory_photos"
+
+
+def test_the_daily_refresh_rewrites_only_search_text_an_older_fold_left(db, make_item):
+    from plane.bgtasks.inventory_task import refresh_inventory_search_text
+    from plane.db.models import InventoryItem
+
+    stale = make_item("Masło")
+    no_line = make_item("Plátano")
+    right = make_item("Milk")
+    gone = make_item("Jabłko")
+    gone.delete()
+    InventoryItem.all_objects.filter(pk=stale.pk).update(keywords_normalised="masło\n")  # the fold before 0132
+    InventoryItem.all_objects.filter(pk=no_line.pk).update(keywords_normalised="")  # an image before 0131
+    InventoryItem.all_objects.filter(pk=gone.pk).update(keywords_normalised="jabłko\n")
+    assert refresh_inventory_search_text() == 3
+    texts = dict(InventoryItem.all_objects.values_list("pk", "keywords_normalised"))
+    assert (texts[stale.pk], texts[no_line.pk], texts[right.pk], texts[gone.pk]) == (
+        "maslo\n",
+        "platano\n",
+        "milk\n",
+        "jablko\n",
+    )
+    assert refresh_inventory_search_text() == 0  # nothing left to write
+
+
+def test_the_refresh_is_scheduled_daily():
+    from plane.celery import app
+
+    entry = app.conf.beat_schedule["check-every-day-to-refresh-inventory-search-text"]
+    assert entry["task"] == "plane.bgtasks.inventory_task.refresh_inventory_search_text"
+
+
+def test_the_refresh_never_overwrites_an_edit_saved_after_it_read_the_row(db, make_item):
+    from unittest.mock import patch
+
+    from plane.bgtasks.inventory_task import refresh_inventory_search_text
+    from plane.db.models import InventoryItem
+    from plane.db.models.inventory import search_text
+
+    item = make_item("Masło")
+    InventoryItem.all_objects.filter(pk=item.pk).update(keywords_normalised="masło\n")
+
+    def edit_in_the_window(name, keywords):
+        # Called between the task's read and its write: someone renames the item right then.
+        edited = InventoryItem.objects.get(pk=item.pk)
+        edited.name = "Mantequilla / Masło"
+        edited.save()
+        return search_text(name, keywords)
+
+    with patch("plane.bgtasks.inventory_task.search_text", side_effect=edit_in_the_window):
+        assert refresh_inventory_search_text() == 0
+    assert InventoryItem.all_objects.get(pk=item.pk).keywords_normalised == "mantequilla / maslo\n"

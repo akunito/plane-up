@@ -3,6 +3,7 @@
 
 import type { ItemState, Operation } from "@plane/inventory";
 import { toBuy } from "@plane/inventory";
+import { fold } from "../src/fold";
 import { ModelServer } from "../../inventory/tests/model-server";
 
 export const ME = { id: "00000000-0000-4000-8000-000000000001", display_name: "Ana" };
@@ -16,8 +17,8 @@ export const SUPPLEMENTS = "20000000-0000-4000-8000-000000000003";
 let seq = 0;
 export const uid = (prefix = "3") => `${prefix}0000000-0000-4000-8000-${String(++seq).padStart(12, "0")}`;
 
-/** As the server's fold_for_search, for the keyword match. */
-const foldAccents = (t: string) => t.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
+// The app's own fold (as the server's fold_for_search), so the fake cannot drift from it.
+const foldAccents = fold;
 
 export interface Data {
   name: string;
@@ -215,7 +216,8 @@ export class FakeApi {
       const items = [...this.data.entries()]
         // Name or keywords, as the server searches (2026-11-23).
         .filter(([, d]) => {
-          return q && foldAccents(`${d.name}\n${d.keywords ?? ""}`).includes(foldAccents(q));
+          // Each part folded on its own, as search_text: a query never spans the name and the keywords.
+          return q && `${foldAccents(d.name)}\n${foldAccents(d.keywords ?? "")}`.includes(foldAccents(q));
         })
         .map(([id]) => this.payload(id));
       return [200, { items, categories: [], stores: [] }];
