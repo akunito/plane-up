@@ -90,7 +90,8 @@ export interface Toast {
 export interface AppState {
   phase: Phase;
   slug: string;
-  workspaces: { slug: string; name: string }[];
+  /** role: the person's workspace role (20 admin), as users/me/workspaces/ answers it. */
+  workspaces: { slug: string; name: string; role?: number }[];
   lists: Lists | null;
   known: Record<string, Known>;
   orders: Order[];
@@ -106,6 +107,23 @@ export interface AppState {
   offlineSince: number | null;
   /** The device cannot keep changes: the queue lives in memory, or a write to it failed (phase 9 review). */
   storageProblem: "volatile" | "write_failed" | null;
+}
+
+/** One row of the main app's lite project list (GET workspaces/{slug}/projects/), as the drawer reads it. */
+export interface PlaneProject {
+  id: string;
+  name: string;
+  identifier: string;
+  member_role?: number | null;
+  archived_at?: string | null;
+  sort_order?: number | null;
+  logo_props?: { in_use?: string; emoji?: { value?: string }; icon?: { name?: string; color?: string } } | null;
+  cycle_view?: boolean;
+  module_view?: boolean;
+  issue_views_view?: boolean;
+  page_view?: boolean;
+  inbox_view?: boolean;
+  inventory_view?: boolean;
 }
 
 export interface Deps {
@@ -241,10 +259,18 @@ export class Controller {
     // From here an offline fallback may open only this person's snapshot (phase 6 audit: a person who had
     // just signed in, then lost the network, was shown the previous person's lists and queue).
     this.confirmedUser = settings.body.id ?? null;
-    const workspaces = await requestJson<{ slug: string; name: string }[]>(client, "GET", "users/me/workspaces/");
+    const workspaces = await requestJson<{ slug: string; name: string; role?: number }[]>(
+      client,
+      "GET",
+      "users/me/workspaces/"
+    );
     const all =
       workspaces.kind === "ok" && Array.isArray(workspaces.body)
-        ? workspaces.body.map((w) => ({ slug: w.slug, name: w.name }))
+        ? workspaces.body.map((w) => {
+            const out: { slug: string; name: string; role?: number } = { slug: w.slug, name: w.name };
+            if (typeof w.role === "number") out.role = w.role;
+            return out;
+          })
         : [];
     const remembered = prefs.get("slug");
     // A workspace named by a link (?ws=, main.tsx) or the remembered one counts only when the person is in
@@ -260,6 +286,19 @@ export class Controller {
     if (!slug) return this.leave({ phase: "no_workspace", workspaces: all });
     this.set({ slug, workspaces: all });
     await this.openWorkspace();
+  }
+
+  /** The workspace's projects for the Plane drawer, or why not ("offline": no network; "failed": refused or
+   * unreadable). Never touches the app's state: a refused read here is not the app's signed-out signal. */
+  async planeProjects(): Promise<PlaneProject[] | "offline" | "failed"> {
+    if (!this.state.slug) return "failed";
+    const r = await requestJson<PlaneProject[]>(
+      this.client(),
+      "GET",
+      `workspaces/${encodeURIComponent(this.state.slug)}/projects/`
+    );
+    if (r.kind === "ok" && Array.isArray(r.body)) return r.body;
+    return r.kind === "failed" && r.failure === "offline" ? "offline" : "failed";
   }
 
   async switchWorkspace(slug: string): Promise<void> {

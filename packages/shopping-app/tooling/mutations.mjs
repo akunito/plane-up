@@ -67,6 +67,20 @@ const M = [
     "",
   ],
   ["admins who can join are not mentioned", "src/model.ts", "if (project.admins_outside > 0)", "if (false)"],
+  // APLANE-73: Plane's menu.
+  ["back does not close Plane's menu", "src/screens/Nav.tsx", 'globalThis.addEventListener("popstate", onPop);', ""],
+  [
+    "a guest of a project sees its inventory entry",
+    "src/screens/Nav.tsx",
+    "!!p.inventory_view && (p.member_role ?? 0) >= 15",
+    "!!p.inventory_view",
+  ],
+  [
+    "an in-app entry in the menu pushes a history entry instead of replacing the menu's",
+    "src/screens/Nav.tsx",
+    "globalThis.location.replace(hash);",
+    "globalThis.location.hash = hash;",
+  ],
   [
     "shopping mode ignores the stepper",
     "src/screens/Shop.tsx",

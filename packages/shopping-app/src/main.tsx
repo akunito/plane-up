@@ -5,6 +5,7 @@ import "./style.css";
 import { createRoot } from "react-dom/client";
 import { App } from "./app";
 import { Controller } from "./controller";
+import { STATE_KEY } from "./screens/Nav";
 import { pickLocale } from "./i18n";
 import { SYNC_TAG } from "./worker-core";
 
@@ -14,6 +15,11 @@ import { SYNC_TAG } from "./worker-core";
 const params = new URLSearchParams(location.search);
 const asked = params.get("ws")?.trim() ?? "";
 if (params.has("ws")) history.replaceState(history.state, "", `${location.pathname}${location.hash}`);
+// Reloaded on the Plane drawer's entry (Android killed the app with the drawer open): that entry has the
+// screen's URL and nothing listens on it, so the first back press would do nothing. Go back over it: the
+// entry before has the same URL, but after a reload it belongs to the old document, so expect one more load
+// of the same screen (from the service worker), not a silent step (APLANE-73 re-review).
+if ((history.state as Record<string, unknown> | null)?.[STATE_KEY]) history.back();
 const deps: ConstructorParameters<typeof Controller>[0] = { base: "", onQueued: requestSync };
 if (asked) deps.slug = asked;
 const controller = new Controller(deps);

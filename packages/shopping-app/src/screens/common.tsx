@@ -8,11 +8,22 @@ import type { Order, Row } from "../model";
 import { audience, personName, projectOf } from "../model";
 import { ago, listNames } from "../i18n";
 import { Ago, Dialog, Icon, NumberField, Rich, parseIntStrict, useCtx } from "../ui";
+import { NavToggle } from "./Nav";
 
-export function Tabs({ active, summary }: { active: "shopping" | "inventory"; summary?: string }) {
+/** counts: the to-buy counter as icons and numbers (cart: missing, pin: pinned), the sentence for screen readers.
+ * The sentence did not fit beside the Plane menu toggle and the tabs at 360 px in any language (APLANE-73
+ * mockup: 0 of 6 cases on one line; icons: 6 of 6). */
+export function Tabs({
+  active,
+  counts,
+}: {
+  active: "shopping" | "inventory";
+  counts?: { missing: number; pinned: number };
+}) {
   const { t } = useCtx();
   return (
     <header className="topbar">
+      <NavToggle current={active === "shopping"} />
       <nav className="tabs" aria-label={t("tab_shopping") + " / " + t("tab_inventory")}>
         <a href="#/" className="tab" aria-current={active === "shopping" ? "page" : undefined}>
           {t("tab_shopping")}
@@ -22,7 +33,24 @@ export function Tabs({ active, summary }: { active: "shopping" | "inventory"; su
         </a>
       </nav>
       <span className="spacer" />
-      {summary ? <span className="muted small">{summary}</span> : null}
+      {counts ? (
+        <span className="muted small counts">
+          <span className="visually-hidden">{t("summary", counts)}</span>
+          {/* The hover title lives on the hidden part: on the outer span Chromium may expose it as a name and
+              TalkBack read the sentence twice (re-review). */}
+          <span className="counts-shown" aria-hidden="true" title={t("summary", counts)}>
+            <span className="count">
+              {Icon.cart(14)}
+              {counts.missing}
+            </span>
+            <span className="count">
+              {/* Filled: the rows' sign for pinned (the outline pin means not pinned). */}
+              {Icon.pin(true, 14)}
+              {counts.pinned}
+            </span>
+          </span>
+        </span>
+      ) : null}
       {active === "inventory" ? (
         <a href="#/capture" className="icon-button" aria-label={t("new_item")}>
           {Icon.plus(20)}

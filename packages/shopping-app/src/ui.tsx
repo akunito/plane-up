@@ -61,9 +61,9 @@ export const Icon = {
         <path d="m21 21-4.3-4.3" />
       </>
     ),
-  cart: () =>
+  cart: (size = 16) =>
     svg(
-      16,
+      size,
       <>
         <circle cx="8" cy="21" r="1" />
         <circle cx="19" cy="21" r="1" />
@@ -71,7 +71,27 @@ export const Icon = {
       </>
     ),
   back: () => svg(20, <path d="m15 18-6-6 6-6" />),
+  // lucide PanelLeft: the main app's sidebar toggle (AppSidebarToggleButton).
+  panelLeft: () =>
+    svg(
+      20,
+      <>
+        <rect width="18" height="18" x="3" y="3" rx="2" />
+        <path d="M9 3v18" />
+      </>
+    ),
   chevron: () => svg(14, <path d="m9 18 6-6-6-6" />),
+  // lucide Package: the inventory entry of the main app's project navigation.
+  package: () =>
+    svg(
+      16,
+      <>
+        <path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z" />
+        <path d="M12 22V12" />
+        <path d="m3.3 7 7.79 4.5a2 2 0 0 0 1.81 0l7.79-4.5" />
+        <path d="m7.5 4.27 9 5.15" />
+      </>
+    ),
   down: () => svg(14, <path d="m6 9 6 6 6-6" />),
   plus: (size = 16) => svg(size, <path d="M5 12h14M12 5v14" />),
   minus: () => svg(16, <path d="M5 12h14" />),
