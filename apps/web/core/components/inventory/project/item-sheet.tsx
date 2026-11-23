@@ -116,7 +116,10 @@ export function ItemSheet(props: {
     e.target.value = "";
     if (file) void pickPhoto(file);
   };
-  const photoButton = `inline-flex h-8 cursor-pointer items-center rounded-md border border-strong px-3 text-13 text-secondary ${photoBusy ? "pointer-events-none opacity-50" : ""}`;
+  // The inputs are visually hidden, not `hidden`: display:none left them out of the accessibility tree, so a
+  // screen reader never heard the item's name and the keyboard could not reach them (camera audit). The label
+  // shows the input's focus.
+  const photoButton = `relative inline-flex h-8 cursor-pointer items-center rounded-md border border-strong px-3 text-13 text-secondary focus-within:outline focus-within:outline-2 focus-within:outline-accent-strong ${photoBusy ? "pointer-events-none opacity-50" : ""}`;
 
   const commit = (field: string, value: (draft: string) => unknown) => async (draft: string) => {
     const saved = await save({ [field]: value(draft) });
@@ -201,7 +204,7 @@ export function ItemSheet(props: {
                   accept="image/*"
                   capture="environment"
                   aria-label={`${item.name}: ${t("photo_take")}`}
-                  hidden
+                  className="sr-only"
                   disabled={photoBusy}
                   onChange={onPhotoFile}
                 />
@@ -213,7 +216,7 @@ export function ItemSheet(props: {
                 type="file"
                 accept="image/*"
                 aria-label={`${item.name}: ${t(camera ? "photo_gallery" : photo ? "photo_replace" : "photo_add")}`}
-                hidden
+                className="sr-only"
                 disabled={photoBusy}
                 onChange={onPhotoFile}
               />

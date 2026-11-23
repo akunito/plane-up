@@ -85,9 +85,15 @@ export async function restoreSeed(page: Page) {
       // oxlint-disable-next-line no-await-in-loop -- rarely more than one
       await apiDelete(page, `/api/workspaces/qa-inv/projects/${left.project.id}/inventory/items/${left.id}/`);
   const salt = await item(page, "Salt");
-  // The photo test adds one to Salt (APLANE-66); seeded without. Always, not only when a photo shows: the
-  // DELETE also clears uploads a failed run left pending, which would otherwise count against the cap.
+  // The photo tests add one to Salt (shopping app) and Detergent (main app), seeded without. Always, not only
+  // when a photo shows: a test stopped by its timeout skips its own cleanup, and the DELETE also clears uploads
+  // a failed run left pending, which would otherwise count against the cap.
   await apiDelete(page, `/api/workspaces/qa-inv/projects/${salt.project.id}/inventory/items/${salt.id}/photo/`);
+  const detergent = await item(page, "Detergent");
+  await apiDelete(
+    page,
+    `/api/workspaces/qa-inv/projects/${detergent.project.id}/inventory/items/${detergent.id}/photo/`
+  );
   if (salt.category !== "Pantry")
     await apiPatch(page, `/api/workspaces/qa-inv/projects/${salt.project.id}/inventory/items/${salt.id}/`, {
       category: "Pantry",

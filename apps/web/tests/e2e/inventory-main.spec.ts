@@ -9,7 +9,7 @@
  */
 import type { Page } from "@playwright/test";
 import { apiDelete, apiPatch, apiPost, authFile, closeDrawer, expect, isPhone, test } from "./helpers";
-import { INV, contextFor, item, restoreSeed, server } from "./inventory-helpers";
+import { INV, contextFor, restoreSeed, server } from "./inventory-helpers";
 
 const projects = INV?.projects;
 const MARKER = 'meta[name="plane-shopping-shell"]';
@@ -256,55 +256,50 @@ test.describe("inventory in the main app @inventory-main", () => {
   test("the item sheet's photo: a camera button on touch screens, upload and remove (APLANE-66)", async ({
     page,
   }, info) => {
-    const detergent = await item(page, "Detergent");
-    const photoPath = `/api/workspaces/qa-inv/projects/${detergent.project.id}/inventory/items/${detergent.id}/photo/`;
-    try {
-      await visit(page, `/qa-inv/projects/${projects!.HOME.id}/inventory/`);
-      const table = page.getByTestId("project-inventory");
-      await table
-        .locator('[data-testid="inventory-row"][data-item="Detergent"]')
-        .getByRole("button", { name: "Details" })
-        .click();
-      const dialog = page.getByRole("dialog");
-      // Android's photo picker has no camera: a touch screen gets "Take photo" (a capture input) and "Gallery".
-      // Pinned to the project, so a lost touch emulation cannot quietly test the desktop path on the phone.
-      const touch = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
-      expect(touch).toBe(info.project.name === "android");
-      const input = dialog.getByLabel(touch ? "Detergent: Take photo" : "Detergent: Add photo");
-      await expect(input).toHaveCount(1);
-      if (touch) {
-        await expect(input).toHaveAttribute("capture", "environment");
-        await expect(dialog.getByLabel("Detergent: Gallery")).toHaveCount(1);
-      } else await expect(dialog.getByLabel("Detergent: Take photo")).toHaveCount(0);
-      await input.evaluate(async (el: HTMLInputElement) => {
-        const canvas = document.createElement("canvas");
-        canvas.width = 2000;
-        canvas.height = 1500;
-        const g = canvas.getContext("2d")!;
-        g.fillStyle = "#2a7";
-        g.fillRect(0, 0, 2000, 1500);
-        const blob: Blob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b!), "image/jpeg", 0.9));
-        const files = new DataTransfer();
-        files.items.add(new File([blob], "IMG_20261123_080000.jpg", { type: "image/jpeg" }));
-        el.files = files.files;
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-      });
-      const photo = dialog.getByRole("img", { name: "Photo of Detergent" });
-      await expect(photo).toBeVisible({ timeout: 20_000 });
-      // Shrunk on the device to the 1600 px the server expects.
-      await expect
-        .poll(() => photo.evaluate((img: HTMLImageElement) => (img.complete ? img.naturalWidth : 0)), {
-          timeout: 15_000,
-        })
-        .toBe(1600);
-      await server(page, "Detergent", "photo").toEqual(expect.stringMatching(/^[0-9a-f-]{36}$/));
-      await dialog.getByRole("button", { name: "Detergent: Remove photo" }).click();
-      await expect(photo).toHaveCount(0);
-      await server(page, "Detergent", "photo").toBeNull();
-    } finally {
-      // A photo left behind would change the label other tests look for ("Change photo").
-      if ((await item(page, "Detergent")).photo) await apiDelete(page, photoPath);
-    }
+    await visit(page, `/qa-inv/projects/${projects!.HOME.id}/inventory/`);
+    const table = page.getByTestId("project-inventory");
+    await table
+      .locator('[data-testid="inventory-row"][data-item="Detergent"]')
+      .getByRole("button", { name: "Details" })
+      .click();
+    const dialog = page.getByRole("dialog");
+    // Android's photo picker has no camera: a touch screen gets "Take photo" (a capture input) and "Gallery".
+    // Pinned to the project, so a lost touch emulation cannot quietly test the desktop path on the phone.
+    const touch = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
+    expect(touch).toBe(info.project.name === "android");
+    const input = dialog.getByLabel(touch ? "Detergent: Take photo" : "Detergent: Add photo");
+    await expect(input).toHaveCount(1);
+    // In the accessibility tree (a screen reader hears the item; the keyboard reaches it), not display:none.
+    await expect(input).not.toHaveAttribute("hidden");
+    if (touch) {
+      await expect(input).toHaveAttribute("capture", "environment");
+      await expect(dialog.getByLabel("Detergent: Gallery")).toHaveCount(1);
+    } else await expect(dialog.getByLabel("Detergent: Take photo")).toHaveCount(0);
+    await input.evaluate(async (el: HTMLInputElement) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 2000;
+      canvas.height = 1500;
+      const g = canvas.getContext("2d")!;
+      g.fillStyle = "#2a7";
+      g.fillRect(0, 0, 2000, 1500);
+      const blob: Blob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b!), "image/jpeg", 0.9));
+      const files = new DataTransfer();
+      files.items.add(new File([blob], "IMG_20261123_080000.jpg", { type: "image/jpeg" }));
+      el.files = files.files;
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const photo = dialog.getByRole("img", { name: "Photo of Detergent" });
+    await expect(photo).toBeVisible({ timeout: 20_000 });
+    // Shrunk on the device to the 1600 px the server expects.
+    await expect
+      .poll(() => photo.evaluate((img: HTMLImageElement) => (img.complete ? img.naturalWidth : 0)), {
+        timeout: 15_000,
+      })
+      .toBe(1600);
+    await server(page, "Detergent", "photo").toEqual(expect.stringMatching(/^[0-9a-f-]{36}$/));
+    await dialog.getByRole("button", { name: "Detergent: Remove photo" }).click();
+    await expect(photo).toHaveCount(0);
+    await server(page, "Detergent", "photo").toBeNull();
   });
 
   test("the first list of a public project with one member warns; a secret one does not (S21)", async ({ page }) => {

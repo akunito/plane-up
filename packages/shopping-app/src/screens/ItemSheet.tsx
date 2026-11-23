@@ -364,7 +364,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
                   accept="image/*"
                   aria-label={t("item_action", { item, action: t("photo_take") })}
                   capture="environment"
-                  hidden
+                  className="visually-hidden"
                   disabled={photoBusy}
                   onChange={pickPhoto}
                 />
@@ -379,7 +379,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
                   item,
                   action: t(camera ? "photo_gallery" : data.photo ? "photo_replace" : "photo_add"),
                 })}
-                hidden
+                className="visually-hidden"
                 disabled={photoBusy}
                 onChange={pickPhoto}
               />

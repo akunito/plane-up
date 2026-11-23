@@ -854,6 +854,12 @@ button.stepper-value {
   background: var(--bg-raised);
 }
 
+/* A photo input is visually hidden inside its label: the label shows its keyboard focus. */
+.photo-actions label:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .photo-actions {
   display: flex;
   flex-wrap: wrap;

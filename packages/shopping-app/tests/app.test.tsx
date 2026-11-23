@@ -647,6 +647,10 @@ describe("phase 9 device review", () => {
   it("the item sheet's footer actions name their item (S34: TalkBack read a bare 'Mark ordered')", async () => {
     await boot(catalog(), `#/item/${SALT}`);
     expect(await screen.findByRole("button", { name: "Salt: Mark ordered" })).toBeTruthy();
+    // The photo input is visually hidden, not display:none: in the accessibility tree and reachable by keyboard.
+    const input = screen.getByLabelText(/^Salt: (Add photo|Gallery)$/) as HTMLInputElement;
+    expect(input.hidden).toBe(false);
+    expect(input.className).toBe("visually-hidden");
   });
 
   it("the workspace picker is in the list's scroll area, not under the full-height screen", async () => {
