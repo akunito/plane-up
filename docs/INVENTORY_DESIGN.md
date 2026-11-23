@@ -283,6 +283,7 @@ MCP tools, in a small server of its own: shopping_list, list_items, list_categor
 | Item sheet | standalone app, project page | mode, minimum, organisation, purchase data, barcode, history |
 | Waiting and unapplied changes | standalone app | changes held by the two-hour rule; `stale` results with "apply anyway"; a blocked queue |
 | Sidebar entry | main app | first entry, counter, full page load to `/shopping/` |
+| Plane menu (APLANE-73) | standalone app | PanelLeft toggle on the two top-level screens opens a drawer like Plane's sidebar (Shopping list, Home, Inbox, Your work, Projects, joined projects with Plane's flags, roles and icons); opened by the button only, never an edge swipe (the left edge is Android's back gesture); back closes it; the top bar counter is icons and numbers (cart, filled pin) so the row fits at 360 px |
 | Home widget | main app | to-buy list with ticks and capture, online only; links to the app |
 | Project › Inventory | main app | desktop table, inline editing, lists, feature toggle, aisle order |
 
