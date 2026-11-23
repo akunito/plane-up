@@ -459,8 +459,12 @@ test.describe("shopping app @shopping", () => {
     await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
     await page.getByRole("button", { name: "Open the Plane menu" }).click();
     await expect(page.getByRole("dialog", { name: "Plane" })).toBeVisible();
-    const box = page.viewportSize()!;
-    await page.mouse.dblclick(box.width - 10, box.height / 2);
+    // Both taps in one task, before the first back()'s popstate: separate CDP clicks let it land in between,
+    // and the unguarded code then passed (re-review).
+    await page.locator(".nav-scrim").evaluate((el: HTMLElement) => {
+      el.click();
+      el.click();
+    });
     await expect(page.getByRole("dialog", { name: "Plane" })).toHaveCount(0);
     await page.waitForTimeout(300);
     await expect(page).toHaveURL(/\/shopping\/#\/$/);

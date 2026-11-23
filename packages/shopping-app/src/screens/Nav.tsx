@@ -156,7 +156,7 @@ function NavDrawer({ current, onClosed }: { current: boolean; onClosed: () => vo
     e.preventDefault();
     if (closing.current) return;
     if (globalThis.location.hash === hash || (hash === "#/" && globalThis.location.hash === "")) return close();
-    // Chromium fires popstate synchronously here (onPop closes too); closing first keeps the cleanup from
+    // Chromium may fire popstate synchronously here (onPop then closes too); closing first keeps the cleanup from
     // reading a state it would act on.
     closing.current = true;
     globalThis.location.replace(hash);
