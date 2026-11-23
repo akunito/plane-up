@@ -239,6 +239,8 @@ export const en = {
   offline_since: "No connection: this is the list from {when}. Changes are kept and sent when it returns.",
   item_missing: "This item no longer exists, or you cannot see it.",
   unknown_item: "an item",
+  keywords: "Other names (for search)",
+  also_called: "also:",
   item_action: "{item}: {action}",
   storage_volatile:
     "This device cannot keep changes (a private window, or storage is full): they are sent while the app is open, and lost if it is closed first.",

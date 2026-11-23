@@ -21,6 +21,18 @@ function Highlight({ name, query }: { name: string; query: string }) {
   );
 }
 
+/** The keyword a search matched when the name did not: "also: butter" under "Mantequilla / Masło". */
+function matchedKeyword(name: string, keywords: string | undefined, query: string): string | null {
+  const q = query.toLocaleLowerCase();
+  if (!q || !keywords || name.toLocaleLowerCase().includes(q)) return null;
+  return (
+    keywords
+      .split(",")
+      .map((k) => k.trim())
+      .find((k) => k.toLocaleLowerCase().includes(q)) ?? null
+  );
+}
+
 export function Capture({ s }: { s: AppState }) {
   const { c, t } = useCtx();
   const [query, setQuery] = useState("");
@@ -110,6 +122,14 @@ export function Capture({ s }: { s: AppState }) {
                 <a href={`#/item/${id}`} className="name block">
                   <Highlight name={k.data.name} query={q} />
                 </a>
+                {(() => {
+                  const also = matchedKeyword(k.data.name, k.data.keywords, q);
+                  return also ? (
+                    <span className="sub block">
+                      {t("also_called")} <Highlight name={also} query={q} />
+                    </span>
+                  ) : null;
+                })()}
                 <span className="sub block">
                   {[k.data.list.name, k.data.project.name, hint].filter(Boolean).join(" · ")}
                 </span>

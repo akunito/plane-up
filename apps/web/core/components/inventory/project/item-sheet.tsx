@@ -28,7 +28,7 @@ import { FIELD, modeKey } from "./dialogs";
 import { notifyInventoryChanged } from "../visibility";
 import { EditableField, str } from "../controls";
 
-const TEXT_FIELDS = ["purchase_url", "variant", "currency", "barcode"] as const;
+const TEXT_FIELDS = ["keywords", "purchase_url", "variant", "currency", "barcode"] as const;
 
 export function ItemSheet(props: {
   open: boolean;
@@ -154,7 +154,7 @@ export function ItemSheet(props: {
               <EditableField
                 className={FIELD}
                 value={str(item[field])}
-                maxLength={field === "currency" ? 3 : field === "barcode" ? 64 : 2048}
+                maxLength={field === "currency" ? 3 : field === "barcode" ? 64 : field === "keywords" ? 1000 : 2048}
                 onCommit={commit(field, (d) => d.trim())}
               />
             </label>

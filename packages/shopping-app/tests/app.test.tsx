@@ -653,6 +653,15 @@ describe("phase 9 device review", () => {
     expect(input.className).toBe("visually-hidden");
   });
 
+  it("quick capture finds an item by a keyword and says which one matched", async () => {
+    await boot(catalog(), "#/capture", undefined, (a) => {
+      a.data.get(SALT)!.keywords = "salt, sal, sól";
+    });
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "sól" } });
+    expect(await screen.findByRole("link", { name: "Salt" })).toBeTruthy();
+    expect(screen.getByText((_, el) => el?.tagName === "SPAN" && el.textContent === "also: sól")).toBeTruthy();
+  });
+
   it("the workspace picker is in the list's scroll area, not under the full-height screen", async () => {
     await boot(catalog(), "#/", undefined, (a) => a.workspaces.push({ slug: "other", name: "Other" }));
     const picker = await screen.findByRole("combobox", { name: /Workspace/ });

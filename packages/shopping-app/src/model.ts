@@ -21,6 +21,8 @@ export interface ItemData extends ItemState {
   currency: string;
   expires_on: string | null;
   barcode: string;
+  /** Other names to find it by (English, synonyms); absent in snapshots saved before 2026-11-23. */
+  keywords?: string;
   /** The confirmed photo's asset id (APLANE-66); its <img> goes through photoUrl. */
   photo?: string | null;
   sort_order: number;

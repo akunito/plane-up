@@ -730,3 +730,45 @@ def test_review_authorisation_is_checked_again_under_the_lock(workspace, people,
         assert (result["result"], result["reason"]) == ("rejected", "forbidden" if move == "project" else "gone"), move
         assert "item" not in result
         assert InventoryItem.all_objects.get(pk=item.pk).quantity == 1
+
+
+# ---------------------------------------------------------------- keywords (owner, 2026-11-23)
+
+
+def test_keywords_are_saved_tidied_and_found_by_search(workspace, people, home, groceries):
+    item = _item(groceries, "Mantequilla / Masło", "on_demand", needed=False)
+    client = _client(people["bob"])
+    response = client.patch(
+        proj(workspace.slug, home, f"items/{item.pk}/"), {"keywords": "  butter,   MASŁO  "}, format="json"
+    )
+    assert response.status_code == 200, response.content
+    assert response.json()["keywords"] == "butter, MASŁO"
+    item.refresh_from_db()
+    assert item.keywords_normalised == "butter, masło"
+    for query in ("BUTTER", "masło", "Masło"):
+        found = client.get(ws(workspace.slug, f"suggestions/?q={query}")).json()["items"]
+        assert [i["name"] for i in found] == ["Mantequilla / Masło"], query
+    # The name still finds it, once, and an unrelated word finds nothing.
+    assert len(client.get(ws(workspace.slug, "suggestions/?q=mantequilla")).json()["items"]) == 1
+    assert client.get(ws(workspace.slug, "suggestions/?q=cheese")).json()["items"] == []
+
+
+def test_keywords_reject_what_is_not_text(workspace, people, home, groceries):
+    item = _item(groceries, "Milk", "on_demand", needed=False)
+    client = _client(people["bob"])
+    for bad in (["butter"], 5, "x" * 1001, "a\x00b"):
+        response = client.patch(proj(workspace.slug, home, f"items/{item.pk}/"), {"keywords": bad}, format="json")
+        assert response.status_code == 400, bad
+    item.refresh_from_db()
+    assert item.keywords == ""
+
+
+def test_keyword_search_stays_inside_what_the_person_can_see(workspace, people, home, groceries):
+    hidden = Project.objects.create(name="Secret", identifier="SECR", workspace=workspace, inventory_view=True)
+    ProjectMember.objects.create(project=hidden, member=people["alice"], role=20)
+    secret = InventoryList.objects.create(name="Secret list", project=hidden)
+    item = _item(secret, "Regalo", "on_demand", needed=False)
+    item.keywords = "present, gift"
+    item.save()
+    found = _client(people["bob"]).get(ws(workspace.slug, "suggestions/?q=gift")).json()["items"]
+    assert found == []

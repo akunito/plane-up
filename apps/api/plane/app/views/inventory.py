@@ -66,6 +66,7 @@ ITEM_DATA_FIELDS = (
     "currency",
     "expires_on",
     "barcode",
+    "keywords",
     "sort_order",
     "min_quantity",
     "restock_to",
@@ -122,6 +123,7 @@ def item_payload(item, on_order=0, has_open=False):
         "currency": item.currency,
         "expires_on": item.expires_on.isoformat() if item.expires_on else None,
         "barcode": item.barcode,
+        "keywords": item.keywords,
         "sort_order": item.sort_order,
         # The re-run key of an import (brief, Moving an item): the importer finds its own rows by these.
         "external_source": item.external_source,
@@ -259,7 +261,10 @@ class InventorySuggestionsEndpoint(InventoryBaseView):
         query = normalise_item_name(request.query_params.get("q", ""))[:100]
         matches = []
         if query:
-            found = with_orders(items.filter(name_normalised__contains=query)).order_by("name_normalised")[:20]
+            # The keywords too (owner, 2026-11-23): other names, English and synonyms, searched like the name.
+            found = with_orders(
+                items.filter(Q(name_normalised__contains=query) | Q(keywords_normalised__contains=query))
+            ).order_by("name_normalised")[:20]
             matches = [item_payload(i, i.on_order, i.open_count > 0) for i in found]
         # order_by() on the field itself: Meta.ordering would join the DISTINCT and the cap would count
         # items, not values (measured against Django 5.2.15 by the phase 2 audit).
@@ -417,6 +422,7 @@ class InventoryPreferenceEndpoint(InventoryBaseView):
 
 
 SORT_ORDER_MAX = 1e15
+KEYWORDS_MAX = 1000
 
 
 def _clean_item_data(data, current=None):
@@ -443,6 +449,10 @@ def _clean_item_data(data, current=None):
             if not isinstance(value, str) or len(value) > limit or "\x00" in value:
                 return None, _bad(field)
             value = value.strip()
+        elif field == "keywords":
+            if not isinstance(value, str) or len(value) > KEYWORDS_MAX or "\x00" in value:
+                return None, _bad(field)
+            value = " ".join(value.split())
         elif field == "purchase_url":
             if (
                 not isinstance(value, str)

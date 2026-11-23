@@ -239,6 +239,8 @@ export const pl: Dictionary = {
   offline_since: "Brak połączenia: to lista z {when}. Zmiany są zachowane i zostaną wysłane po jego powrocie.",
   item_missing: "Ten produkt już nie istnieje albo nie masz do niego dostępu.",
   unknown_item: "produkt",
+  keywords: "Inne nazwy (do wyszukiwania)",
+  also_called: "też:",
   item_action: "{item}: {action}",
   storage_volatile:
     "To urządzenie nie może zapisywać zmian (okno prywatne lub pełna pamięć): są wysyłane, gdy aplikacja jest otwarta, i giną, jeśli zostanie zamknięta wcześniej.",
