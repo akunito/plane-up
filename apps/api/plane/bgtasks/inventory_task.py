@@ -15,7 +15,8 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from plane.db.models import FileAsset, InventoryEvent
+from plane.db.models import FileAsset, InventoryEvent, InventoryItem
+from plane.db.models.inventory import search_text
 
 logger = logging.getLogger("plane.worker")
 
@@ -38,6 +39,27 @@ def prune_inventory_events():
 
 
 PHOTO_CHUNK = 500
+
+
+@shared_task
+def refresh_inventory_search_text():
+    """Rewrites every item's search text that differs from search_text(name, keywords) under the CURRENT fold; returns
+    how many. A row saved by an older image (deploy window, rollback and back) keeps that image's fold after the
+    data migration that refilled the others has run, and nothing else would ever fix it (0132 audit). A household
+    has a few hundred items: one pass reads them all; rows already right are not written."""
+    stale = []
+    for item in InventoryItem.all_objects.only("pk", "name", "keywords", "keywords_normalised").iterator(
+        chunk_size=500
+    ):
+        want = search_text(item.name, item.keywords)
+        if item.keywords_normalised != want:
+            item.keywords_normalised = want
+            stale.append(item)
+    for start in range(0, len(stale), 500):
+        InventoryItem.all_objects.bulk_update(stale[start : start + 500], ["keywords_normalised"])
+    if stale:
+        logger.info("inventory search text refreshed for %d items", len(stale))
+    return len(stale)
 
 
 @shared_task

@@ -265,8 +265,9 @@ def _search_rank(folded, words, starts, name_normalised, search):
     """Owner, 2026-11-23: "butter" must put Mantequilla / Masło (keyword "butter") above "peanut butter". Lower is
     better: 0 the query IS one of the name's languages, 1 it IS a keyword, 2 a word of the name starts with it, 3 a
     word of a keyword does, 4 the name holds it, 5 a keyword holds it; names split on " / " only. On folded text,
-    except a row saved by an image from before the search text: its name comes from name_normalised (folded here),
-    its keywords keep their accents (the filter misses those keywords too; such rows exist only in a deploy window)."""
+    except rows an older image saved (deploy window, rollback and back): without the name line the name comes from
+    name_normalised (folded here); with an older fold the stored text is used as is. Either way only until the daily
+    refresh_inventory_search_text rewrites the row."""
     if "\n" in search:
         name, keywords = search.split("\n", 1)
     else:
@@ -296,8 +297,9 @@ class InventorySuggestionsEndpoint(InventoryBaseView):
             # a short query ("sal") hits many keywords and must not push out the item whose name it is (audit).
             # Ranked over at most 500 hits (a household has a few hundred items).
             folded = fold_for_search(query)
-            # name_normalised too, as a net: a row saved by an image from before the search text (a rollback and
-            # back, or the deploy window after 0131) holds keywords only, and must still be found by its name.
+            # name_normalised too, as a net for rows an older image saved (a rollback and back, or a deploy window):
+            # such a row is found by its name typed as stored (with ł if it has one) until the daily
+            # refresh_inventory_search_text rewrites it.
             hits = list(
                 items.filter(Q(keywords_normalised__contains=folded) | Q(name_normalised__contains=query))
                 .order_by("name_normalised")

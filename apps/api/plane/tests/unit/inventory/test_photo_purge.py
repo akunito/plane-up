@@ -133,3 +133,33 @@ def test_it_is_scheduled_daily():
 
     entry = app.conf.beat_schedule["check-every-day-to-purge-removed-inventory-photos"]
     assert entry["task"] == "plane.bgtasks.inventory_task.purge_removed_inventory_photos"
+
+
+def test_the_daily_refresh_rewrites_only_search_text_an_older_fold_left(db, make_item):
+    from plane.bgtasks.inventory_task import refresh_inventory_search_text
+    from plane.db.models import InventoryItem
+
+    stale = make_item("Masło")
+    no_line = make_item("Plátano")
+    right = make_item("Milk")
+    gone = make_item("Jabłko")
+    gone.delete()
+    InventoryItem.all_objects.filter(pk=stale.pk).update(keywords_normalised="masło\n")  # the fold before 0132
+    InventoryItem.all_objects.filter(pk=no_line.pk).update(keywords_normalised="")  # an image before 0131
+    InventoryItem.all_objects.filter(pk=gone.pk).update(keywords_normalised="jabłko\n")
+    assert refresh_inventory_search_text() == 3
+    texts = dict(InventoryItem.all_objects.values_list("pk", "keywords_normalised"))
+    assert (texts[stale.pk], texts[no_line.pk], texts[right.pk], texts[gone.pk]) == (
+        "maslo\n",
+        "platano\n",
+        "milk\n",
+        "jablko\n",
+    )
+    assert refresh_inventory_search_text() == 0  # nothing left to write
+
+
+def test_the_refresh_is_scheduled_daily():
+    from plane.celery import app
+
+    entry = app.conf.beat_schedule["check-every-day-to-refresh-inventory-search-text"]
+    assert entry["task"] == "plane.bgtasks.inventory_task.refresh_inventory_search_text"

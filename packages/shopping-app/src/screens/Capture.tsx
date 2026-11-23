@@ -5,24 +5,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { view } from "@plane/inventory";
 import type { AppState } from "../controller";
 import { prefs } from "../store";
+import { fold } from "../fold";
 import { ItemControl, useCtx } from "../ui";
 
 const DEBOUNCE_MS = 200;
-
-/** Letters without a decomposition, as the server's _BASE_LETTERS (ł→l: "l" and "ł" find each other). */
-const BASE_LETTERS: Record<string, string> = { ł: "l", đ: "d", ø: "o", ı: "i", ħ: "h", ŧ: "t" };
-
-/** As the server's fold_for_search: whitespace collapsed, lower case, accents gone, ł→l. */
-const fold = (text: string) =>
-  text
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
-    .normalize("NFC")
-    .split(/\s+/)
-    .filter(Boolean)
-    .join(" ")
-    .toLocaleLowerCase()
-    .replace(/[łđøıħŧ]/g, (ch) => BASE_LETTERS[ch] ?? ch);
 
 /** Where the folded query sits in the name, as [start, end) in the name's own UTF-16 indices: each character is
  * folded on its own and every folded unit remembers the character it came from, so "sol" bolds "Sól" (the server
