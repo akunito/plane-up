@@ -744,8 +744,8 @@ def test_keywords_are_saved_tidied_and_found_by_search(workspace, people, home, 
     assert response.status_code == 200, response.content
     assert response.json()["keywords"] == "butter, MASŁO"
     item.refresh_from_db()
-    assert item.keywords_normalised == "mantequilla / masło\nbutter, masło"
-    for query in ("BUTTER", "masło", "Masło"):
+    assert item.keywords_normalised == "mantequilla / maslo\nbutter, maslo"
+    for query in ("BUTTER", "masło", "Masło", "maslo", "MASLO"):
         found = client.get(ws(workspace.slug, f"suggestions/?q={query}")).json()["items"]
         assert [i["name"] for i in found] == ["Mantequilla / Masło"], query
     # The name still finds it, once, and an unrelated word finds nothing.
@@ -859,7 +859,7 @@ def test_every_rank_boundary_beats_name_order(workspace, people, home, groceries
 
     garlic, oil = item("Ajo / Czosnek 🧄"), item("Aceite / Czosnek w oleju")
     assert ids("czosnek") == [garlic, oil]  # 0 name part (emoji ignored) over 2 a word of the name
-    butter, clarified = item("Mantequilla / Masło"), item("Aceite / Olej", "masło")  # ł is kept by the fold
+    butter, clarified = item("Mantequilla / Masło"), item("Aceite / Olej", "maslo")  # ł and l are one letter here
     assert ids("masło") == [butter, clarified]  # 0 name part over 1 exact keyword
     keyword, dish = item("Mantequilla clarificada / Ghee", "butter"), item("Butter chicken / Kurczak")
     assert ids("butter") == [keyword, dish]  # 1 exact keyword over 2 a word of the name
@@ -868,3 +868,13 @@ def test_every_rank_boundary_beats_name_order(workspace, people, home, groceries
     juice, flavoured = item("Zumo de naranja / Sok"), item("Agua sabor / Woda smakowa", "naranja")
     found = ids("ranj")
     assert found.index(juice) < found.index(flavoured)  # 4 the name holds it over 5 a keyword holds it
+
+
+def test_a_and_á_and_l_and_ł_find_each_other_both_ways(workspace, people, home, groceries):
+    # Owner, 2026-11-23: a/á and l/ł must be found indistinctly, whichever is typed or stored.
+    with_marks = _item(groceries, "Plátano / Jabłko", "on_demand", needed=False)
+    plain = _item(groceries, "Platano verde / Jablko zielone", "on_demand", needed=False)
+    client = _client(people["bob"])
+    for query in ("plátano", "platano", "PLÁTANO", "jabłko", "jablko", "JABŁKO"):
+        found = {i["id"] for i in client.get(ws(workspace.slug, f"suggestions/?q={query}")).json()["items"]}
+        assert found == {str(with_marks.pk), str(plain.pk)}, query

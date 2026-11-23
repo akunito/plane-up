@@ -61,12 +61,18 @@ def normalise_item_name(name):
     return " ".join(unicodedata.normalize("NFKC", name or "").split()).casefold()
 
 
+# Letters Unicode does not decompose into a base + mark, folded by hand (owner, 2026-11-23: "l" and "ł" must find
+# each other both ways, as "a" and "á" do). Lower case only: the input is casefolded first.
+_BASE_LETTERS = str.maketrans({"ł": "l", "đ": "d", "ø": "o", "ı": "i", "ħ": "h", "ŧ": "t"})
+
+
 def fold_for_search(text):
-    """normalise_item_name without accents, for the keyword search: "jabón" finds a keyword written "jabon". Only
-    combining marks go, so Polish ł (a letter of its own, not l + a mark) stays: keyword lists carry "l" spellings
-    where wanted. Never used for names: their uniqueness keeps accents."""
+    """normalise_item_name without accents, for the search, applied to the stored text AND the query: "jabón" and
+    "jabon", "masło" and "maslo" find each other both ways. Combining marks go (á→a, ñ→n, ó→o, ż→z), and the letters
+    in _BASE_LETTERS become their base letter (ł→l). Never used for names: their uniqueness keeps accents."""
     decomposed = unicodedata.normalize("NFKD", normalise_item_name(text))
-    return unicodedata.normalize("NFC", "".join(ch for ch in decomposed if not unicodedata.combining(ch)))
+    bare = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return unicodedata.normalize("NFC", bare).translate(_BASE_LETTERS)
 
 
 def search_text(name, keywords):

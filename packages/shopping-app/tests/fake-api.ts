@@ -17,7 +17,7 @@ let seq = 0;
 export const uid = (prefix = "3") => `${prefix}0000000-0000-4000-8000-${String(++seq).padStart(12, "0")}`;
 
 /** As the server's fold_for_search, for the keyword match. */
-const foldAccents = (t: string) => t.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
+const foldAccents = (t: string) => t.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/ł/g, "l");
 
 export interface Data {
   name: string;

@@ -171,16 +171,16 @@ def test_keywords_are_normalised_like_names_also_with_update_fields(inventory_li
     item.keywords = "Butter  ŁADNE"
     item.save(update_fields=["keywords"])
     item.refresh_from_db()
-    assert item.keywords_normalised == "masło\nbutter ładne"
+    assert item.keywords_normalised == "maslo\nbutter ladne"
     # A rename alone recomputes the search text too (it starts with the name).
     item.name = "Mantequilla / Masło"
     item.save(update_fields=["name"])
     item.refresh_from_db()
     assert (item.name_normalised, item.keywords_normalised) == (
         "mantequilla / masło",
-        "mantequilla / masło\nbutter ładne",
+        "mantequilla / maslo\nbutter ladne",
     )
-    # Accents go for the search (ł is a letter of its own and stays); the name keeps them where it is unique.
+    # Accents go for the search, ł too (→ l); the name keeps them where it is unique.
     item.name = "Plátano / Banan"
     item.keywords = "Jabón, sól"
     item.save(update_fields=["name", "keywords"])
@@ -257,3 +257,15 @@ def test_0131_fills_the_search_text_of_rows_from_before_including_deleted(invent
     fill(apps, None)
     texts = dict(InventoryItem.all_objects.filter(pk__in=[live.pk, gone.pk]).values_list("pk", "keywords_normalised"))
     assert texts == {live.pk: "platano\nbanana", gone.pk: "jabon\nbanana"}
+
+
+def test_0132_refills_with_l_for_ł(inventory_list):
+    import importlib
+
+    from django.apps import apps
+
+    fill = importlib.import_module("plane.db.migrations.0132_inventoryitem_search_fold_letters").fill
+    item = _item(inventory_list, name="Masło")
+    InventoryItem.all_objects.filter(pk=item.pk).update(keywords="Jabłko", keywords_normalised="masło\njabłko")
+    fill(apps, None)
+    assert InventoryItem.all_objects.get(pk=item.pk).keywords_normalised == "maslo\njablko"
