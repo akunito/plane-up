@@ -818,3 +818,53 @@ def test_a_row_without_the_name_line_is_still_found_by_name(workspace, people, h
         assert [i["id"] for i in client.get(ws(workspace.slug, f"suggestions/?q={query}")).json()["items"]] == [
             str(item.pk)
         ], query
+
+
+def test_an_exact_name_or_keyword_ranks_above_a_word_inside_another(workspace, people, home, groceries):
+    # Prod, 2026-11-23: "butter" and "MASŁO" listed peanut butter above the butter (name order inside one tier).
+    peanut = _item(groceries, "Crema de cacahuete / Masło orzechowe", "on_demand", needed=False)
+    peanut.keywords = "peanut butter, crema cacahuete"
+    peanut.save()
+    butter = _item(groceries, "Mantequilla / Masło", "on_demand", needed=False)
+    butter.keywords = "butter, mantequilla, maslo"
+    butter.save()
+    garlic = _item(groceries, "Ajo / Czosnek 🧄", "on_demand", needed=False)
+    turkey = _item(groceries, "Pavo al ajo / Indyk z czosnkiem", "on_demand", needed=False)
+    turkey.keywords = "garlic turkey"
+    turkey.save()
+    garlic.keywords = "garlic"
+    garlic.save()
+    client = _client(people["bob"])
+
+    def ids(q):
+        return [i["id"] for i in client.get(ws(workspace.slug, f"suggestions/?q={q}")).json()["items"]]
+
+    assert ids("butter") == [str(butter.pk), str(peanut.pk)]  # keyword IS it, over a word of a keyword
+    assert ids("MASŁO") == [str(butter.pk), str(peanut.pk)]  # one of the name's languages IS it
+    assert ids("garlic") == [str(garlic.pk), str(turkey.pk)]
+
+
+def test_every_rank_boundary_beats_name_order(workspace, people, home, groceries):
+    # Each pair: the first item sorts AFTER the second by name, so only the rank puts it first.
+    def item(name, keywords=""):
+        i = _item(groceries, name, "on_demand", needed=False)
+        i.keywords = keywords
+        i.save()
+        return str(i.pk)
+
+    client = _client(people["bob"])
+
+    def ids(q):
+        return [i["id"] for i in client.get(ws(workspace.slug, f"suggestions/?q={q}")).json()["items"]]
+
+    garlic, oil = item("Ajo / Czosnek 🧄"), item("Aceite / Czosnek w oleju")
+    assert ids("czosnek") == [garlic, oil]  # 0 name part (emoji ignored) over 2 a word of the name
+    butter, clarified = item("Mantequilla / Masło"), item("Aceite / Olej", "masło")  # ł is kept by the fold
+    assert ids("masło") == [butter, clarified]  # 0 name part over 1 exact keyword
+    keyword, dish = item("Mantequilla clarificada / Ghee", "butter"), item("Butter chicken / Kurczak")
+    assert ids("butter") == [keyword, dish]  # 1 exact keyword over 2 a word of the name
+    oranges, water = item("Naranjas / Pomarańcze"), item("Agua / Woda", "naranja")
+    assert ids("naran") == [oranges, water]  # 2 a word of the name over 3 a word of a keyword
+    juice, flavoured = item("Zumo de naranja / Sok"), item("Agua sabor / Woda smakowa", "naranja")
+    found = ids("ranj")
+    assert found.index(juice) < found.index(flavoured)  # 4 the name holds it over 5 a keyword holds it

@@ -5,6 +5,7 @@
 # Inventory endpoints (APLANE-60). Thin: state changes go through plane.app.inventory.engine, visibility
 # through plane.app.inventory.access. Session or API key; guests get 403 everywhere.
 
+import re
 import uuid
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -252,6 +253,35 @@ class InventoryOpsEndpoint(InventoryBaseView):
         return Response({"results": engine.apply_batch(ops, ctx)})
 
 
+_WORD = re.compile(r"\w+")
+
+
+def _words(text):
+    """The words alone: emoji, punctuation and extra spaces gone ("czosnek 🧄" → "czosnek")."""
+    return " ".join(_WORD.findall(text))
+
+
+def _search_rank(folded, words, starts, name_normalised, search):
+    """Owner, 2026-11-23: "butter" must put Mantequilla / Masło (keyword "butter") above "peanut butter". Lower is
+    better: 0 the query IS one of the name's languages, 1 it IS a keyword, 2 a word of the name starts with it, 3 a
+    word of a keyword does, 4 the name holds it, 5 a keyword holds it; names split on " / " only. On folded text,
+    except a row saved by an image from before the search text: its name comes from name_normalised (folded here),
+    its keywords keep their accents (the filter misses those keywords too; such rows exist only in a deploy window)."""
+    if "\n" in search:
+        name, keywords = search.split("\n", 1)
+    else:
+        name, keywords = fold_for_search(name_normalised), search
+    if any(_words(part) == words for part in name.split(" / ")):
+        return 0
+    if any(_words(k) == words for k in keywords.split(",")):
+        return 1
+    if starts.search(name):
+        return 2
+    if starts.search(keywords):
+        return 3
+    return 4 if folded in name else 5
+
+
 class InventorySuggestionsEndpoint(InventoryBaseView):
     def get(self, request, slug):
         workspace = self._workspace(slug)
@@ -262,8 +292,8 @@ class InventorySuggestionsEndpoint(InventoryBaseView):
         matches = []
         if query:
             # Name and keywords (owner, 2026-11-23), without accents: keywords_normalised is the search text
-            # (search_text: folded name, line break, folded keywords). Name matches first, ranked here: a short query
-            # ("sal") hits many keywords, and the cap of 20 must not push out the item whose name it is (audit).
+            # (search_text: folded name, line break, folded keywords). Ranked here (_search_rank), then the cap of 20:
+            # a short query ("sal") hits many keywords and must not push out the item whose name it is (audit).
             # Ranked over at most 500 hits (a household has a few hundred items).
             folded = fold_for_search(query)
             # name_normalised too, as a net: a row saved by an image from before the search text (a rollback and
@@ -274,7 +304,8 @@ class InventorySuggestionsEndpoint(InventoryBaseView):
                 .values_list("pk", "name_normalised", "keywords_normalised")[:500]
             )
             # A stable sort on the rank alone keeps the name order inside each rank.
-            hits.sort(key=lambda h: 0 if query in h[1] or folded in h[2].split("\n", 1)[0] else 1)
+            words, starts = _words(folded), re.compile(r"(?<!\w)" + re.escape(folded))
+            hits.sort(key=lambda h: _search_rank(folded, words, starts, h[1], h[2]))
             top = [h[0] for h in hits[:20]]
             by_pk = {i.pk: i for i in with_orders(items.filter(pk__in=top))}
             matches = [
