@@ -264,10 +264,13 @@ def _words(text):
 def _search_rank(folded, words, starts, name_normalised, search):
     """Owner, 2026-11-23: "butter" must put Mantequilla / Masło (keyword "butter") above "peanut butter". Lower is
     better: 0 the query IS one of the name's languages, 1 it IS a keyword, 2 a word of the name starts with it, 3 a
-    word of a keyword does, 4 the name holds it, 5 a keyword holds it. All on folded text (no accents); a row without
-    the name line (saved by an older image) is ranked by its name_normalised."""
-    name = fold_for_search(name_normalised)
-    keywords = search.split("\n", 1)[1] if "\n" in search else search
+    word of a keyword does, 4 the name holds it, 5 a keyword holds it; names split on " / " only. On folded text,
+    except a row saved by an image from before the search text: its name comes from name_normalised (folded here),
+    its keywords keep their accents (the filter misses those keywords too; such rows exist only in a deploy window)."""
+    if "\n" in search:
+        name, keywords = search.split("\n", 1)
+    else:
+        name, keywords = fold_for_search(name_normalised), search
     if any(_words(part) == words for part in name.split(" / ")):
         return 0
     if any(_words(k) == words for k in keywords.split(",")):
