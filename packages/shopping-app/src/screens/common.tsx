@@ -34,16 +34,20 @@ export function Tabs({
       </nav>
       <span className="spacer" />
       {counts ? (
-        <span className="muted small counts" title={t("summary", counts)}>
+        <span className="muted small counts">
           <span className="visually-hidden">{t("summary", counts)}</span>
-          <span className="count" aria-hidden="true">
-            {Icon.cart(14)}
-            {counts.missing}
-          </span>
-          <span className="count" aria-hidden="true">
-            {/* Filled: the rows' sign for pinned (the outline pin means not pinned). */}
-            {Icon.pin(true, 14)}
-            {counts.pinned}
+          {/* The hover title lives on the hidden part: on the outer span Chromium may expose it as a name and
+              TalkBack read the sentence twice (re-review). */}
+          <span className="counts-shown" aria-hidden="true" title={t("summary", counts)}>
+            <span className="count">
+              {Icon.cart(14)}
+              {counts.missing}
+            </span>
+            <span className="count">
+              {/* Filled: the rows' sign for pinned (the outline pin means not pinned). */}
+              {Icon.pin(true, 14)}
+              {counts.pinned}
+            </span>
           </span>
         </span>
       ) : null}

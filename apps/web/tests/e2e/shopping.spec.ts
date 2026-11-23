@@ -459,6 +459,8 @@ test.describe("shopping app @shopping", () => {
   }) => {
     await page.setViewportSize({ width: 360, height: 740 });
     await open(page);
+    // Rendered first, so the widening below really has two numbers to widen.
+    await expect(page.locator(".topbar .count")).toHaveText(["6", "2"]);
     const row = await page.evaluate(() => {
       // Two digits each: the widest a household list reaches in practice.
       for (const c of Array.from(document.querySelectorAll(".topbar .count"))) c.lastChild!.textContent = "12";

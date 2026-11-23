@@ -978,7 +978,8 @@ button.stepper-value {
 }
 
 /* The to-buy counter as icons and numbers: the same width in every language (APLANE-73 mockup). */
-.counts {
+.counts,
+.counts-shown {
   display: inline-flex;
   align-items: center;
   gap: 10px;

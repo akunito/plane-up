@@ -1360,11 +1360,11 @@ describe("Plane's menu (APLANE-73)", () => {
     await settle();
     const counts = document.querySelector(".topbar .counts")!;
     expect(within(counts as HTMLElement).getByText("5 missing · 1 pinned").className).toBe("visually-hidden");
-    const shown = [...counts.querySelectorAll(".count")];
-    expect(shown.map((c) => [c.textContent, c.getAttribute("aria-hidden")])).toEqual([
-      ["5", "true"],
-      ["1", "true"],
-    ]);
+    const shown = counts.querySelector(".counts-shown")!;
+    expect(shown.getAttribute("aria-hidden")).toBe("true");
+    expect([...shown.querySelectorAll(".count")].map((c) => c.textContent)).toEqual(["5", "1"]);
+    // Only the hidden part carries the hover title; the outer span has no name of its own.
+    expect([counts.getAttribute("title"), shown.getAttribute("title")]).toEqual([null, "5 missing · 1 pinned"]);
   });
 
   it("every Plane entry carries its icon, as in the main app's sidebar", async () => {
