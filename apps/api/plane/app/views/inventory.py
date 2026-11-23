@@ -12,7 +12,7 @@ from decimal import Decimal, InvalidOperation
 from botocore.exceptions import BotoCoreError
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Case, Count, IntegerField, OuterRef, Q, Subquery, Sum, UUIDField, Value, When
+from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Sum, UUIDField, Value
 from django.db.models.functions import Coalesce
 from django.http import HttpResponseRedirect
 from django.utils import timezone
@@ -261,16 +261,23 @@ class InventorySuggestionsEndpoint(InventoryBaseView):
         query = normalise_item_name(request.query_params.get("q", ""))[:100]
         matches = []
         if query:
-            # The keywords too (owner, 2026-11-23): other names, English and synonyms, matched without accents.
-            # Name matches first: a short query ("sal") hits many keywords, and the cap of 20 must not push out the
-            # item whose name it is (keywords audit).
+            # Name and keywords (owner, 2026-11-23), without accents: keywords_normalised is the search text
+            # (search_text: folded name, line break, folded keywords). Name matches first, ranked here: a short query
+            # ("sal") hits many keywords, and the cap of 20 must not push out the item whose name it is (audit).
+            # Ranked over at most 500 hits (a household has a few hundred items).
             folded = fold_for_search(query)
-            found = (
-                with_orders(items.filter(Q(name_normalised__contains=query) | Q(keywords_normalised__contains=folded)))
-                .annotate(keyword_only=Case(When(name_normalised__contains=query, then=Value(0)), default=Value(1)))
-                .order_by("keyword_only", "name_normalised")[:20]
+            hits = list(
+                items.filter(keywords_normalised__contains=folded)
+                .order_by("name_normalised")
+                .values_list("pk", "keywords_normalised")[:500]
             )
-            matches = [item_payload(i, i.on_order, i.open_count > 0) for i in found]
+            # A stable sort on the rank alone keeps the name order inside each rank.
+            hits.sort(key=lambda hit: 0 if folded in hit[1].split("\n", 1)[0] else 1)
+            top = [pk for pk, _ in hits[:20]]
+            by_pk = {i.pk: i for i in with_orders(items.filter(pk__in=top))}
+            matches = [
+                item_payload(by_pk[pk], by_pk[pk].on_order, by_pk[pk].open_count > 0) for pk in top if pk in by_pk
+            ]
         # order_by() on the field itself: Meta.ordering would join the DISTINCT and the cap would count
         # items, not values (measured against Django 5.2.15 by the phase 2 audit).
         categories = list(

@@ -744,7 +744,7 @@ def test_keywords_are_saved_tidied_and_found_by_search(workspace, people, home, 
     assert response.status_code == 200, response.content
     assert response.json()["keywords"] == "butter, MASŁO"
     item.refresh_from_db()
-    assert item.keywords_normalised == "butter, masło"
+    assert item.keywords_normalised == "mantequilla / masło\nbutter, masło"
     for query in ("BUTTER", "masło", "Masło"):
         found = client.get(ws(workspace.slug, f"suggestions/?q={query}")).json()["items"]
         assert [i["name"] for i in found] == ["Mantequilla / Masło"], query
@@ -791,3 +791,19 @@ def test_keywords_match_without_accents_and_names_come_first(workspace, people, 
     # 26 matches for "sal", capped at 20: the item named so is first, not pushed out by keyword hits.
     found = client.get(ws(workspace.slug, "suggestions/?q=sal")).json()["items"]
     assert len(found) == 20 and found[0]["id"] == str(salt.pk)
+
+
+def test_a_name_with_accents_is_found_typed_without_them_and_ranks_first(workspace, people, home, groceries):
+    salt = _item(groceries, "Sal / Sól", "on_demand", needed=False)
+    _item(groceries, "Plátano / Banan", "on_demand", needed=False)
+    for i in range(25):
+        other = _item(groceries, f"Aceite {i:02d}", "on_demand", needed=False)
+        other.keywords = "aceite de girasol"
+        other.save()
+    client = _client(people["bob"])
+    assert [i["name"] for i in client.get(ws(workspace.slug, "suggestions/?q=platano")).json()["items"]] == [
+        "Plátano / Banan"
+    ]
+    # 26 hits for "sol"; the one whose (accented) NAME holds it comes first, ahead of "aceite" by name order.
+    found = [i["id"] for i in client.get(ws(workspace.slug, "suggestions/?q=sol")).json()["items"]]
+    assert len(found) == 20 and found[0] == str(salt.pk)

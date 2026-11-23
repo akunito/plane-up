@@ -665,6 +665,16 @@ describe("phase 9 device review", () => {
     expect(await screen.findByText((_, el) => el?.tagName === "SPAN" && el.textContent === "also: sól")).toBeTruthy();
   });
 
+  it("quick capture bolds a name matched without its accents", async () => {
+    await boot(catalog(), "#/capture", undefined, (a) => {
+      a.data.get(SALT)!.name = "Sal 🧂 / Sól";
+    });
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "sol" } });
+    const link = await screen.findByRole("link", { name: "Sal 🧂 / Sól" });
+    // Past an emoji (2 UTF-16 units), the bold still lands on the accented letters.
+    expect(link.querySelector("strong")?.textContent).toBe("Sól");
+  });
+
   it("the workspace picker is in the list's scroll area, not under the full-height screen", async () => {
     await boot(catalog(), "#/", undefined, (a) => a.workspaces.push({ slug: "other", name: "Other" }));
     const picker = await screen.findByRole("combobox", { name: /Workspace/ });
