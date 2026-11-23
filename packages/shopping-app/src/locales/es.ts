@@ -240,6 +240,8 @@ export const es: Dictionary = {
   offline_since: "Sin conexión: es la lista de {when}. Los cambios se guardan y se envían cuando vuelva.",
   item_missing: "Este artículo ya no existe o no puedes verlo.",
   unknown_item: "un artículo",
+  keywords: "Otros nombres (para buscar)",
+  also_called: "también:",
   item_action: "{item}: {action}",
   storage_volatile:
     "Este dispositivo no puede guardar cambios (ventana privada o almacenamiento lleno): se envían mientras la app esté abierta y se pierden si se cierra antes.",

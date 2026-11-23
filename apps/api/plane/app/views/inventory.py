@@ -48,7 +48,7 @@ from plane.db.models import (
     Workspace,
     WorkspaceMember,
 )
-from plane.db.models.inventory import normalise_item_name
+from plane.db.models.inventory import fold_for_search, normalise_item_name
 from plane.settings.storage import S3Storage
 
 from .base import BaseAPIView
@@ -66,6 +66,7 @@ ITEM_DATA_FIELDS = (
     "currency",
     "expires_on",
     "barcode",
+    "keywords",
     "sort_order",
     "min_quantity",
     "restock_to",
@@ -122,6 +123,7 @@ def item_payload(item, on_order=0, has_open=False):
         "currency": item.currency,
         "expires_on": item.expires_on.isoformat() if item.expires_on else None,
         "barcode": item.barcode,
+        "keywords": item.keywords,
         "sort_order": item.sort_order,
         # The re-run key of an import (brief, Moving an item): the importer finds its own rows by these.
         "external_source": item.external_source,
@@ -259,8 +261,25 @@ class InventorySuggestionsEndpoint(InventoryBaseView):
         query = normalise_item_name(request.query_params.get("q", ""))[:100]
         matches = []
         if query:
-            found = with_orders(items.filter(name_normalised__contains=query)).order_by("name_normalised")[:20]
-            matches = [item_payload(i, i.on_order, i.open_count > 0) for i in found]
+            # Name and keywords (owner, 2026-11-23), without accents: keywords_normalised is the search text
+            # (search_text: folded name, line break, folded keywords). Name matches first, ranked here: a short query
+            # ("sal") hits many keywords, and the cap of 20 must not push out the item whose name it is (audit).
+            # Ranked over at most 500 hits (a household has a few hundred items).
+            folded = fold_for_search(query)
+            # name_normalised too, as a net: a row saved by an image from before the search text (a rollback and
+            # back, or the deploy window after 0131) holds keywords only, and must still be found by its name.
+            hits = list(
+                items.filter(Q(keywords_normalised__contains=folded) | Q(name_normalised__contains=query))
+                .order_by("name_normalised")
+                .values_list("pk", "name_normalised", "keywords_normalised")[:500]
+            )
+            # A stable sort on the rank alone keeps the name order inside each rank.
+            hits.sort(key=lambda h: 0 if query in h[1] or folded in h[2].split("\n", 1)[0] else 1)
+            top = [h[0] for h in hits[:20]]
+            by_pk = {i.pk: i for i in with_orders(items.filter(pk__in=top))}
+            matches = [
+                item_payload(by_pk[pk], by_pk[pk].on_order, by_pk[pk].open_count > 0) for pk in top if pk in by_pk
+            ]
         # order_by() on the field itself: Meta.ordering would join the DISTINCT and the cap would count
         # items, not values (measured against Django 5.2.15 by the phase 2 audit).
         categories = list(
@@ -417,6 +436,7 @@ class InventoryPreferenceEndpoint(InventoryBaseView):
 
 
 SORT_ORDER_MAX = 1e15
+KEYWORDS_MAX = 1000
 
 
 def _clean_item_data(data, current=None):
@@ -443,6 +463,10 @@ def _clean_item_data(data, current=None):
             if not isinstance(value, str) or len(value) > limit or "\x00" in value:
                 return None, _bad(field)
             value = value.strip()
+        elif field == "keywords":
+            if not isinstance(value, str) or len(value) > KEYWORDS_MAX or "\x00" in value:
+                return None, _bad(field)
+            value = " ".join(value.split())
         elif field == "purchase_url":
             if (
                 not isinstance(value, str)

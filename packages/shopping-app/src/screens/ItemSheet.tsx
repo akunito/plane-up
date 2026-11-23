@@ -23,6 +23,7 @@ type Field =
   | "currency"
   | "expires_on"
   | "barcode"
+  | "keywords"
   | "min_quantity"
   | "restock_to";
 
@@ -318,6 +319,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
           </select>
         </label>
         {text("category", "category")}
+        {text("keywords", "keywords", "text", { maxLength: 1000 })}
 
         <h2 className="group">{t("purchase")}</h2>
         {text("store", "store")}

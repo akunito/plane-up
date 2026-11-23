@@ -171,11 +171,21 @@ def test_keywords_are_normalised_like_names_also_with_update_fields(inventory_li
     item.keywords = "Butter  ŁADNE"
     item.save(update_fields=["keywords"])
     item.refresh_from_db()
-    assert item.keywords_normalised == "butter ładne"
+    assert item.keywords_normalised == "masło\nbutter ładne"
+    # A rename alone recomputes the search text too (it starts with the name).
     item.name = "Mantequilla / Masło"
     item.save(update_fields=["name"])
     item.refresh_from_db()
-    assert (item.name_normalised, item.keywords_normalised) == ("mantequilla / masło", "butter ładne")
+    assert (item.name_normalised, item.keywords_normalised) == (
+        "mantequilla / masło",
+        "mantequilla / masło\nbutter ładne",
+    )
+    # Accents go for the search (ł is a letter of its own and stays); the name keeps them where it is unique.
+    item.name = "Plátano / Banan"
+    item.keywords = "Jabón, sól"
+    item.save(update_fields=["name", "keywords"])
+    item.refresh_from_db()
+    assert (item.name_normalised, item.keywords_normalised) == ("plátano / banan", "platano / banan\njabon, sol")
 
 
 def test_an_order_needs_a_positive_quantity_and_takes_the_device_id(inventory_list):
@@ -232,3 +242,18 @@ def test_shopping_is_a_reserved_workspace_slug():
 
 def test_the_external_api_accepts_the_flag():
     assert "inventory_view" in ProjectCreateSerializer.Meta.fields
+
+
+def test_0131_fills_the_search_text_of_rows_from_before_including_deleted(inventory_list):
+    import importlib
+
+    from django.apps import apps
+
+    fill = importlib.import_module("plane.db.migrations.0131_inventoryitem_search_text").fill
+    live = _item(inventory_list, name="Plátano")
+    gone = _item(inventory_list, name="Jabón")
+    gone.delete()
+    InventoryItem.all_objects.filter(pk__in=[live.pk, gone.pk]).update(keywords="Banana", keywords_normalised="")
+    fill(apps, None)
+    texts = dict(InventoryItem.all_objects.filter(pk__in=[live.pk, gone.pk]).values_list("pk", "keywords_normalised"))
+    assert texts == {live.pk: "platano\nbanana", gone.pk: "jabon\nbanana"}

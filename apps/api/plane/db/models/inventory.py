@@ -61,6 +61,20 @@ def normalise_item_name(name):
     return " ".join(unicodedata.normalize("NFKC", name or "").split()).casefold()
 
 
+def fold_for_search(text):
+    """normalise_item_name without accents, for the keyword search: "jabón" finds a keyword written "jabon". Only
+    combining marks go, so Polish ł (a letter of its own, not l + a mark) stays: keyword lists carry "l" spellings
+    where wanted. Never used for names: their uniqueness keeps accents."""
+    decomposed = unicodedata.normalize("NFKD", normalise_item_name(text))
+    return unicodedata.normalize("NFC", "".join(ch for ch in decomposed if not unicodedata.combining(ch)))
+
+
+def search_text(name, keywords):
+    """What the search matches, accent-free: the name on the first line, the keywords after it, so "platano" finds
+    "Plátano" by its name too (re-review). No line break survives the fold, so a query never spans the two."""
+    return fold_for_search(name) + "\n" + fold_for_search(keywords)
+
+
 class InventoryList(ProjectBaseModel):
     name = models.CharField(max_length=255)
     default_mode = models.CharField(max_length=16, choices=InventoryMode.choices, default=InventoryMode.ON_DEMAND)
@@ -117,8 +131,9 @@ class InventoryItem(ProjectBaseModel):
     expires_on = models.DateField(null=True, blank=True)
     barcode = models.CharField(max_length=64, blank=True, default="")
     # Other names to find the item by (owner, 2026-11-23: names in Spanish and Polish, English and synonyms
-    # here). keywords_normalised is computed in save() like name_normalised, for the search to compare the same
-    # way (Python casefold, not the database's lower(), whose behaviour on Ł/ł depends on the collation).
+    # here). keywords_normalised is the SEARCH text, computed in save(): the folded name, a line break, the folded
+    # keywords (search_text: casefold + no accents, in Python, not the database's lower(), whose behaviour on Ł/ł
+    # depends on the collation). It depends on both fields; 0131 filled it for the rows from before.
     keywords = models.TextField(blank=True, default="", db_default="")
     keywords_normalised = models.TextField(editable=False, default="", db_default="")
     sort_order = models.FloatField(default=65535)
@@ -163,14 +178,13 @@ class InventoryItem(ProjectBaseModel):
 
     def save(self, *args, **kwargs):
         self.name_normalised = normalise_item_name(self.name)
-        self.keywords_normalised = normalise_item_name(self.keywords)
+        self.keywords_normalised = search_text(self.name, self.keywords)
         update_fields = kwargs.get("update_fields")
         if update_fields is not None:
-            extra = [
-                derived
-                for source, derived in (("name", "name_normalised"), ("keywords", "keywords_normalised"))
-                if source in update_fields and derived not in update_fields
-            ]
+            derived_from = {"name": ("name_normalised", "keywords_normalised"), "keywords": ("keywords_normalised",)}
+            extra = list(
+                dict.fromkeys(d for f in update_fields for d in derived_from.get(f, ()) if d not in update_fields)
+            )
             if extra:
                 kwargs["update_fields"] = [*update_fields, *extra]
         super().save(*args, **kwargs)

@@ -9,15 +9,63 @@ import { ItemControl, useCtx } from "../ui";
 
 const DEBOUNCE_MS = 200;
 
+/** As the server's fold_for_search: NFKC + casefold-ish, whitespace collapsed, accents gone (ł stays). */
+const fold = (text: string) =>
+  text
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .normalize("NFC")
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" ")
+    .toLocaleLowerCase();
+
+/** Where the folded query sits in the name, as [start, end) in the name's own UTF-16 indices: each character is
+ * folded on its own and every folded unit remembers the character it came from, so "sol" bolds "Sól" (the server
+ * matches names without accents too), past emoji and other 2-unit characters. Not the server's casefold: "strasse"
+ * finds "Straße" there but bolds nothing here (toLocaleLowerCase keeps ß). */
+function findFolded(name: string, query: string): [number, number] | null {
+  const q = fold(query);
+  if (!q) return null;
+  let folded = "";
+  const from: number[] = [];
+  const to: number[] = [];
+  for (let i = 0; i < name.length; ) {
+    const ch = String.fromCodePoint(name.codePointAt(i)!);
+    const f = /\s/.test(ch) ? " " : fold(ch);
+    for (let k = 0; k < f.length; k++) {
+      from.push(i);
+      to.push(i + ch.length);
+    }
+    folded += f;
+    i += ch.length;
+  }
+  const at = folded.indexOf(q);
+  return at < 0 ? null : [from[at]!, to[at + q.length - 1]!];
+}
+
 function Highlight({ name, query }: { name: string; query: string }) {
-  const at = query ? name.toLocaleLowerCase().indexOf(query.toLocaleLowerCase()) : -1;
-  if (at < 0) return <>{name}</>;
+  const hit = findFolded(name, query);
+  if (!hit) return <>{name}</>;
   return (
     <>
-      {name.slice(0, at)}
-      <strong>{name.slice(at, at + query.length)}</strong>
-      {name.slice(at + query.length)}
+      {name.slice(0, hit[0])}
+      <strong>{name.slice(hit[0], hit[1])}</strong>
+      {name.slice(hit[1])}
     </>
+  );
+}
+
+/** The keyword a search matched when the name did not: "also: butter" under "Mantequilla / Masło". Compared as the
+ * server compares; when no single keyword holds the query (it spans a comma), the whole list is shown. */
+function matchedKeyword(name: string, keywords: string | undefined, query: string): string | null {
+  const q = fold(query);
+  if (!q || !keywords || fold(name).includes(q)) return null;
+  return (
+    keywords
+      .split(",")
+      .map((k) => k.trim())
+      .find((k) => fold(k).includes(q)) ?? (fold(keywords).includes(q) ? keywords : null)
   );
 }
 
@@ -110,6 +158,14 @@ export function Capture({ s }: { s: AppState }) {
                 <a href={`#/item/${id}`} className="name block">
                   <Highlight name={k.data.name} query={q} />
                 </a>
+                {(() => {
+                  const also = matchedKeyword(k.data.name, k.data.keywords, q);
+                  return also ? (
+                    <span className="sub block">
+                      {t("also_called")} <Highlight name={also} query={q} />
+                    </span>
+                  ) : null;
+                })()}
                 <span className="sub block">
                   {[k.data.list.name, k.data.project.name, hint].filter(Boolean).join(" · ")}
                 </span>
