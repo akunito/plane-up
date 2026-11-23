@@ -6,6 +6,7 @@
 import uuid
 import base64
 import requests
+from botocore.exceptions import BotoCoreError
 from bs4 import BeautifulSoup
 
 # Django imports
@@ -111,7 +112,16 @@ def copy_assets(entity, entity_identifier, project_id, asset_ids, user_id):
             storage_metadata=original_asset.storage_metadata,
             **get_entity_id_field(original_asset.entity_type, entity_identifier),
         )
-        storage.copy_object(original_asset.asset, destination_key)
+        try:
+            copied = storage.copy_object(original_asset.asset, destination_key)
+        except BotoCoreError as e:
+            log_exception(e)
+            copied = None
+        if copied is None:
+            # A failed copy used to be marked uploaded with the rest: an asset pointing at no object (APLANE-72
+            # audit). Left out of the mapping, the duplicate keeps the original's image instead of a broken one.
+            duplicated_asset.delete(soft=False)
+            continue
         duplicated_assets.append(
             {
                 "new_asset_id": str(duplicated_asset.id),

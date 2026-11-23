@@ -132,6 +132,31 @@ class TestCopyS3Objects:
         assert new_asset.is_uploaded is True
 
     @pytest.mark.django_db
+    @pytest.mark.parametrize("failure", ["refused", "unreachable"])
+    @patch("plane.bgtasks.copy_s3_object.S3Storage")
+    def test_a_failed_copy_leaves_no_asset_and_no_mapping(
+        self, mock_s3_storage, failure, workspace, project, issue, file_asset
+    ):
+        """APLANE-72 audit: a failed copy was marked uploaded with the rest, pointing at no object."""
+        from botocore.exceptions import EndpointConnectionError
+
+        storage = mock_s3_storage.return_value
+        if failure == "refused":
+            storage.copy_object.return_value = None  # copy_object's answer to a ClientError
+        else:
+            storage.copy_object.side_effect = EndpointConnectionError(endpoint_url="http://x")
+        before = FileAsset.all_objects.count()
+        result = copy_assets(
+            entity=issue,
+            entity_identifier=issue.id,
+            project_id=project.id,
+            asset_ids=[file_asset.id],
+            user_id=issue.created_by_id,
+        )
+        assert result == []
+        assert FileAsset.all_objects.count() == before
+
+    @pytest.mark.django_db
     @patch("plane.bgtasks.copy_s3_object.S3Storage")
     def test_copy_assets_empty_asset_ids(self, mock_s3_storage, workspace, project, issue):
         """Test copying with empty asset_ids list"""
