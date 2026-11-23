@@ -108,6 +108,23 @@ export interface AppState {
   storageProblem: "volatile" | "write_failed" | null;
 }
 
+/** One row of the main app's lite project list (GET workspaces/{slug}/projects/), as the drawer reads it. */
+export interface PlaneProject {
+  id: string;
+  name: string;
+  identifier: string;
+  member_role?: number | null;
+  archived_at?: string | null;
+  sort_order?: number | null;
+  logo_props?: { in_use?: string; emoji?: { value?: string }; icon?: { name?: string; color?: string } } | null;
+  cycle_view?: boolean;
+  module_view?: boolean;
+  issue_views_view?: boolean;
+  page_view?: boolean;
+  inbox_view?: boolean;
+  inventory_view?: boolean;
+}
+
 export interface Deps {
   base: string;
   fetchImpl?: typeof fetch;
@@ -260,6 +277,18 @@ export class Controller {
     if (!slug) return this.leave({ phase: "no_workspace", workspaces: all });
     this.set({ slug, workspaces: all });
     await this.openWorkspace();
+  }
+
+  /** The workspace's projects for the Plane drawer; null when they cannot be read (offline, refused). Never
+   * touches the app's state: a refused read here is not the app's signed-out signal. */
+  async planeProjects(): Promise<PlaneProject[] | null> {
+    if (!this.state.slug) return null;
+    const r = await requestJson<PlaneProject[]>(
+      this.client(),
+      "GET",
+      `workspaces/${encodeURIComponent(this.state.slug)}/projects/`
+    );
+    return r.kind === "ok" && Array.isArray(r.body) ? r.body : null;
   }
 
   async switchWorkspace(slug: string): Promise<void> {

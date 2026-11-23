@@ -81,6 +81,53 @@ export class FakeApi {
   outdatedOps = false;
   /** History requests fail as a dropped network does (offline). */
   dropHistory = false;
+  /** The main app's lite project list, as GET workspaces/{slug}/projects/ answers it (APLANE-73 drawer). */
+  projects: Record<string, unknown>[] = [
+    {
+      id: PROJECT,
+      name: "Home",
+      identifier: "H",
+      member_role: 20,
+      sort_order: 2,
+      archived_at: null,
+      inventory_view: true,
+      cycle_view: true,
+      module_view: false,
+      issue_views_view: true,
+      page_view: true,
+      inbox_view: false,
+      logo_props: { in_use: "emoji", emoji: { value: "127968" } },
+    },
+    {
+      id: SECRET,
+      name: "Me",
+      identifier: "M",
+      member_role: 5,
+      sort_order: 1,
+      archived_at: null,
+      inventory_view: true,
+      cycle_view: true,
+      page_view: true,
+    },
+    {
+      id: "10000000-0000-4000-8000-000000000003",
+      name: "Not mine",
+      identifier: "N",
+      member_role: null,
+      sort_order: 0,
+      archived_at: null,
+    },
+    {
+      id: "10000000-0000-4000-8000-000000000004",
+      name: "Old",
+      identifier: "O",
+      member_role: 20,
+      sort_order: 3,
+      archived_at: "2026-01-01T00:00:00Z",
+    },
+  ];
+  /** The project list fails as a dropped network does (offline). */
+  dropProjects = false;
   constructor(items: { state: ItemState; data: Data }[]) {
     this.server = new ModelServer(items.map((i) => i.state));
     for (const i of items) this.data.set(i.state.id, i.data);
@@ -147,6 +194,7 @@ export class FakeApi {
     if (p === "/api/users/me/settings/")
       return [200, { workspace: { last_workspace_slug: "home", fallback_workspace_slug: "home" } }];
     if (p === "/api/users/me/workspaces/") return [200, this.workspaces];
+    if (/^\/api\/workspaces\/[^/]+\/projects\/$/.test(p)) return [200, this.projects];
     if (p.endsWith("/inventory/lists/") && !p.includes("/projects/"))
       return [
         200,
@@ -286,6 +334,7 @@ export class FakeApi {
     this.calls.push({ method, path, body });
     if (path === STORAGE && this.onStorage) await this.onStorage();
     if (this.dropHistory && path.endsWith("/history/")) throw new TypeError("Failed to fetch");
+    if (this.dropProjects && /\/api\/workspaces\/[^/]+\/projects\/$/.test(path)) throw new TypeError("Failed to fetch");
     if (this.fail) {
       const json = this.fail.json;
       return new Response(json === undefined ? "<html></html>" : JSON.stringify(json), {

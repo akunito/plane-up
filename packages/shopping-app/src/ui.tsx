@@ -71,6 +71,15 @@ export const Icon = {
       </>
     ),
   back: () => svg(20, <path d="m15 18-6-6 6-6" />),
+  // lucide PanelLeft: the main app's sidebar toggle (AppSidebarToggleButton).
+  panelLeft: () =>
+    svg(
+      20,
+      <>
+        <rect width="18" height="18" x="3" y="3" rx="2" />
+        <path d="M9 3v18" />
+      </>
+    ),
   chevron: () => svg(14, <path d="m9 18 6-6-6-6" />),
   down: () => svg(14, <path d="m6 9 6 6 6-6" />),
   plus: (size = 16) => svg(size, <path d="M5 12h14M12 5v14" />),

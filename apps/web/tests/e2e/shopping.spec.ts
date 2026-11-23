@@ -427,6 +427,31 @@ test.describe("shopping app @shopping", () => {
     }
   });
 
+  test("APLANE-73: Plane's menu: back shuts it; a project's work items open in Plane and back returns here", async ({
+    page,
+  }) => {
+    await open(page);
+    const toggle = page.getByRole("button", { name: "Open the Plane menu" });
+    const nav = page.getByRole("dialog", { name: "Plane" });
+    // Back with the menu open shuts the menu and stays on the list (it does not leave the screen).
+    await toggle.click();
+    await expect(nav).toBeVisible();
+    await page.goBack();
+    await expect(nav).toHaveCount(0);
+    await expect(page).toHaveURL(/\/shopping\/(#\/?)?$/);
+    await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
+    await toggle.click();
+    await expect(nav.getByRole("link", { name: "Inbox" })).toHaveAttribute("href", "/qa-inv/notifications/");
+    await nav.getByRole("button", { name: /Home$/ }).click();
+    await nav.getByRole("link", { name: "Work items" }).click();
+    await expect(page).toHaveURL(new RegExp(`/qa-inv/projects/${INV!.projects.HOME.id}/issues`));
+    await page.goBack();
+    await expect(page).toHaveURL(/\/shopping\/(#\/?)?$/);
+    await expect(page.locator("[data-phase]")).toHaveCount(0);
+    await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
+    await expect(nav).toHaveCount(0);
+  });
+
   test("a workspace guest has no access", async ({ browser }, info) => {
     const gus = await contextFor(browser, info, "qa-inv-gus");
     await gus.page.goto("/shopping/");
@@ -483,7 +508,8 @@ test.describe("@visual-shopping", () => {
     await open(page);
     await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
     // Renamed when pinned rows gained "bought … (by …)" (APLANE-67, S17): the new name creates its baseline.
-    await shot(page, "vs-01-list-bought");
+    // Renamed again with the Plane menu toggle in the top bar (APLANE-73).
+    await shot(page, "vs-01-list-nav");
   });
 
   test("VS-02 shopping mode", async ({ page }) => {
@@ -502,7 +528,8 @@ test.describe("@visual-shopping", () => {
   test("VS-04 inventory", async ({ page }) => {
     await open(page, "#/inventory");
     await expect(page.getByRole("link", { name: "Open Mulch" })).toBeVisible();
-    await shot(page, "vs-04-inventory");
+    // Renamed with the Plane menu toggle in the top bar (APLANE-73).
+    await shot(page, "vs-04-inventory-nav");
   });
 
   test("VS-05 item sheet", async ({ page }) => {
@@ -526,6 +553,14 @@ test.describe("@visual-shopping", () => {
     await page.getByRole("button", { name: "Magnesium: the order arrived" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await shot(page, "vs-07-arrival", page.getByRole("dialog"));
+  });
+
+  test("VS-09 Plane's menu (APLANE-73)", async ({ page }) => {
+    await open(page);
+    await page.getByRole("button", { name: "Open the Plane menu" }).click();
+    const nav = page.getByRole("dialog", { name: "Plane" });
+    await expect(nav.getByRole("button", { name: /Home$/ })).toBeVisible();
+    await shot(page, "vs-09-plane-menu");
   });
 
   test("VS-08 waiting and unapplied", async ({ page }) => {

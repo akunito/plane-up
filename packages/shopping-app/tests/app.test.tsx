@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createQueue, makeLock, newUuid, OP_VERSION, tap } from "@plane/inventory";
 import { App } from "../src/app";
+import { leave } from "../src/screens/Nav";
 import { Controller, DONE_RESET_MS } from "../src/controller";
 import { memoryStore } from "../src/store";
 import type { AppStore } from "../src/store";
@@ -1201,5 +1202,141 @@ describe("the workspace a link names (?ws=)", () => {
     controller = make("not-mine");
     await controller.start();
     expect([controller.get().slug, controller.get().phase]).toEqual(["home", "ready"]);
+  });
+});
+
+describe("Plane's menu (APLANE-73)", () => {
+  const open = async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Open the Plane menu" }));
+    return screen.findByRole("dialog", { name: "Plane" });
+  };
+  const back = async () =>
+    act(async () => {
+      window.history.back();
+      await new Promise((r) => setTimeout(r, 20));
+    });
+  let left: string[];
+  beforeEach(() => {
+    left = [];
+    leave.to = (href) => void left.push(href);
+  });
+  // jsdom keeps one history for the whole file: a drawer left open would leave its entry to the next test.
+  afterEach(async () => {
+    const nav = screen.queryByRole("dialog", { name: "Plane" });
+    if (nav) fireEvent.keyDown(nav, { key: "Escape" });
+    // A Plane link left it on purpose (the stubbed load did not take it).
+    else if (window.history.state?.planeNav) window.history.back();
+    await waitFor(() => expect(window.history.state?.planeNav).toBeFalsy());
+  });
+
+  it("unmounted while open (the screen changed under it), it takes its history entry back", async () => {
+    await boot();
+    await settle();
+    await open();
+    expect(window.history.state?.planeNav).toBe(true);
+    cleanup();
+    await waitFor(() => expect(window.history.state?.planeNav).toBeFalsy());
+  });
+
+  it("opens from the toggle with Plane's entries; back closes it and gives focus back", async () => {
+    await boot();
+    await settle();
+    const nav = await open();
+    expect(window.history.state?.planeNav).toBe(true);
+    const href = (name: string) => within(nav).getByRole("link", { name }).getAttribute("href");
+    expect(href("Home")).toBe("/home/");
+    expect(href("Inbox")).toBe("/home/notifications/");
+    expect(href("Your work")).toBe(`/home/profile/${ME.id}`);
+    expect(href("Projects")).toBe("/home/projects/");
+    expect(
+      within(nav)
+        .getByRole("link", { name: /Shopping list/ })
+        .getAttribute("aria-current")
+    ).toBe("page");
+    // Joined and not archived, by sort_order, as the main app's sidebar.
+    await waitFor(() => expect(within(nav).getAllByRole("button", { expanded: false }).length).toBe(2));
+    expect(
+      within(nav)
+        .getAllByRole("button", { expanded: false })
+        .map((b) => b.textContent)
+    ).toEqual(["MMe", "🏠Home"]);
+    await back();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Open the Plane menu" }));
+  });
+
+  it("shows a project's entries under the main app's flags and roles", async () => {
+    await boot();
+    await settle();
+    const nav = await open();
+    fireEvent.click(await within(nav).findByRole("button", { name: /Home/ }));
+    const names = () =>
+      within(nav)
+        .getAllByRole("link")
+        .map((a) => a.textContent)
+        .filter((n) => !["Home", "Inbox", "Your work", "Projects"].includes(n!) && !n!.startsWith("Shopping list"));
+    // Admin of Home: cycles and inventory on; modules and intake off by the project's flags.
+    expect(names()).toEqual(["Work items", "Cycles", "Views", "Pages", "Inventory"]);
+    expect(within(nav).getByRole("link", { name: "Work items" }).getAttribute("href")).toBe(
+      "/home/projects/10000000-0000-4000-8000-000000000001/issues"
+    );
+    fireEvent.click(within(nav).getByRole("button", { name: /Home/ }));
+    // A guest of Me: no cycles and no inventory, whatever the flags say.
+    fireEvent.click(within(nav).getByRole("button", { name: /Me/ }));
+    expect(names()).toEqual(["Work items", "Pages"]);
+  });
+
+  it("Escape, the scrim and the close button shut it through history: no entry is left behind", async () => {
+    await boot();
+    await settle();
+    for (const how of ["escape", "scrim", "button"] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one drawer at a time
+      const nav = await open();
+      if (how === "escape") fireEvent.keyDown(nav, { key: "Escape" });
+      else if (how === "scrim") fireEvent.click(nav.parentElement!);
+      else fireEvent.click(within(nav).getByRole("button", { name: "Close the menu" }));
+      // oxlint-disable-next-line no-await-in-loop
+      await waitFor(() => expect(screen.queryByRole("dialog"), how).toBeNull());
+      expect(window.history.state?.planeNav, how).toBeFalsy();
+    }
+  });
+
+  it("an in-app entry replaces the drawer's history entry; a Plane entry leaves for the main app", async () => {
+    await boot(catalog(), "#/inventory");
+    await settle();
+    let nav = await open();
+    fireEvent.click(within(nav).getByRole("link", { name: /Shopping list/ }));
+    await waitFor(() => expect(screen.getByRole("link", { name: "Shopping", current: "page" })).toBeTruthy());
+    expect(window.location.hash).toBe("#/");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // Replaced, not pushed: one back lands on the inventory's own entry, not on a drawer entry of the same URL.
+    await back();
+    expect([window.location.hash, window.history.state?.planeNav ?? false]).toEqual(["#/inventory", false]);
+    await go("#/inventory");
+    nav = await open();
+    fireEvent.click(within(nav).getByRole("link", { name: "Inbox" }));
+    expect(left).toEqual(["/home/notifications/"]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("offline: the projects it already knows, with a note that Plane needs a connection", async () => {
+    await boot(catalog(), "#/", undefined, (a) => (a.dropProjects = true));
+    await settle();
+    const nav = await open();
+    expect(await within(nav).findByRole("status")).toHaveProperty(
+      "textContent",
+      "No connection: Plane's pages open only online."
+    );
+    fireEvent.click(within(nav).getByRole("button", { name: /Me/ }));
+    expect(within(nav).getByRole("link", { name: "Work items" })).toBeTruthy();
+    expect(within(nav).getByRole("link", { name: "Inventory" })).toBeTruthy();
+  });
+
+  it("is on the two top-level screens only; screens with a back arrow keep it", async () => {
+    await boot(catalog(), "#/shop");
+    await settle();
+    expect(screen.queryByRole("button", { name: "Open the Plane menu" })).toBeNull();
+    await go("#/inventory");
+    expect(screen.getByRole("button", { name: "Open the Plane menu" })).toBeTruthy();
   });
 });

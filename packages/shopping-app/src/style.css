@@ -968,3 +968,144 @@ button.stepper-value {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* Plane's sidebar as a drawer (APLANE-73). The toggle sits where the main app's does on mobile (left of the
+   header); the top bar's 16 px gutter less the button's own padding keeps the icon on the content edge. */
+.topbar > .nav-toggle {
+  margin-left: -12px;
+  margin-right: -8px;
+}
+
+.nav-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgb(0 0 0 / 50%);
+}
+
+/* 250 px like the main app's sidebar, never so wide that the scrim has no room left to be tapped. */
+.nav-drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(calc(250px + env(safe-area-inset-left)), calc(100% - 56px));
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border);
+  animation: nav-in 150ms ease-out;
+}
+
+@keyframes nav-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-drawer {
+    animation: none;
+  }
+}
+
+.nav-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px 8px 16px;
+}
+
+.nav-title {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.nav-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 8px 16px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+}
+
+.nav-item:active,
+.nav-item[aria-current="page"] {
+  background: var(--pressed);
+  color: var(--text);
+}
+
+.nav-count {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.nav-section {
+  margin: 12px 0 4px;
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.nav-note {
+  margin: 0 8px 8px;
+  color: var(--warn);
+  font-size: 13px;
+}
+
+.nav-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.nav-logo {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: var(--bg-control);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.nav-logo.emoji {
+  background: transparent;
+  font-size: 15px;
+}
+
+.nav-chevron {
+  display: inline-flex;
+  color: var(--muted);
+  transition: transform 100ms;
+}
+
+.nav-chevron.open {
+  transform: rotate(90deg);
+}
+
+.nav-sub {
+  padding-left: 28px;
+}

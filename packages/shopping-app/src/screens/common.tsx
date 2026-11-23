@@ -8,11 +8,13 @@ import type { Order, Row } from "../model";
 import { audience, personName, projectOf } from "../model";
 import { ago, listNames } from "../i18n";
 import { Ago, Dialog, Icon, NumberField, Rich, parseIntStrict, useCtx } from "../ui";
+import { NavToggle } from "./Nav";
 
 export function Tabs({ active, summary }: { active: "shopping" | "inventory"; summary?: string }) {
   const { t } = useCtx();
   return (
     <header className="topbar">
+      <NavToggle />
       <nav className="tabs" aria-label={t("tab_shopping") + " / " + t("tab_inventory")}>
         <a href="#/" className="tab" aria-current={active === "shopping" ? "page" : undefined}>
           {t("tab_shopping")}
