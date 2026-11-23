@@ -81,6 +81,17 @@ export const Icon = {
       </>
     ),
   chevron: () => svg(14, <path d="m9 18 6-6-6-6" />),
+  // lucide Package: the inventory entry of the main app's project navigation.
+  package: () =>
+    svg(
+      16,
+      <>
+        <path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z" />
+        <path d="M12 22V12" />
+        <path d="m3.3 7 7.79 4.5a2 2 0 0 0 1.81 0l7.79-4.5" />
+        <path d="m7.5 4.27 9 5.15" />
+      </>
+    ),
   down: () => svg(14, <path d="m6 9 6 6 6-6" />),
   plus: (size = 16) => svg(size, <path d="M5 12h14M12 5v14" />),
   minus: () => svg(16, <path d="M5 12h14" />),

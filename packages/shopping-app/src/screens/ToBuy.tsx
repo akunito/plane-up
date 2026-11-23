@@ -40,7 +40,7 @@ export function ToBuy({ s }: { s: AppState }) {
 
   return (
     <div className="screen">
-      <Tabs active="shopping" summary={t("summary", { missing: b.count, pinned: b.pinned })} />
+      <Tabs active="shopping" counts={{ missing: b.count, pinned: b.pinned }} />
       <div className="toolbar">
         <label className="select">
           <span className="visually-hidden">{t("group_by", { grouping: "" })}</span>

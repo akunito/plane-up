@@ -973,7 +973,21 @@ button.stepper-value {
    header); the top bar's 16 px gutter less the button's own padding keeps the icon on the content edge. */
 .topbar > .nav-toggle {
   margin-left: -12px;
-  margin-right: -8px;
+  margin-right: -12px;
+}
+
+/* The to-buy counter as icons and numbers: the same width in every language (APLANE-73 mockup). */
+.counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
 }
 
 .nav-scrim {
@@ -1051,6 +1065,10 @@ button.stepper-value {
   font-weight: 500;
   text-align: left;
   text-decoration: none;
+}
+
+.nav-item > svg {
+  flex: none;
 }
 
 .nav-item:active,

@@ -7,10 +7,11 @@
 // window or hands it to a custom tab (audit: replace() was right only in the first case).
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import type { PlaneProject } from "../controller";
 import type { Key } from "../i18n";
 import { board } from "../model";
+import { PlaneIcon } from "../plane-icons";
 import { Icon, useCtx } from "../ui";
 
 export const STATE_KEY = "planeNav";
@@ -24,15 +25,26 @@ export const leave = { to: (href: string) => globalThis.location.assign(href) };
 const PROJECT_NAV: readonly {
   key: Key;
   path: string;
+  icon: () => ReactNode;
   show: (p: PlaneProject, role: number) => boolean;
 }[] = [
-  { key: "nav_work_items", path: "issues", show: () => true },
-  { key: "nav_cycles", path: "cycles", show: (p, role) => !!p.cycle_view && role >= 15 },
-  { key: "nav_modules", path: "modules", show: (p, role) => !!p.module_view && role >= 15 },
-  { key: "nav_views", path: "views", show: (p) => !!p.issue_views_view },
-  { key: "nav_pages", path: "pages", show: (p) => !!p.page_view },
-  { key: "nav_intake", path: "intake", show: (p) => !!p.inbox_view },
-  { key: "nav_inventory", path: "inventory", show: (p) => !!p.inventory_view && (p.member_role ?? 0) >= 15 },
+  { key: "nav_work_items", path: "issues", icon: () => PlaneIcon.workItems, show: () => true },
+  { key: "nav_cycles", path: "cycles", icon: () => PlaneIcon.cycles, show: (p, role) => !!p.cycle_view && role >= 15 },
+  {
+    key: "nav_modules",
+    path: "modules",
+    icon: () => PlaneIcon.modules,
+    show: (p, role) => !!p.module_view && role >= 15,
+  },
+  { key: "nav_views", path: "views", icon: () => PlaneIcon.views, show: (p) => !!p.issue_views_view },
+  { key: "nav_pages", path: "pages", icon: () => PlaneIcon.pages, show: (p) => !!p.page_view },
+  { key: "nav_intake", path: "intake", icon: () => PlaneIcon.intake, show: (p) => !!p.inbox_view },
+  {
+    key: "nav_inventory",
+    path: "inventory",
+    icon: Icon.package,
+    show: (p) => !!p.inventory_view && (p.member_role ?? 0) >= 15,
+  },
 ];
 
 const sortKey = (p: PlaneProject) => (typeof p.sort_order === "number" ? p.sort_order : Infinity);
@@ -199,13 +211,19 @@ function NavDrawer({ current, onClosed }: { current: boolean; onClosed: () => vo
             inventory_view: true,
           }))
         : projects;
-  const top: { key: Key; href: string }[] = [
-    { key: "nav_home", href: `/${slug}/` },
-    { key: "nav_inbox", href: `/${slug}/notifications/` },
+  const top: { key: Key; href: string; icon: ReactNode }[] = [
+    { key: "nav_home", href: `/${slug}/`, icon: PlaneIcon.home },
+    { key: "nav_inbox", href: `/${slug}/notifications/`, icon: PlaneIcon.inbox },
     ...(s.lists
-      ? [{ key: "nav_your_work" as Key, href: `/${slug}/profile/${encodeURIComponent(s.lists.me.id)}` }]
+      ? [
+          {
+            key: "nav_your_work" as Key,
+            href: `/${slug}/profile/${encodeURIComponent(s.lists.me.id)}`,
+            icon: PlaneIcon.yourWork,
+          },
+        ]
       : []),
-    { key: "nav_projects", href: `/${slug}/projects/` },
+    { key: "nav_projects", href: `/${slug}/projects/`, icon: PlaneIcon.projects },
   ];
 
   return (
@@ -239,6 +257,7 @@ function NavDrawer({ current, onClosed }: { current: boolean; onClosed: () => vo
           </a>
           {top.map((i) => (
             <a key={i.key} href={i.href} className="nav-item" onClick={toPlane(i.href)}>
+              {i.icon}
               <span className="grow">{t(i.key)}</span>
             </a>
           ))}
@@ -275,6 +294,7 @@ function NavDrawer({ current, onClosed }: { current: boolean; onClosed: () => vo
                       const href = `/${slug}/projects/${encodeURIComponent(p.id)}/${n.path}`;
                       return (
                         <a key={n.key} href={href} className="nav-item" onClick={toPlane(href)}>
+                          {n.icon()}
                           <span className="grow">{t(n.key)}</span>
                         </a>
                       );

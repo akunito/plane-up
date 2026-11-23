@@ -10,7 +10,16 @@ import { ago, listNames } from "../i18n";
 import { Ago, Dialog, Icon, NumberField, Rich, parseIntStrict, useCtx } from "../ui";
 import { NavToggle } from "./Nav";
 
-export function Tabs({ active, summary }: { active: "shopping" | "inventory"; summary?: string }) {
+/** counts: the to-buy counter as icons and numbers (cart: missing, pin: pinned), the sentence for screen readers.
+ * The sentence did not fit beside the Plane menu toggle and the tabs at 360 px in any language (APLANE-73
+ * mockup: 0 of 6 cases on one line; icons: 6 of 6). */
+export function Tabs({
+  active,
+  counts,
+}: {
+  active: "shopping" | "inventory";
+  counts?: { missing: number; pinned: number };
+}) {
   const { t } = useCtx();
   return (
     <header className="topbar">
@@ -24,7 +33,19 @@ export function Tabs({ active, summary }: { active: "shopping" | "inventory"; su
         </a>
       </nav>
       <span className="spacer" />
-      {summary ? <span className="muted small">{summary}</span> : null}
+      {counts ? (
+        <span className="muted small counts">
+          <span className="visually-hidden">{t("summary", counts)}</span>
+          <span className="count" aria-hidden="true">
+            {Icon.cart()}
+            {counts.missing}
+          </span>
+          <span className="count" aria-hidden="true">
+            {Icon.pin(false, 14)}
+            {counts.pinned}
+          </span>
+        </span>
+      ) : null}
       {active === "inventory" ? (
         <a href="#/capture" className="icon-button" aria-label={t("new_item")}>
           {Icon.plus(20)}

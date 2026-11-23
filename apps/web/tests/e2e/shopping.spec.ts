@@ -53,7 +53,9 @@ test.describe("shopping app @shopping", () => {
 
   test("the to-buy list: rows, counter without pinned rows, On the way with the overdue order", async ({ page }) => {
     await open(page);
-    await expect(page.getByText("6 missing · 2 pinned")).toBeVisible();
+    // The sentence is for screen readers; the bar shows the numbers beside a cart and a pin (APLANE-73).
+    await expect(page.getByText("6 missing · 2 pinned")).toHaveClass("visually-hidden");
+    await expect(page.locator(".topbar .count")).toHaveText(["6", "2"]);
     await Promise.all(
       ["Milk", "Detergent", "Wipes", "Nappies", "Mulch", "Bread", "Eggs"].map((name) =>
         expect(page.getByRole("checkbox", { name: `${name}: bought` })).toBeVisible()
@@ -527,8 +529,8 @@ test.describe("@visual-shopping", () => {
     await open(page);
     await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
     // Renamed when pinned rows gained "bought … (by …)" (APLANE-67, S17): the new name creates its baseline.
-    // Renamed again with the Plane menu toggle in the top bar (APLANE-73).
-    await shot(page, "vs-01-list-nav");
+    // Renamed again with the Plane menu toggle and the counter as icons in the top bar (APLANE-73).
+    await shot(page, "vs-01-list-counts");
   });
 
   test("VS-02 shopping mode", async ({ page }) => {
@@ -547,8 +549,8 @@ test.describe("@visual-shopping", () => {
   test("VS-04 inventory", async ({ page }) => {
     await open(page, "#/inventory");
     await expect(page.getByRole("link", { name: "Open Mulch" })).toBeVisible();
-    // Renamed with the Plane menu toggle in the top bar (APLANE-73).
-    await shot(page, "vs-04-inventory-nav");
+    // Renamed with the Plane menu toggle in the top bar (APLANE-73; renamed again for its final margins).
+    await shot(page, "vs-04-inventory-menu");
   });
 
   test("VS-05 item sheet", async ({ page }) => {
@@ -579,7 +581,8 @@ test.describe("@visual-shopping", () => {
     await page.getByRole("button", { name: "Open the Plane menu" }).click();
     const nav = page.getByRole("dialog", { name: "Plane" });
     await expect(nav.getByRole("button", { name: /Home$/ })).toBeVisible();
-    await shot(page, "vs-09-plane-menu");
+    // Renamed when the entries gained Plane's icons.
+    await shot(page, "vs-09-plane-menu-icons");
   });
 
   test("VS-08 waiting and unapplied", async ({ page }) => {

@@ -1355,6 +1355,27 @@ describe("Plane's menu (APLANE-73)", () => {
     expect(within(nav).getByRole("link", { name: "Inventory" })).toBeTruthy();
   });
 
+  it("the counter shows icons and numbers; the sentence is there for screen readers", async () => {
+    await boot();
+    await settle();
+    const counts = document.querySelector(".topbar .counts")!;
+    expect(within(counts as HTMLElement).getByText("5 missing · 1 pinned").className).toBe("visually-hidden");
+    const shown = [...counts.querySelectorAll(".count")];
+    expect(shown.map((c) => [c.textContent, c.getAttribute("aria-hidden")])).toEqual([
+      ["5", "true"],
+      ["1", "true"],
+    ]);
+  });
+
+  it("every Plane entry carries its icon, as in the main app's sidebar", async () => {
+    await boot();
+    await settle();
+    const nav = await open();
+    fireEvent.click(await within(nav).findByRole("button", { name: /Home/ }));
+    for (const link of within(nav).getAllByRole("link"))
+      expect(link.querySelector("svg"), link.textContent!).not.toBeNull();
+  });
+
   it("is on the two top-level screens only; screens with a back arrow keep it", async () => {
     await boot(catalog(), "#/shop");
     await settle();
