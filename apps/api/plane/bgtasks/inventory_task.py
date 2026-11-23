@@ -10,9 +10,12 @@ import logging
 from datetime import timedelta
 
 from celery import shared_task
+from django.conf import settings
+from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
-from plane.db.models import InventoryEvent
+from plane.db.models import FileAsset, InventoryEvent
 
 logger = logging.getLogger("plane.worker")
 
@@ -32,3 +35,41 @@ def prune_inventory_events():
         total += deleted
     logger.info("inventory: pruned %s events received before %s", total, cutoff.isoformat())
     return total
+
+
+PHOTO_CHUNK = 500
+
+
+@shared_task
+def purge_removed_inventory_photos():
+    """Removed or replaced item photos (soft-deleted INVENTORY_ITEM_PHOTO rows) and uploads never confirmed, older
+    than INVENTORY_PHOTO_PURGE_DAYS, lose their row and their storage object. Only photo rows: the live photo
+    (not deleted, uploaded) is never selected, and a photo of a deleted item goes with the same delay.
+
+    Reuses the general purge's storage sweep (deletion_task._purge_blobs): keys are read before the rows go, the
+    objects are deleted only on commit, a key a surviving row still names is kept, and the sweep never raises.
+    One transaction per chunk, so a failure keeps what the earlier chunks committed and their objects swept."""
+    from plane.bgtasks.deletion_task import _purge_blobs
+
+    cutoff = timezone.now() - timedelta(days=settings.INVENTORY_PHOTO_PURGE_DAYS)
+    doomed = FileAsset.all_objects.filter(entity_type=FileAsset.INVENTORY_ITEM_PHOTO).filter(
+        Q(deleted_at__lt=cutoff) | Q(deleted_at__isnull=True, is_uploaded=False, created_at__lt=cutoff)
+    )
+    rows = objects = 0
+    while True:
+        chunk = list(doomed.values_list("pk", "asset", "size")[:PHOTO_CHUNK])
+        if not chunk:
+            break
+        blobs = [(str(key), int(size or 0)) for _pk, key, size in chunk if key]
+        with transaction.atomic():
+            FileAsset.all_objects.filter(pk__in=[pk for pk, _key, _size in chunk]).delete()
+            transaction.on_commit(lambda blobs=blobs: _purge_blobs(blobs))
+        rows += len(chunk)
+        objects += len(blobs)
+    logger.info(
+        "inventory: purged %s removed or abandoned photo row(s), %s object(s) sent to the storage sweep, before %s",
+        rows,
+        objects,
+        cutoff.isoformat(),
+    )
+    return rows

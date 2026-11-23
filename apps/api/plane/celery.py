@@ -102,6 +102,10 @@ app.conf.beat_schedule = {
         "task": "plane.bgtasks.inventory_task.prune_inventory_events",
         "schedule": crontab(hour=4, minute=0),  # UTC 04:00
     },
+    "check-every-day-to-purge-removed-inventory-photos": {
+        "task": "plane.bgtasks.inventory_task.purge_removed_inventory_photos",
+        "schedule": crontab(hour=4, minute=15),  # UTC 04:15
+    },
 }
 
 

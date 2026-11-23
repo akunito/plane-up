@@ -504,6 +504,12 @@ HARD_DELETE_AFTER_DAYS = max(1, _retention_days("HARD_DELETE_AFTER_DAYS", 60))
 # this to 1.
 HARD_DELETE_ENABLED = os.environ.get("HARD_DELETE_ENABLED", "0") == "1"
 
+# Removed or replaced inventory photos, and uploads never confirmed, are purged (row and object) after this
+# many days by their own daily task, independent of HARD_DELETE_ENABLED: the owner asked for removed photos to
+# really go (2026-11-22, "cada 14 días"), and the task touches only photo rows nothing else can reach. Floored
+# at 1 like HARD_DELETE_AFTER_DAYS, for the same reason.
+INVENTORY_PHOTO_PURGE_DAYS = max(1, _retention_days("INVENTORY_PHOTO_PURGE_DAYS", 14))
+
 
 # API activity logs hold request/response payloads, so they are retained for a
 # shorter window than other logs.
