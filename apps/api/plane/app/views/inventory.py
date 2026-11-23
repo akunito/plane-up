@@ -731,7 +731,7 @@ PHOTO_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 # A RATE, not a bound: uploads started and never confirmed count only while their presigned POST is still
 # valid (SIGNED_URL_EXPIRATION), so a member can start about 5 per item per hour. Counting older ones locked an
 # item out for the 7 days delete_unuploaded_file_asset waits (phase 8 audit F6); that task only soft-deletes,
-# so objects uploaded and never confirmed stay in storage while the purge is disarmed. Members only.
+# and purge_removed_inventory_photos takes the row and object INVENTORY_PHOTO_PURGE_DAYS later. Members only.
 PHOTO_PENDING_MAX = 5
 
 
@@ -750,8 +750,9 @@ def _item_response(pk):
 class ProjectInventoryItemPhotoEndpoint(ProjectInventoryBaseView):
     """The item's photo: POST starts an upload (presigned POST straight to storage), PATCH <asset> confirms it
     and makes it THE photo, DELETE removes it, GET <asset> redirects to a short-lived URL. Replaced and removed
-    photos are soft-deleted: hidden at once; their rows and objects go only when the nightly purge is armed
-    (HARD_DELETE_ENABLED, off in prod as of 2026-11-21). Online only; the device queue never carries photos."""
+    photos are soft-deleted: hidden at once; their rows and objects go INVENTORY_PHOTO_PURGE_DAYS (14) later
+    with purge_removed_inventory_photos, which does not wait for HARD_DELETE_ENABLED. Online only; the device
+    queue never carries photos."""
 
     def post(self, request, slug, project_id, pk, asset_id=None):
         if asset_id is not None:

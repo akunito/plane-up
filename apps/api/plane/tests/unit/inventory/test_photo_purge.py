@@ -113,6 +113,16 @@ def test_a_storage_failure_keeps_the_purge_and_does_not_raise(db, make_item, sto
     assert not FileAsset.all_objects.filter(pk=photo.pk).exists()
 
 
+def test_a_delete_that_removes_nothing_stops_instead_of_looping(db, make_item, storage, purge):
+    from django.db.models.query import QuerySet
+
+    item = make_item("Milk")
+    _photo(item, "ws/stuck.jpg", deleted_days=20)
+    with patch.object(QuerySet, "delete", return_value=(0, {})):
+        assert purge() == 0
+    storage.delete_files.assert_not_called()
+
+
 def test_nothing_to_do(db, storage, purge):
     assert purge() == 0
     storage.delete_files.assert_not_called()

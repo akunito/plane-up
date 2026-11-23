@@ -62,9 +62,15 @@ def purge_removed_inventory_photos():
             break
         blobs = [(str(key), int(size or 0)) for _pk, key, size in chunk if key]
         with transaction.atomic():
-            FileAsset.all_objects.filter(pk__in=[pk for pk, _key, _size in chunk]).delete()
+            # Through `doomed` again, not by pk alone: a row confirmed (made THE photo) between the select and
+            # here no longer matches and is not deleted (photo purge audit).
+            deleted = doomed.filter(pk__in=[pk for pk, _key, _size in chunk]).delete()[0]
+            if not deleted:
+                # Nothing went although rows were selected: stop rather than select them for ever.
+                logger.error("inventory: photo purge deleted 0 of %s selected rows; stopping", len(chunk))
+                break
             transaction.on_commit(lambda blobs=blobs: _purge_blobs(blobs))
-        rows += len(chunk)
+        rows += deleted
         objects += len(blobs)
     logger.info(
         "inventory: purged %s removed or abandoned photo row(s), %s object(s) sent to the storage sweep, before %s",

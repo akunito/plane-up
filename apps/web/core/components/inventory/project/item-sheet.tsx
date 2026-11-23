@@ -118,8 +118,8 @@ export function ItemSheet(props: {
   };
   // The inputs are visually hidden, not `hidden`: display:none left them out of the accessibility tree, so a
   // screen reader never heard the item's name and the keyboard could not reach them (camera audit). The label
-  // shows the input's focus.
-  const photoButton = `relative inline-flex h-8 cursor-pointer items-center rounded-md border border-strong px-3 text-13 text-secondary focus-within:outline focus-within:outline-2 focus-within:outline-accent-strong ${photoBusy ? "pointer-events-none opacity-50" : ""}`;
+  // shows the input's keyboard focus.
+  const photoButton = `relative inline-flex h-8 cursor-pointer items-center rounded-md border border-strong px-3 text-13 text-secondary has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent-strong ${photoBusy ? "pointer-events-none opacity-50" : ""}`;
 
   const commit = (field: string, value: (draft: string) => unknown) => async (draft: string) => {
     const saved = await save({ [field]: value(draft) });

@@ -506,8 +506,9 @@ HARD_DELETE_ENABLED = os.environ.get("HARD_DELETE_ENABLED", "0") == "1"
 
 # Removed or replaced inventory photos, and uploads never confirmed, are purged (row and object) after this
 # many days by their own daily task, independent of HARD_DELETE_ENABLED: the owner asked for removed photos to
-# really go (2026-11-22, "cada 14 días"), and the task touches only photo rows nothing else can reach. Floored
-# at 1 like HARD_DELETE_AFTER_DAYS, for the same reason.
+# really go (2026-11-22, "cada 14 días"), and the task touches only inventory photo rows (a project cover or
+# workspace logo pointed at one would lose that pointer, SET_NULL; nothing else refers to them). Floored at 1
+# like HARD_DELETE_AFTER_DAYS, for the same reason.
 INVENTORY_PHOTO_PURGE_DAYS = max(1, _retention_days("INVENTORY_PHOTO_PURGE_DAYS", 14))
 
 
