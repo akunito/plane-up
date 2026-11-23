@@ -54,7 +54,7 @@ test.describe("shopping app @shopping", () => {
   test("the to-buy list: rows, counter without pinned rows, On the way with the overdue order", async ({ page }) => {
     await open(page);
     // The sentence is for screen readers; the bar shows the numbers beside a cart and a pin (APLANE-73).
-    await expect(page.getByText("6 missing · 2 pinned")).toHaveClass("visually-hidden");
+    await expect(page.getByText("6 missing · 2 pinned")).toHaveClass(/\bvisually-hidden\b/);
     await expect(page.locator(".topbar .count")).toHaveText(["6", "2"]);
     await Promise.all(
       ["Milk", "Detergent", "Wipes", "Nappies", "Mulch", "Bread", "Eggs"].map((name) =>
@@ -454,6 +454,24 @@ test.describe("shopping app @shopping", () => {
     await expect(nav).toHaveCount(0);
   });
 
+  test("APLANE-73: at 360 px the menu toggle, the tabs and the counter share one row, with two-digit counts", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    await open(page);
+    const row = await page.evaluate(() => {
+      // Two digits each: the widest a household list reaches in practice.
+      for (const c of Array.from(document.querySelectorAll(".topbar .count"))) c.lastChild!.textContent = "12";
+      const [toggle, tabs, counts] = [".nav-toggle", ".tabs", ".topbar .counts"].map((sel) => {
+        const r = document.querySelector(sel)!.getBoundingClientRect();
+        return Math.round(r.top + r.height / 2);
+      });
+      return { toggle, tabs, counts };
+    });
+    expect(Math.abs(row.counts - row.tabs), JSON.stringify(row)).toBeLessThanOrEqual(2);
+    expect(Math.abs(row.toggle - row.tabs), JSON.stringify(row)).toBeLessThanOrEqual(2);
+  });
+
   test("APLANE-73: a double tap on the menu's scrim goes back once and never leaves the screen", async ({ page }) => {
     // jsdom coalesces two history.back() calls; only a real browser shows the second one leaving the list.
     await open(page, "#/inventory");
@@ -529,8 +547,9 @@ test.describe("@visual-shopping", () => {
     await open(page);
     await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
     // Renamed when pinned rows gained "bought … (by …)" (APLANE-67, S17): the new name creates its baseline.
-    // Renamed again with the Plane menu toggle and the counter as icons in the top bar (APLANE-73).
-    await shot(page, "vs-01-list-counts");
+    // Renamed again with the Plane menu toggle and the counter as icons in the top bar (APLANE-73; again when
+    // the pin became the filled one: an earlier dev run had made a baseline with the outline pin).
+    await shot(page, "vs-01-list-counted");
   });
 
   test("VS-02 shopping mode", async ({ page }) => {
@@ -581,8 +600,8 @@ test.describe("@visual-shopping", () => {
     await page.getByRole("button", { name: "Open the Plane menu" }).click();
     const nav = page.getByRole("dialog", { name: "Plane" });
     await expect(nav.getByRole("button", { name: /Home$/ })).toBeVisible();
-    // Renamed when the entries gained Plane's icons.
-    await shot(page, "vs-09-plane-menu-icons");
+    // Renamed when the entries gained Plane's icons, and for the filled pin in the counter behind the scrim.
+    await shot(page, "vs-09-menu-icons");
   });
 
   test("VS-08 waiting and unapplied", async ({ page }) => {

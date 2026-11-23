@@ -970,7 +970,8 @@ button.stepper-value {
 }
 
 /* Plane's sidebar as a drawer (APLANE-73). The toggle sits where the main app's does on mobile (left of the
-   header); the top bar's 16 px gutter less the button's own padding keeps the icon on the content edge. */
+   header). Its 20 px icon is centred in a 44 px target, 12 px in from each side: -12 px puts the icon on the
+   16 px content edge and ends the target exactly where the tabs begin. */
 .topbar > .nav-toggle {
   margin-left: -12px;
   margin-right: -12px;

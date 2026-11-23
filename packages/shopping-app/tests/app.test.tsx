@@ -1372,8 +1372,10 @@ describe("Plane's menu (APLANE-73)", () => {
     await settle();
     const nav = await open();
     fireEvent.click(await within(nav).findByRole("button", { name: /Home/ }));
-    for (const link of within(nav).getAllByRole("link"))
-      expect(link.querySelector("svg"), link.textContent!).not.toBeNull();
+    const links = within(nav).getAllByRole("link");
+    for (const link of links) expect(link.querySelector("svg"), link.textContent!).not.toBeNull();
+    // Each entry its own icon (a copied path pasted twice would show up here).
+    expect(new Set(links.map((a) => a.querySelector("svg")!.innerHTML)).size).toBe(links.length);
   });
 
   it("is on the two top-level screens only; screens with a back arrow keep it", async () => {

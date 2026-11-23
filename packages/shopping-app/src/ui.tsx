@@ -61,9 +61,9 @@ export const Icon = {
         <path d="m21 21-4.3-4.3" />
       </>
     ),
-  cart: () =>
+  cart: (size = 16) =>
     svg(
-      16,
+      size,
       <>
         <circle cx="8" cy="21" r="1" />
         <circle cx="19" cy="21" r="1" />

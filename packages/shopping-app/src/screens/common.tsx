@@ -34,14 +34,15 @@ export function Tabs({
       </nav>
       <span className="spacer" />
       {counts ? (
-        <span className="muted small counts">
+        <span className="muted small counts" title={t("summary", counts)}>
           <span className="visually-hidden">{t("summary", counts)}</span>
           <span className="count" aria-hidden="true">
-            {Icon.cart()}
+            {Icon.cart(14)}
             {counts.missing}
           </span>
           <span className="count" aria-hidden="true">
-            {Icon.pin(false, 14)}
+            {/* Filled: the rows' sign for pinned (the outline pin means not pinned). */}
+            {Icon.pin(true, 14)}
             {counts.pinned}
           </span>
         </span>
