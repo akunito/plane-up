@@ -35,7 +35,7 @@ OAuth avatar (the still-unresolved family this change adds)
 
 import pytest
 import requests
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from bs4 import BeautifulSoup
 
@@ -70,14 +70,14 @@ class TestWebhookUrlValidation:
         "ip",
         [
             "169.254.169.254",  # AWS/GCP metadata (CVE-2026-30242 PoC)
-            "127.0.0.1",        # loopback
-            "10.0.0.1",         # private
-            "172.16.0.1",       # private
-            "192.168.0.1",      # private
-            "::1",              # IPv6 loopback
-            "100.64.0.1",       # CGNAT / RFC 6598 (GHSA-75fg)
-            "2002:7f00:1::",    # 6to4 -> 127.0.0.1 (GHSA-75fg)
-            "224.0.0.1",        # multicast (GHSA-75fg)
+            "127.0.0.1",  # loopback
+            "10.0.0.1",  # private
+            "172.16.0.1",  # private
+            "192.168.0.1",  # private
+            "::1",  # IPv6 loopback
+            "100.64.0.1",  # CGNAT / RFC 6598 (GHSA-75fg)
+            "2002:7f00:1::",  # 6to4 -> 127.0.0.1 (GHSA-75fg)
+            "224.0.0.1",  # multicast (GHSA-75fg)
             "::ffff:169.254.169.254",  # IPv4-mapped metadata
         ],
     )
@@ -173,9 +173,7 @@ class TestWebhookRedirect:
         mock_resolve.return_value = ["93.184.216.34"]
         session = mock_session_cls.return_value
         # The endpoint replies 302 -> internal; the webhook client must NOT follow.
-        session.request.return_value = _resp(
-            302, headers={"Location": "http://169.254.169.254/latest/meta-data/"}
-        )
+        session.request.return_value = _resp(302, headers={"Location": "http://169.254.169.254/latest/meta-data/"})
 
         resp = pinned_fetch("POST", "https://hooks.example.com/x", json={})
 
@@ -195,17 +193,13 @@ class TestFaviconRedirect:
     @patch("plane.utils.url_security.requests.Session")
     @patch("plane.utils.url_security.resolve_and_validate")
     @patch("plane.bgtasks.work_item_link_task.socket.getaddrinfo")
-    def test_favicon_redirect_to_private_returns_default(
-        self, mock_pre_dns, mock_resolve, mock_session_cls
-    ):
+    def test_favicon_redirect_to_private_returns_default(self, mock_pre_dns, mock_resolve, mock_session_cls):
         # validate_url_ip pre-check (work_item_link_task.socket) sees a public IP.
         mock_pre_dns.return_value = [_addr("93.184.216.34")]
         # safe_get: hop0 public, hop1 (redirect target) blocked.
         mock_resolve.side_effect = [["93.184.216.34"], ValueError(_BLOCKED)]
         session = mock_session_cls.return_value
-        session.request.return_value = _resp(
-            302, headers={"Location": "http://192.168.8.14:8081/"}
-        )
+        session.request.return_value = _resp(302, headers={"Location": "http://192.168.8.14:8081/"})
 
         soup = BeautifulSoup(
             '<link rel="icon" href="https://redirector.example.com/x">',
@@ -227,11 +221,9 @@ class TestFaviconRebinding:
     @patch("plane.utils.url_security.requests.Session")
     @patch("plane.utils.url_security.resolve_and_validate")
     @patch("plane.bgtasks.work_item_link_task.socket.getaddrinfo")
-    def test_favicon_rebind_to_private_returns_default(
-        self, mock_pre_dns, mock_resolve, mock_session_cls
-    ):
+    def test_favicon_rebind_to_private_returns_default(self, mock_pre_dns, mock_resolve, mock_session_cls):
         mock_pre_dns.return_value = [_addr("93.184.216.34")]  # pre-check: public
-        mock_resolve.side_effect = ValueError(_BLOCKED)        # fetch-time: rebound -> blocked
+        mock_resolve.side_effect = ValueError(_BLOCKED)  # fetch-time: rebound -> blocked
         session = mock_session_cls.return_value
         session.request.return_value = _resp(200)
 
@@ -268,22 +260,40 @@ class TestOAuthAvatarSSRF:
         # Public avatar URL that 302-redirects to the metadata service.
         mock_resolve.side_effect = [["93.184.216.34"], ValueError(_BLOCKED)]
         session = mock_session_cls.return_value
-        session.request.return_value = _resp(
-            302, headers={"Location": "http://169.254.169.254/imds"}
-        )
-        result = self._adapter().download_and_upload_avatar(
-            "https://evil.example.com/avatar", user=MagicMock()
-        )
+        session.request.return_value = _resp(302, headers={"Location": "http://169.254.169.254/imds"})
+        result = self._adapter().download_and_upload_avatar("https://evil.example.com/avatar", user=MagicMock())
         assert result is None
+
+    # APLANE-72: the avatar's upload and metadata read are server-side calls: the internal endpoint
+    # (S3Storage() with no request), never the request's public host, which the container may not reach.
+    @patch("plane.authentication.adapter.base.FileAsset")
+    @patch("plane.authentication.adapter.base.S3Storage")
+    @patch("plane.authentication.adapter.base.pinned_fetch_following_redirects")
+    def test_avatar_is_stored_through_the_internal_endpoint(self, mock_fetch, mock_storage, _asset):
+        response = MagicMock()
+        response.headers = {"Content-Type": "image/png", "Content-Length": "4"}
+        response.iter_content.return_value = [b"\x89PNG"]
+        mock_fetch.return_value = (response, None)
+        mock_storage.return_value.upload_file.return_value = True
+        self._adapter().download_and_upload_avatar("https://cdn.example.com/a.png", user=MagicMock())
+        assert mock_storage.call_args == call()
+        mock_storage.return_value.upload_file.assert_called_once()
+
+    @patch("plane.authentication.adapter.base.FileAsset")
+    @patch("plane.authentication.adapter.base.S3Storage")
+    def test_old_avatar_is_deleted_through_the_internal_endpoint(self, mock_storage, mock_asset):
+        user = MagicMock()
+        mock_asset.objects.get.return_value.asset.name = "old-avatar.png"
+        self._adapter().delete_old_avatar(user)
+        assert mock_storage.call_args == call()
+        mock_storage.return_value.delete_files.assert_called_once_with(object_names=["old-avatar.png"])
 
     @patch("plane.authentication.adapter.base.pinned_fetch_following_redirects")
     def test_avatar_uses_ssrf_safe_client(self, mock_fetch):
         # Wiring guard: the avatar path must go through the pinned client, never
         # a raw requests.get (which would re-resolve + follow redirects freely).
         mock_fetch.side_effect = ValueError(_BLOCKED)
-        result = self._adapter().download_and_upload_avatar(
-            "https://cdn.example.com/a.png", user=MagicMock()
-        )
+        result = self._adapter().download_and_upload_avatar("https://cdn.example.com/a.png", user=MagicMock())
         assert result is None
         assert mock_fetch.call_args.args[0] == "GET"
         assert mock_fetch.call_args.args[1] == "https://cdn.example.com/a.png"

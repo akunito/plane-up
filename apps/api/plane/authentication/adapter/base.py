@@ -100,9 +100,9 @@ class Adapter:
         """Check if sign up is enabled or not and raise exception if not enabled"""
 
         # Get configuration value
-        (ENABLE_SIGNUP,) = get_configuration_value([
-            {"key": "ENABLE_SIGNUP", "default": os.environ.get("ENABLE_SIGNUP", "1")}
-        ])
+        (ENABLE_SIGNUP,) = get_configuration_value(
+            [{"key": "ENABLE_SIGNUP", "default": os.environ.get("ENABLE_SIGNUP", "1")}]
+        )
 
         # Check if sign up is disabled and invite is present or not
         if ENABLE_SIGNUP == "0" and not WorkspaceMemberInvite.objects.filter(email=email).exists():
@@ -195,7 +195,8 @@ class Adapter:
             # Generate unique filename
             filename = f"{uuid.uuid4().hex}-user-avatar.{extension}"
 
-            storage = S3Storage(request=self.request)
+            # Server-side calls: the internal endpoint, not the request's public host (APLANE-72).
+            storage = S3Storage()
 
             # Create file-like object from the size-bounded buffer
             file_obj = BytesIO(content)
@@ -255,7 +256,7 @@ class Adapter:
         try:
             if user.avatar_asset:
                 asset = FileAsset.objects.get(pk=user.avatar_asset_id, user_id=user.id)
-                storage = S3Storage(request=self.request)
+                storage = S3Storage()  # server-side delete: the internal endpoint (APLANE-72)
                 storage.delete_files(object_names=[asset.asset.name])
 
                 # Delete the user avatar

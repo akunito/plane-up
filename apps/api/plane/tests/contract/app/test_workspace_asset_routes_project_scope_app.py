@@ -273,6 +273,41 @@ class TestDuplicateAssetProjectScope:
         )
         assert FileAsset.objects.count() == before + 1
 
+    # APLANE-72: the copy is server-side, so it must use the internal endpoint (S3Storage() with no request), and a
+    # failed copy must not leave an asset marked uploaded that points at no object.
+    @pytest.mark.django_db
+    def test_duplicate_copies_through_the_internal_endpoint(self, session_client, workspace, project, project_asset):
+        with mock.patch(S3_STORAGE_PATH) as mock_storage:
+            response = session_client.post(
+                duplicate_url(workspace.slug, project_asset.id),
+                {"entity_type": FileAsset.EntityTypeContext.ISSUE_ATTACHMENT, "project_id": str(project.id)},
+                format="json",
+            )
+        assert response.status_code == status.HTTP_200_OK
+        assert mock_storage.call_args == mock.call()
+        mock_storage.return_value.copy_object.assert_called_once()
+
+    @pytest.mark.django_db
+    @pytest.mark.parametrize("failure", ["refused", "unreachable"])
+    def test_duplicate_whose_copy_fails_leaves_no_asset(
+        self, session_client, workspace, project, project_asset, failure
+    ):
+        from botocore.exceptions import EndpointConnectionError
+
+        before = FileAsset.all_objects.count()
+        with mock.patch(S3_STORAGE_PATH) as mock_storage:
+            if failure == "refused":
+                mock_storage.return_value.copy_object.return_value = None  # copy_object's answer to a ClientError
+            else:
+                mock_storage.return_value.copy_object.side_effect = EndpointConnectionError(endpoint_url="http://x")
+            response = session_client.post(
+                duplicate_url(workspace.slug, project_asset.id),
+                {"entity_type": FileAsset.EntityTypeContext.ISSUE_ATTACHMENT, "project_id": str(project.id)},
+                format="json",
+            )
+        assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+        assert FileAsset.all_objects.count() == before
+
     @pytest.mark.django_db
     def test_duplicate_omitted_project_id_inherits_source_project(
         self, session_client, workspace, project, project_asset

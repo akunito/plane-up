@@ -5,6 +5,8 @@
 # Python imports
 import uuid
 
+from botocore.exceptions import BotoCoreError
+
 # Django imports
 from django.conf import settings
 from django.http import HttpResponseRedirect
@@ -26,6 +28,7 @@ from plane.utils.cache import invalidate_cache_directly
 from plane.utils.path_validator import sanitize_filename
 from plane.bgtasks.storage_metadata_task import get_asset_object_metadata
 from plane.throttles.asset import AssetRateThrottle
+from plane.utils.exception_logger import log_exception
 
 
 def can_modify_asset(user, asset):
@@ -889,7 +892,9 @@ class DuplicateAssetEndpoint(BaseAPIView):
 
         workspace = Workspace.objects.get(slug=slug)
 
-        storage = S3Storage(request=request)
+        # The copy is a server-side call: the internal endpoint, never the request's public host, which the
+        # container may not reach (APLANE-72; measured: dev cannot resolve its own host, prod can).
+        storage = S3Storage()
         # Restrict the source asset to the same destination workspace to prevent cross-workspace asset copying
         original_asset = FileAsset.objects.filter(
             id=asset_id,
@@ -951,7 +956,16 @@ class DuplicateAssetEndpoint(BaseAPIView):
             storage_metadata=original_asset.storage_metadata,
             **entity_id_fields,
         )
-        storage.copy_object(original_asset.asset, destination_key)
+        try:
+            copied = storage.copy_object(original_asset.asset, destination_key)
+        except BotoCoreError as e:
+            # copy_object catches only ClientError; a connection error used to be a 500 with the row left behind.
+            log_exception(e)
+            copied = None
+        if copied is None:
+            # Before APLANE-72 a failed copy was marked uploaded anyway: an asset pointing at no object.
+            duplicated_asset.delete(soft=False)
+            return Response({"error": "storage"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         # Update the is_uploaded field for all newly created assets
         FileAsset.objects.filter(id=duplicated_asset.id).update(is_uploaded=True)
 
