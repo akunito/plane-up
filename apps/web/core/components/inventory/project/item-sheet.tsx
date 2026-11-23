@@ -7,6 +7,7 @@
 // The item sheet of Project › Inventory: the data fields the table does not show, the list it lives in,
 // and its history. Data only, saved when a field is left; state changes stay in the table.
 
+import type { ChangeEvent } from "react";
 import { useEffect, useState } from "react";
 import type { ClientOptions, HistoryEntry, ProjectList } from "@plane/inventory";
 import {
@@ -43,6 +44,10 @@ export function ItemSheet(props: {
   const [history, setHistory] = useState<HistoryEntry[] | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
+  // Touch screens get the camera as its own button: Android's photo picker (Edge Canary 152, Android 15) offers no
+  // camera for accept=image/*, only a capture input opens it (measured 2026-11-22, shopping app). Elsewhere one
+  // button, as before.
+  const [camera] = useState(() => typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches);
   const [photoBroken, setPhotoBroken] = useState<string | null>(null);
   // A photo that failed to load (offline: photos are never cached) is tried again when the network returns.
   useEffect(() => {
@@ -106,6 +111,12 @@ export function ItemSheet(props: {
     photoDone(await uploadPhoto<Item>(opts, projectId, item.id, shrunk));
   };
   const photo = typeof item.photo === "string" ? item.photo : null;
+  const onPhotoFile = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) void pickPhoto(file);
+  };
+  const photoButton = `inline-flex h-8 cursor-pointer items-center rounded-md border border-strong px-3 text-13 text-secondary ${photoBusy ? "pointer-events-none opacity-50" : ""}`;
 
   const commit = (field: string, value: (draft: string) => unknown) => async (draft: string) => {
     const saved = await save({ [field]: value(draft) });
@@ -182,25 +193,35 @@ export function ItemSheet(props: {
             )
           )}
           <div className="flex flex-wrap items-center gap-2">
-            <label
-              className={`inline-flex h-8 cursor-pointer items-center rounded-md border border-strong px-3 text-13 text-secondary ${photoBusy ? "pointer-events-none opacity-50" : ""}`}
-            >
-              {t(photo ? "photo_replace" : "photo_add")}
+            {camera && (
+              <label className={photoButton}>
+                {t("photo_take")}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  aria-label={`${item.name}: ${t("photo_take")}`}
+                  hidden
+                  disabled={photoBusy}
+                  onChange={onPhotoFile}
+                />
+              </label>
+            )}
+            <label className={photoButton}>
+              {t(camera ? "photo_gallery" : photo ? "photo_replace" : "photo_add")}
               <input
                 type="file"
                 accept="image/*"
+                aria-label={`${item.name}: ${t(camera ? "photo_gallery" : photo ? "photo_replace" : "photo_add")}`}
                 hidden
                 disabled={photoBusy}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = "";
-                  if (file) void pickPhoto(file);
-                }}
+                onChange={onPhotoFile}
               />
             </label>
             {photo && (
               <Button
                 variant="ghost"
+                aria-label={`${item.name}: ${t("photo_remove")}`}
                 size="sm"
                 disabled={photoBusy}
                 onClick={async () => {
