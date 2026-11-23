@@ -750,6 +750,14 @@ button.stepper-value {
   padding: 8px 16px;
 }
 
+/* A chip in a row that scrolls must not shrink: .chip's min-width (44px) replaces the automatic minimum, so with
+   more lists than fit the chips shrank below their text and the names ran into each other (prod, 2026-11-23,
+   five HOME lists on a phone). */
+.chips.scroll-x > .chip {
+  flex: none;
+  white-space: nowrap;
+}
+
 .create {
   display: flex;
   flex-direction: column;

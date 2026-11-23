@@ -10,8 +10,9 @@
 # - InventoryEvent is a plain model with no deleted_at, and every FK it holds is hidden
 #   (related_name="+"): soft_delete_related_objects walks visible reverse relations and loads each row,
 #   while Django's Collector still cascades through hidden ones on a hard delete (measured in M6).
-# - name_normalised is computed in save() only: update(), bulk_create() and bulk_update() skip it, so
-#   anything that writes names in bulk (the phase-7 import) must set it with normalise_item_name.
+# - name_normalised and keywords_normalised are computed in save() only: update(), bulk_create() and
+#   bulk_update() skip them, so anything that writes names or keywords in bulk must set them with
+#   normalise_item_name.
 # - Moving an item to another project must rewrite `project` and `workspace` on its orders and events
 #   in the same transaction: both are CASCADE copies, and the old project's deletion would take them.
 #   update() skips ProjectBaseModel.save(), which is what keeps `workspace` in step.
@@ -115,6 +116,11 @@ class InventoryItem(ProjectBaseModel):
     currency = models.CharField(max_length=3, blank=True, default="")
     expires_on = models.DateField(null=True, blank=True)
     barcode = models.CharField(max_length=64, blank=True, default="")
+    # Other names to find the item by (owner, 2026-11-23: names in Spanish and Polish, English and synonyms
+    # here). keywords_normalised is computed in save() like name_normalised, for the search to compare the same
+    # way (Python casefold, not the database's lower(), whose behaviour on Ł/ł depends on the collation).
+    keywords = models.TextField(blank=True, default="", db_default="")
+    keywords_normalised = models.TextField(editable=False, default="", db_default="")
     sort_order = models.FloatField(default=65535)
     external_source = models.CharField(max_length=255, null=True, blank=True)
     external_id = models.CharField(max_length=255, null=True, blank=True)
@@ -157,9 +163,16 @@ class InventoryItem(ProjectBaseModel):
 
     def save(self, *args, **kwargs):
         self.name_normalised = normalise_item_name(self.name)
+        self.keywords_normalised = normalise_item_name(self.keywords)
         update_fields = kwargs.get("update_fields")
-        if update_fields is not None and "name" in update_fields and "name_normalised" not in update_fields:
-            kwargs["update_fields"] = [*update_fields, "name_normalised"]
+        if update_fields is not None:
+            extra = [
+                derived
+                for source, derived in (("name", "name_normalised"), ("keywords", "keywords_normalised"))
+                if source in update_fields and derived not in update_fields
+            ]
+            if extra:
+                kwargs["update_fields"] = [*update_fields, *extra]
         super().save(*args, **kwargs)
 
     def __str__(self):

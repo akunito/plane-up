@@ -68,6 +68,17 @@ def test_the_flag_column_keeps_a_database_default_for_inserts_that_do_not_name_i
         assert cur.fetchone()[0] == "false"
 
 
+def test_the_keyword_columns_keep_a_database_default_for_inserts_that_do_not_name_them():
+    """Shipped dark (2026-11-23): an image from before 0130 inserts items without naming these columns."""
+    with connection.cursor() as cur:
+        cur.execute(
+            "SELECT column_name, column_default FROM information_schema.columns "
+            "WHERE table_name = 'inventory_items' AND column_name IN ('keywords', 'keywords_normalised')"
+        )
+        defaults = dict(cur.fetchall())
+    assert defaults == {"keywords": "''::text", "keywords_normalised": "''::text"}
+
+
 def test_quantity_is_signed_and_never_clamped(inventory_list):
     item = _item(inventory_list, mode="units", quantity=-3, min_quantity=1)
     item.refresh_from_db()
@@ -153,6 +164,18 @@ def test_renaming_with_update_fields_keeps_the_normalised_name_in_step(inventory
     item.save(update_fields=["name"])
     item.refresh_from_db()
     assert item.name_normalised == "whole milk"
+
+
+def test_keywords_are_normalised_like_names_also_with_update_fields(inventory_list):
+    item = _item(inventory_list, name="Masło")
+    item.keywords = "Butter  ŁADNE"
+    item.save(update_fields=["keywords"])
+    item.refresh_from_db()
+    assert item.keywords_normalised == "butter ładne"
+    item.name = "Mantequilla / Masło"
+    item.save(update_fields=["name"])
+    item.refresh_from_db()
+    assert (item.name_normalised, item.keywords_normalised) == ("mantequilla / masło", "butter ładne")
 
 
 def test_an_order_needs_a_positive_quantity_and_takes_the_device_id(inventory_list):
