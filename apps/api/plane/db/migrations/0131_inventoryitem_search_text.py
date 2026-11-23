@@ -1,5 +1,6 @@
 # keywords_normalised becomes the search text (folded name + line break + folded keywords): filled here for the
-# rows from before, which hold '' (0130's db_default). Data only, no schema change; an older image ignores it.
+# rows from before, which hold '' (0130's db_default). Data only, no schema change; an older image ignores it, and
+# rows it saves meanwhile keep keywords only: the search also matches name_normalised for them.
 # The fold is copied, not imported: a migration must not change when the model code does.
 
 import unicodedata

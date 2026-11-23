@@ -266,14 +266,16 @@ class InventorySuggestionsEndpoint(InventoryBaseView):
             # ("sal") hits many keywords, and the cap of 20 must not push out the item whose name it is (audit).
             # Ranked over at most 500 hits (a household has a few hundred items).
             folded = fold_for_search(query)
+            # name_normalised too, as a net: a row saved by an image from before the search text (a rollback and
+            # back, or the deploy window after 0131) holds keywords only, and must still be found by its name.
             hits = list(
-                items.filter(keywords_normalised__contains=folded)
+                items.filter(Q(keywords_normalised__contains=folded) | Q(name_normalised__contains=query))
                 .order_by("name_normalised")
-                .values_list("pk", "keywords_normalised")[:500]
+                .values_list("pk", "name_normalised", "keywords_normalised")[:500]
             )
             # A stable sort on the rank alone keeps the name order inside each rank.
-            hits.sort(key=lambda hit: 0 if folded in hit[1].split("\n", 1)[0] else 1)
-            top = [pk for pk, _ in hits[:20]]
+            hits.sort(key=lambda h: 0 if query in h[1] or folded in h[2].split("\n", 1)[0] else 1)
+            top = [h[0] for h in hits[:20]]
             by_pk = {i.pk: i for i in with_orders(items.filter(pk__in=top))}
             matches = [
                 item_payload(by_pk[pk], by_pk[pk].on_order, by_pk[pk].open_count > 0) for pk in top if pk in by_pk

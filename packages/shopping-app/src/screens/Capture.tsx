@@ -22,7 +22,8 @@ const fold = (text: string) =>
 
 /** Where the folded query sits in the name, as [start, end) in the name's own UTF-16 indices: each character is
  * folded on its own and every folded unit remembers the character it came from, so "sol" bolds "Sól" (the server
- * matches names without accents too) and emoji or ß (folding to 0 or 2 units) keep the positions right. */
+ * matches names without accents too), past emoji and other 2-unit characters. Not the server's casefold: "strasse"
+ * finds "Straße" there but bolds nothing here (toLocaleLowerCase keeps ß). */
 function findFolded(name: string, query: string): [number, number] | null {
   const q = fold(query);
   if (!q) return null;

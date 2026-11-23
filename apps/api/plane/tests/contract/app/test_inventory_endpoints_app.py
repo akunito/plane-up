@@ -807,3 +807,14 @@ def test_a_name_with_accents_is_found_typed_without_them_and_ranks_first(workspa
     # 26 hits for "sol"; the one whose (accented) NAME holds it comes first, ahead of "aceite" by name order.
     found = [i["id"] for i in client.get(ws(workspace.slug, "suggestions/?q=sol")).json()["items"]]
     assert len(found) == 20 and found[0] == str(salt.pk)
+
+
+def test_a_row_without_the_name_line_is_still_found_by_name(workspace, people, home, groceries):
+    # Saved by an image from before the search text (a rollback and back): keywords only, no name line.
+    item = _item(groceries, "Plátano / Banan", "on_demand", needed=False)
+    InventoryItem.objects.filter(pk=item.pk).update(keywords_normalised="banana")
+    client = _client(people["bob"])
+    for query in ("plátano", "banana"):
+        assert [i["id"] for i in client.get(ws(workspace.slug, f"suggestions/?q={query}")).json()["items"]] == [
+            str(item.pk)
+        ], query
