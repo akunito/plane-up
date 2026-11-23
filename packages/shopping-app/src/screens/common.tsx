@@ -14,7 +14,7 @@ export function Tabs({ active, summary }: { active: "shopping" | "inventory"; su
   const { t } = useCtx();
   return (
     <header className="topbar">
-      <NavToggle />
+      <NavToggle current={active === "shopping"} />
       <nav className="tabs" aria-label={t("tab_shopping") + " / " + t("tab_inventory")}>
         <a href="#/" className="tab" aria-current={active === "shopping" ? "page" : undefined}>
           {t("tab_shopping")}

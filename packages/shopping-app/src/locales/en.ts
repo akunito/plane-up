@@ -266,4 +266,5 @@ export const en = {
   nav_intake: "Intake",
   nav_inventory: "Inventory",
   nav_offline: "No connection: Plane's pages open only online.",
+  nav_unavailable: "Plane's project list could not be read; these are the projects this app knows.",
 } as const;

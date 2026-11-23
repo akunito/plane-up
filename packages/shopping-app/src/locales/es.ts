@@ -267,4 +267,5 @@ export const es: Dictionary = {
   nav_intake: "Entrada",
   nav_inventory: "Inventario",
   nav_offline: "Sin conexión: las páginas de Plane solo se abren con red.",
+  nav_unavailable: "No se pudo leer la lista de proyectos de Plane; estos son los que conoce esta app.",
 };

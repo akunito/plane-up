@@ -66,7 +66,7 @@ export class FakeApi {
   server: ModelServer;
   data = new Map<string, Data>();
   calls: Call[] = [];
-  workspaces = [{ slug: "home", name: "Home" }];
+  workspaces: { slug: string; name: string; role?: number }[] = [{ slug: "home", name: "Home" }];
   /** Answer every request with this instead (a status and an optional JSON body). */
   fail: { status: number; json?: unknown } | null = null;
   ordersAt = new Map<string, string>();
@@ -128,6 +128,8 @@ export class FakeApi {
   ];
   /** The project list fails as a dropped network does (offline). */
   dropProjects = false;
+  /** The project list answers this status instead (a refusal). */
+  projectsStatus: number | null = null;
   constructor(items: { state: ItemState; data: Data }[]) {
     this.server = new ModelServer(items.map((i) => i.state));
     for (const i of items) this.data.set(i.state.id, i.data);
@@ -194,7 +196,8 @@ export class FakeApi {
     if (p === "/api/users/me/settings/")
       return [200, { workspace: { last_workspace_slug: "home", fallback_workspace_slug: "home" } }];
     if (p === "/api/users/me/workspaces/") return [200, this.workspaces];
-    if (/^\/api\/workspaces\/[^/]+\/projects\/$/.test(p)) return [200, this.projects];
+    if (/^\/api\/workspaces\/[^/]+\/projects\/$/.test(p))
+      return this.projectsStatus ? [this.projectsStatus, { error: "no" }] : [200, this.projects];
     if (p.endsWith("/inventory/lists/") && !p.includes("/projects/"))
       return [
         200,

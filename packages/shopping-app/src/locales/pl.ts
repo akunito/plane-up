@@ -266,4 +266,5 @@ export const pl: Dictionary = {
   nav_intake: "Zgłoszenia",
   nav_inventory: "Zapasy",
   nav_offline: "Brak połączenia: strony Plane otwierają się tylko online.",
+  nav_unavailable: "Nie udało się odczytać listy projektów Plane; to projekty, które zna ta aplikacja.",
 };

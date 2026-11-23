@@ -1315,8 +1315,31 @@ describe("Plane's menu (APLANE-73)", () => {
     await go("#/inventory");
     nav = await open();
     fireEvent.click(within(nav).getByRole("link", { name: "Inbox" }));
-    expect(left).toEqual(["/home/notifications/"]);
+    // Back over the drawer's entry first, then the load, from the screen's own entry (audit: a custom tab).
+    await waitFor(() => expect(left).toEqual(["/home/notifications/"]));
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect([window.location.hash, window.history.state?.planeNav ?? false]).toEqual(["#/inventory", false]);
+  });
+
+  it("a workspace admin counts as project admin, as in the main app; inventory keeps the project role", async () => {
+    await boot(catalog(), "#/", undefined, (a) => (a.workspaces = [{ slug: "home", name: "Home", role: 20 }]));
+    await settle();
+    const nav = await open();
+    fireEvent.click(await within(nav).findByRole("button", { name: /Me/ }));
+    const names = within(nav)
+      .getAllByRole("link")
+      .map((a) => a.textContent)
+      .filter((n) => !["Home", "Inbox", "Your work", "Projects"].includes(n!) && !n!.startsWith("Shopping list"));
+    expect(names).toEqual(["Work items", "Cycles", "Pages"]);
+  });
+
+  it("a refused project list is said as such, not as no connection", async () => {
+    await boot(catalog(), "#/", undefined, (a) => (a.projectsStatus = 500));
+    await settle();
+    const nav = await open();
+    expect((await within(nav).findByRole("status")).textContent).toBe(
+      "Plane's project list could not be read; these are the projects this app knows."
+    );
   });
 
   it("offline: the projects it already knows, with a note that Plane needs a connection", async () => {
@@ -1338,5 +1361,12 @@ describe("Plane's menu (APLANE-73)", () => {
     expect(screen.queryByRole("button", { name: "Open the Plane menu" })).toBeNull();
     await go("#/inventory");
     expect(screen.getByRole("button", { name: "Open the Plane menu" })).toBeTruthy();
+    // On the inventory the shopping entry is not the current page.
+    const nav = await open();
+    expect(
+      within(nav)
+        .getByRole("link", { name: /Shopping list/ })
+        .getAttribute("aria-current")
+    ).toBeNull();
   });
 });

@@ -155,7 +155,7 @@ export interface Snapshot {
   savedAt: number;
   userId: string;
   slug: string;
-  workspaces: { slug: string; name: string }[];
+  workspaces: { slug: string; name: string; role?: number }[];
   lists: unknown;
   known: unknown;
   orders: unknown;

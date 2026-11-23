@@ -1008,6 +1008,10 @@ button.stepper-value {
   .nav-drawer {
     animation: none;
   }
+
+  .nav-chevron {
+    transition: none;
+  }
 }
 
 .nav-head {

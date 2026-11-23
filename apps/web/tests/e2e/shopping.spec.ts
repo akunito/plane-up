@@ -452,6 +452,21 @@ test.describe("shopping app @shopping", () => {
     await expect(nav).toHaveCount(0);
   });
 
+  test("APLANE-73: a double tap on the menu's scrim goes back once and never leaves the screen", async ({ page }) => {
+    // jsdom coalesces two history.back() calls; only a real browser shows the second one leaving the list.
+    await open(page, "#/inventory");
+    await page.getByRole("link", { name: "Shopping", exact: true }).click();
+    await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
+    await page.getByRole("button", { name: "Open the Plane menu" }).click();
+    await expect(page.getByRole("dialog", { name: "Plane" })).toBeVisible();
+    const box = page.viewportSize()!;
+    await page.mouse.dblclick(box.width - 10, box.height / 2);
+    await expect(page.getByRole("dialog", { name: "Plane" })).toHaveCount(0);
+    await page.waitForTimeout(300);
+    await expect(page).toHaveURL(/\/shopping\/#\/$/);
+    await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
+  });
+
   test("a workspace guest has no access", async ({ browser }, info) => {
     const gus = await contextFor(browser, info, "qa-inv-gus");
     await gus.page.goto("/shopping/");
