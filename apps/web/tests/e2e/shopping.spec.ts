@@ -380,6 +380,26 @@ test.describe("shopping app @shopping", () => {
     }
   });
 
+  test("inventory list chips keep their names whole and apart when they do not fit (prod 2026-11-23)", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.goto("/shopping/#/inventory");
+    const chips = page.getByRole("navigation", { name: "List" }).locator(".chip");
+    await expect(chips.first()).toBeVisible();
+    const result = await chips.evaluateAll((els) => {
+      // The real HOME lists: longer than the seed's, more than fit on the row.
+      const names = ["Supermercado", "Suplementos", "Botiquín y suplementos", "Casa", "Bebé"];
+      els.slice(1).forEach((e, i) => (e.textContent = names[i % names.length]!));
+      const rects = els.map((e) => e.getBoundingClientRect());
+      return {
+        cut: els.filter((e) => e.scrollWidth > e.clientWidth + 1).length,
+        overlapping: rects.slice(1).filter((r, i) => r.left < rects[i]!.right - 1).length,
+      };
+    });
+    expect(result).toEqual({ cut: 0, overlapping: 0 });
+  });
+
   test("S51: /shopping without the slash lands on the app", async ({ page }) => {
     await page.goto("/shopping");
     await expect(page).toHaveURL(/\/shopping\/(#.*)?$/);
