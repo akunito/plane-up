@@ -474,6 +474,36 @@ test.describe("shopping app @shopping", () => {
     expect(Math.abs(row.toggle - row.tabs), JSON.stringify(row)).toBeLessThanOrEqual(2);
   });
 
+  test("the top bar and the bottom bar are both in view and the page itself never scrolls, even when 100dvh is too tall", async ({
+    page,
+  }) => {
+    // Diego's Pixel (installed app, nav bar shown, 2026-11-24): the document scrolled ~53 px, so one of the two
+    // bars was always cut. A browser cannot be made to serve a wrong 100dvh, so the shell is forced 53 px taller
+    // than 100dvh: the cap must still hold it to the viewport.
+    await page.setViewportSize({ width: 360, height: 740 });
+    const fits = async (hash: string) => {
+      await open(page, hash);
+      await expect(page.locator(".bottombar")).toBeVisible();
+      const m = await page.evaluate(() =>
+        ["", "calc(100dvh + 53px)"].map((height) => {
+          document.getElementById("app")!.style.height = height;
+          const se = document.scrollingElement!;
+          const top = document.querySelector(".topbar")!.getBoundingClientRect().top;
+          const bottom = document.querySelector(".bottombar")!.getBoundingClientRect().bottom;
+          return { height, scroll: se.scrollHeight - se.clientHeight, top, bottom, view: se.clientHeight };
+        })
+      );
+      for (const r of m) {
+        const what = `${hash} ${JSON.stringify(r)}`;
+        expect(r.scroll, what).toBe(0);
+        expect(r.top, what).toBeGreaterThanOrEqual(0);
+        expect(r.bottom, what).toBeLessThanOrEqual(r.view + 1);
+      }
+    };
+    await fits("#/");
+    await fits("#/inventory");
+  });
+
   test("APLANE-73: a double tap on the menu's scrim goes back once and never leaves the screen", async ({ page }) => {
     // jsdom coalesces two history.back() calls; only a real browser shows the second one leaving the list.
     await open(page, "#/inventory");
