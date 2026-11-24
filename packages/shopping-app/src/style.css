@@ -1,6 +1,7 @@
 /* Shopping app. Colours from the approved mockups (dark), plus a light set for a light system theme.
    Measured gotcha (main app, APLANE-53/54): on Android Edge `vh` is the LARGE viewport, so a 100vh shell
-   puts the last rows under the browser's bottom bar. The shell is 100dvh and pads the safe areas. */
+   puts the last rows under the browser's bottom bar. The shell is 100dvh, capped at 100% (see #app), and pads the
+   safe areas. */
 
 :root {
   --bg: #141415;
@@ -76,8 +77,15 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* max-height: in the installed app on Diego's Pixel (Edge, Android, nav bar shown) the whole document scrolled by
+   ~53 CSS px, so the top bar or the bottom bar was always cut (2026-11-24, from his screenshots; the Pixel itself was
+   not measured). Inferred: 100dvh came out taller than the page's own viewport. Not reproduced on the Realme, in a
+   tab or installed, nav bar hidden or shown (there 100dvh = innerHeight). 100% resolves through body/html to the
+   initial containing block (Chrome sizes it to the small viewport; nothing scrolls the root here, so the URL bar
+   never hides). It caps #app's own box only, not out-of-flow descendants nor .screen content that outgrows #app. */
 #app {
   height: 100dvh;
+  max-height: 100%;
   padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
