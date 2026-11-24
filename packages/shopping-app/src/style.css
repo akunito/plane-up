@@ -80,8 +80,9 @@ body {
 /* max-height: in the installed app on Diego's Pixel (Edge, Android, nav bar shown) the whole document scrolled by
    ~53 CSS px, so the top bar or the bottom bar was always cut (2026-11-24, from his screenshots; the Pixel itself was
    not measured). Inferred: 100dvh came out taller than the page's own viewport. Not reproduced on the Realme, in a
-   tab or installed, nav bar hidden or shown (there 100dvh = innerHeight). 100% is the initial containing block =
-   the scrollport, so the shell can never outgrow what the page shows. */
+   tab or installed, nav bar hidden or shown (there 100dvh = innerHeight). 100% resolves through body/html to the
+   initial containing block (Chrome sizes it to the small viewport; nothing scrolls the root here, so the URL bar
+   never hides). It caps #app's own box only, not out-of-flow descendants nor .screen content that outgrows #app. */
 #app {
   height: 100dvh;
   max-height: 100%;
