@@ -11,10 +11,10 @@ A household stock and shopping feature inside the fork: recurring items that mus
 ## Product decisions (owner, 2026-11-19) — requirements
 
 1. **Project-scoped, several lists per project.** Inventory is a project feature like Cycles or Pages. A list belongs to a project and is visible to that project's members. No separate sharing model.
-2. **Four modes per item**, chosen per item, with a default mode per list: `pinned` (always on the shopping list as a reminder on every trip, no stock tracked — for fast-moving groceries), `on_demand` (on the list only while flagged "needed"), `level` (ok / low / out; on the list while low or out), `units` (quantity with a minimum; on the list while below it). A pin button toggles `pinned` ⇄ `on_demand` in one tap.
+2. **Four modes per item**, chosen per item, with a default mode per list: `pinned` (an `on_demand` item shown first in its list in the inventory, so it is checked whenever someone reviews what is needed; on the shopping list only while flagged "needed"), `on_demand` (on the list only while flagged "needed"), `level` (ok / low / out; on the list while low or out), `units` (quantity with a minimum; on the list while below it). A pin button toggles `pinned` ⇄ `on_demand` in one tap. Changed 2026-11-25 (owner, APLANE-77): until then a pinned item was always on the shopping list; the owner wants it pinned in the inventory, not on the list.
 3. **Consumption is manual, one tap.** No consumption-rate estimation.
 4. **The shopping list is a derived view** across every list the user can see. Default grouping is category/aisle; switchable to list, store or urgency.
-5. **Shopping is a session.** "Finish shopping" clears what was ticked: pinned items come back unticked with a "bought N days ago" hint.
+5. **Shopping is a session.** "Finish shopping" clears what was ticked. (Until APLANE-77 pinned items came back unticked; now a bought pinned item leaves the list like an on-demand one.)
 6. **"Ordered" state for online purchases**, so two people do not order the same thing; "Arrived" restocks.
 7. **No notifications outside the app.** Only the counter and the Home widget.
 8. **Optional item fields**: store, purchase URL, brand/variant, last price (stored, never prompted; its purpose is ordering through MCP), expiry date (single, optional, rarely used), photo and barcode (plain optional fields, no scanner).
@@ -30,8 +30,8 @@ A household stock and shopping feature inside the fork: recurring items that mus
 Confirmed by the owner on 2026-11-19: ticks applying at once, "Done" per device, no access for guests, the standalone app, what works without coverage, the two-hour rule, and the behaviours listed below. Also agreed that day: the app is installed from both hostnames if that proves possible, otherwise from the public one; the empty tables ship to prod ahead of the feature provided the service keeps working; the mockups are approved (plan, "Decisions"). The rest are details nobody has objected to.
 
 - **A tick applies at once**, not at "Finish shopping" (see "Why ticks apply at once").
-- **"Done" lives on the device.** It lists what was ticked on this device since the last "Finish shopping", which empties it; it also empties itself after six hours without a tick. The server stores no shopping session. Decision 5 holds: after finishing, pinned items are back unticked with their hint.
-- **The counter is the number of rows on the viewer's to-buy list, minus pinned ones.** It is per viewer. An item fully covered by an order is not on the to-buy list.
+- **"Done" lives on the device.** It lists what was ticked on this device since the last "Finish shopping", which empties it; it also empties itself after six hours without a tick. The server stores no shopping session. Decision 5 holds.
+- **The counter is the number of rows on the viewer's to-buy list** (pinned ones included since APLANE-77: they are there only when needed). It is per viewer. An item fully covered by an order is not on the to-buy list.
 - **Guests have no access to inventory**: 403 on every inventory endpoint. Only a project's members see that project's lists; the owner restated this as a requirement.
 - **Categories and stores are free text on the item, and the aisle order is per user** (see "Why no workspace-level tables").
 - **The phone screens are a standalone app at `/shopping/`** (see "Why a standalone app").
@@ -42,7 +42,7 @@ Confirmed by the owner on 2026-11-19: ticks applying at once, "Done" per device,
 - **Items bought online** (`buy_online`) carry a "mark ordered" action instead of a tick box and are not shown in shopping mode. An item with no store set is shown in shopping mode.
 - **Every one-tap action on an item shows an undo toast.** Order actions do not (see Orders).
 - **Quantity to buy** for a `units` item is `max(1, restock_to − max(quantity, 0) − on order)`; an empty `restock_to` means "the minimum".
-- **"Urgency" grouping** orders rows: out, then low or below minimum, then needed, then pinned.
+- **"Urgency" grouping** orders rows: out, then low or below minimum, then needed (pinned or not).
 - **Price is informational.** No spend reports in v1.
 - **Photo is the last thing built** and may slip; barcode is a text field from the start.
 - **UI languages**: en, es, pl, from dictionaries local to the inventory code. No new keys go into `packages/i18n`.
@@ -71,19 +71,19 @@ So a private list needs a **secret** project and no other workspace admin. The U
 
 | Mode | Fields used | On the to-buy list when |
 |---|---|---|
-| `pinned` | — | always, unless on order |
+| `pinned` | needed (bool) | while needed, unless on order (as `on_demand`) |
 | `on_demand` | `needed`, `needed_by`, `needed_at` | `needed`, unless on order |
 | `level` | `level` (ok, low, out) | low or out, unless on order |
 | `units` | `quantity` (state); `min_quantity`, `restock_to` (data) | `max(quantity, 0) + on order < min_quantity` |
 
-- Every item, in any mode, keeps when it was last bought and by whom. That is the "bought N days ago" hint on pinned rows and the "bought while on order" mark below.
+- Every item, in any mode, keeps when it was last bought and by whom. That is the "bought N days ago" line in the item sheet and the "bought while on order" mark below.
 - A state field belongs to one mode. Changing mode clears the state fields the new mode does not use. `min_quantity` and `restock_to` are the item's data, not state: a mode change keeps them, so leaving `units` and coming back restores the same thresholds, and the database rule `restock_to ≥ min_quantity` can never fire on a mode change (phase 1 audit). Changing **to** `units` carries the quantity typed by the user: it is a recount, never a leftover. If `min_quantity` is empty, the change sets it to 1, as for a new `units` item; otherwise the item could never reach the list.
-- Pinning an `on_demand` item clears `needed`. Unpinning gives `on_demand` with `needed = false`; the toast offers "needed".
-- "Buy" and "arrived" are mode-independent: they carry a quantity (1 if absent) and take effect according to the item's mode **when they are applied** — `pinned` records the purchase, `on_demand` clears `needed`, `level` becomes ok, `units` adds the quantity. A purchase therefore survives a mode change made in between. Any other operation that makes no sense for the current mode is rejected as `invalid_for_mode`.
+- Pinning and unpinning keep `needed` (APLANE-77; before, pinning cleared it).
+- "Buy" and "arrived" are mode-independent: they carry a quantity (1 if absent) and take effect according to the item's mode **when they are applied** — `pinned` and `on_demand` clear `needed`, `level` becomes ok, `units` adds the quantity. A purchase therefore survives a mode change made in between. Any other operation that makes no sense for the current mode is rejected as `invalid_for_mode`.
 - `units`: `min_quantity ≥ 0`, and `restock_to` is empty or `≥ min_quantity`, both enforced in the database. **`quantity` is a signed integer and the server never clamps it**, because clamping at zero would make the result depend on the order in which two phones' changes arrive. A negative total is shown as 0 with a "recount" mark. A new `units` item gets a minimum of 1.
 - `quantity == min_quantity` is not on the list.
 - The last-bought time only moves forward, except when the purchase that set it is reverted.
-- Items are created online. A new item goes onto the to-buy list at once: `on_demand` → needed, `level` → low, `units` → quantity 0 with minimum 1, `pinned` → nothing to do. Within a list, live items have distinct names (compared without case or extra spaces); creating a second one offers the existing item.
+- Items are created online. A new item goes onto the to-buy list at once: `on_demand` → needed, `level` → low, `units` → quantity 0 with minimum 1, `pinned` → needed. Within a list, live items have distinct names (compared without case or extra spaces); creating a second one offers the existing item.
 
 ## Moving an item
 
