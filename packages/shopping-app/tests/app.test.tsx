@@ -530,6 +530,19 @@ describe("item sheet", () => {
     expect(controller.get().known[BREAD]).toBeUndefined();
   });
 
+  it("APLANE-81: a delete that throws leaves the dialog closable and says it failed", async () => {
+    await boot(catalog(), `#/item/${MILK}`);
+    await settle();
+    controller.deleteItem = async () => {
+      throw new Error("boom");
+    };
+    fireEvent.click(screen.getByRole("button", { name: "Delete item" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByText(/Not deleted:/)).toBeTruthy();
+    expect(window.location.hash).toBe(`#/item/${MILK}`);
+  });
+
   it("APLANE-81: refuses to delete while the device still holds changes to the item", async () => {
     await boot(catalog(), `#/item/${MILK}`);
     await settle();
