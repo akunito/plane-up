@@ -42,6 +42,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
   const [message, setMessage] = useState<string | null>(null);
   const [modeDialog, setModeDialog] = useState<Mode | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [recount, setRecount] = useState(false);
   const [ordering, setOrdering] = useState(false);
   const [missing, setMissing] = useState(false);
@@ -460,17 +461,21 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
         </button>
       </footer>
       {deleting ? (
-        <Dialog title={t("delete_item_title", { item })} onClose={() => setDeleting(false)}>
+        <Dialog title={t("delete_item_title", { item })} onClose={() => !deleteBusy && setDeleting(false)}>
           <p>{t("delete_item_body")}</p>
           <div className="dialog-actions">
-            <button type="button" className="secondary" onClick={() => setDeleting(false)}>
+            <button type="button" className="secondary" disabled={deleteBusy} onClick={() => setDeleting(false)}>
               {t("cancel")}
             </button>
             <button
               type="button"
               className="secondary danger-text"
+              disabled={deleteBusy}
               onClick={async () => {
+                // One request at a time; Cancel waits too, or a tap after it would queue an op on a deleted item.
+                setDeleteBusy(true);
                 const out = await c.deleteItem(id);
+                setDeleteBusy(false);
                 setDeleting(false);
                 if (!out.ok)
                   return setMessage(

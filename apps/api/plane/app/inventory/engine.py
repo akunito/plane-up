@@ -345,8 +345,11 @@ def _op_change_mode(item, args, ctx, parsed):
         raise _Rejected("invalid_for_mode")
     changed = ["mode", "needed", "needed_by", "needed_at", "level", "quantity"]
     # Clears the state fields the new mode does not use; min_quantity and restock_to are data and stay.
+    # on_demand ⇄ pinned keeps `needed`, as the pin op does (APLANE-77 audit: the main app pins through this op).
+    keeps_needed = {item.mode, mode} <= {InventoryMode.ON_DEMAND, InventoryMode.PINNED}
     item.mode = mode
-    item.needed, item.needed_by, item.needed_at = False, None, None
+    if not keeps_needed:
+        item.needed, item.needed_by, item.needed_at = False, None, None
     item.level = None
     item.quantity = None
     if mode == InventoryMode.LEVEL:

@@ -185,7 +185,9 @@ export class ModelServer {
         const mode = a.mode as ItemState["mode"];
         if (mode === "level" && a.level !== undefined && !LEVELS.has(a.level as string)) return "invalid";
         if (mode === "units" && !isInt(a.quantity)) return "invalid";
-        Object.assign(item, { mode, needed: false, level: null, quantity: null });
+        const keepsNeeded =
+          (item.mode === "on_demand" || item.mode === "pinned") && (mode === "on_demand" || mode === "pinned");
+        Object.assign(item, { mode, needed: keepsNeeded && item.needed, level: null, quantity: null });
         if (mode === "level") item.level = (a.level as ItemState["level"]) ?? "ok";
         if (mode === "units") item.quantity = a.quantity as number;
         return undefined;

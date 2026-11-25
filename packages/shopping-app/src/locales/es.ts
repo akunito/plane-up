@@ -15,7 +15,6 @@ export const es: Dictionary = {
   urgency_0: "Se acabó",
   urgency_1: "Queda poco",
   urgency_2: "Hace falta",
-  urgency_3: "Fijados",
   badge_out: "Se acabó",
   badge_low: "Queda poco",
   badge_needed: "Hace falta",

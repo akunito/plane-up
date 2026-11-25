@@ -15,7 +15,6 @@ export const en = {
   urgency_0: "Out",
   urgency_1: "Running low",
   urgency_2: "Needed",
-  urgency_3: "Pinned",
   badge_out: "Out",
   badge_low: "Running low",
   badge_needed: "Needed",

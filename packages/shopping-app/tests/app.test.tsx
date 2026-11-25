@@ -503,9 +503,31 @@ describe("item sheet", () => {
       expect.stringMatching(new RegExp(`/inventory/items/${MILK}/$`)),
     ]);
     expect(window.location.hash).toBe("#/inventory");
-    expect(controller.state.known[MILK]).toBeUndefined();
+    expect(controller.get().known[MILK]).toBeUndefined();
     await go("#/");
     expect(screen.queryByRole("checkbox", { name: "Milk: bought" })).toBeNull();
+  });
+
+  it("APLANE-81: a read that started before the DELETE does not bring the item back; a 404 counts as deleted", async () => {
+    const items = catalog();
+    await boot(items, `#/item/${MILK}`);
+    await settle();
+    const milk = items.find((i) => i.state.id === MILK)!;
+    fireEvent.click(screen.getByRole("button", { name: "Delete item" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/inventory"));
+    // A stale answer: the server still lists Milk (a read sent before the DELETE).
+    api.server.items.set(MILK, { ...milk.state });
+    api.data.set(MILK, milk.data);
+    await act(async () => controller.refresh());
+    expect(controller.get().known[MILK]).toBeUndefined();
+    // Bread deleted elsewhere first: the DELETE answers 404, and the person sees it deleted.
+    await go(`#/item/${BREAD}`);
+    api.data.delete(BREAD);
+    fireEvent.click(screen.getByRole("button", { name: "Delete item" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.getByText("Bread: deleted.")).toBeTruthy());
+    expect(controller.get().known[BREAD]).toBeUndefined();
   });
 
   it("APLANE-81: refuses to delete while the device still holds changes to the item", async () => {

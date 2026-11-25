@@ -534,7 +534,8 @@ select {
 
 /* In a row the list name and hint shrink and wrap, right-aligned, and the name keeps a floor: with text at 130 %
    a pinned row's "Pinned · bought …" took the whole width and squeezed the name to one letter per line (phase 9,
-   measured on the Realme). */
+   measured on the Realme). The 130 % / 200 % measurements below were made at the text sizes before APLANE-78
+   (text since ×0.8, the em floors scale with it). */
 .row > .sub.inline {
   /* Flex shrink is shared in proportion to factor x base size, never in order: any share wraps the badge's text
      ('Running low' at 100 % with a long list name: an equal factor took 25 px, 100x still a fraction of a pixel

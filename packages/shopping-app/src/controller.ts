@@ -175,6 +175,8 @@ export class Controller {
   /** Lists an inventory screen is showing: reloaded with every refresh. */
   private watched = new Set<string>();
   private toastSeq = 0;
+  /** Items this page deleted (APLANE-81): a read that started before the DELETE answered would bring them back. */
+  private deleted = new Set<string>();
   private readonly snapshots: SnapshotStore;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   /** Opened from a snapshot: the next sign of a connection starts the app again in full. */
@@ -601,7 +603,7 @@ export class Controller {
     await this.updateQueue((s) => refreshed(s, payloads), target);
     if (this.store !== target) return;
     this.set({
-      known: mergeSnapshot(this.state.known, payloads, startedAt, revsAtStart),
+      known: this.alive(mergeSnapshot(this.state.known, payloads, startedAt, revsAtStart)),
       orders: out.list.on_the_way as unknown as Order[],
       covered,
       connection: null,
@@ -635,7 +637,9 @@ export class Controller {
     const orders = new Map(this.state.orders.map((o) => [o.id, o]));
     for (const o of out.open_orders as unknown as Order[]) orders.set(o.id, o);
     this.set({
-      known: dropMissingFromList(mergeFetched(this.state.known, payloads, startedAt), listId, payloads, startedAt),
+      known: this.alive(
+        dropMissingFromList(mergeFetched(this.state.known, payloads, startedAt), listId, payloads, startedAt)
+      ),
       orders: [...orders.values()],
       connection: null,
     });
@@ -659,7 +663,7 @@ export class Controller {
     const payloads = out.body.items as unknown as ItemData[];
     await this.updateQueue((s) => refreshed(s, payloads), target);
     if (this.store !== target) return null;
-    this.set({ known: mergeFetched(this.state.known, payloads, startedAt), connection: null });
+    this.set({ known: this.alive(mergeFetched(this.state.known, payloads, startedAt)), connection: null });
     return { ids: payloads.map((p) => p.id), categories: out.body.categories, stores: out.body.stores };
   }
 
@@ -948,14 +952,25 @@ export class Controller {
       this.set({ connection: out.failure });
       return { ok: false, error: out.failure };
     }
-    if (out.kind === "refused") return { ok: false, error: out.status === 404 ? "gone" : out.error };
+    // 404: already deleted (another phone, the main app): the same outcome for the person.
+    if (out.kind === "refused" && out.status !== 404) return { ok: false, error: out.error };
+    this.deleted.add(itemId);
     if (this.store !== target) return { ok: true }; // a workspace switch meanwhile: the next load reads the server
-    const known = { ...this.state.known };
-    delete known[itemId];
-    this.set({ known });
+    this.set({ known: this.alive(this.state.known) });
     this.saveSnapshot();
     void this.refresh();
     return { ok: true };
+  }
+
+  private alive(known: Record<string, Known>): Record<string, Known> {
+    if (this.deleted.size === 0) return known;
+    let out: Record<string, Known> | null = null;
+    for (const id of this.deleted)
+      if (id in known) {
+        out ??= { ...known };
+        delete out[id];
+      }
+    return out ?? known;
   }
 
   /** The item's photo (APLANE-66): shrunk on the device, then uploaded; online only, like every data edit. */
@@ -1011,7 +1026,7 @@ export class Controller {
     if (!target || this.store !== target || this.openedOffline || !this.ownsStore()) return; // a switch meanwhile
     await this.updateQueue((s) => refreshed(s, payloads), target);
     if (this.store !== target) return;
-    this.set({ known: mergeFetched(this.state.known, payloads, startedAt) });
+    this.set({ known: this.alive(mergeFetched(this.state.known, payloads, startedAt)) });
     this.saveSnapshot();
   }
 

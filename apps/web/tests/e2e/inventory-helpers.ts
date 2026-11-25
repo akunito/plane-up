@@ -49,7 +49,7 @@ export async function restoreSeed(page: Page) {
     ["Milk", { needed: true }],
     ["Salt", { needed: false }],
     // Pinned (APLANE-77): Bread needed, Eggs not.
-    ["Bread", { needed: true }],
+    ["Bread", { needed: true, pinned: true }],
     ["Eggs", { needed: false, pinned: true }],
     ["Wipes", { quantity: 1 }],
     ["Protein", { quantity: 0 }],
@@ -65,7 +65,7 @@ export async function restoreSeed(page: Page) {
     // pin produced (both are compare-and-set).
     if (state.pinned !== undefined && (now.mode === "pinned") !== state.pinned) {
       // oxlint-disable-next-line no-await-in-loop -- rare: only after a test stopped half-way
-      await apiPost(page, "/api/workspaces/qa-inv/inventory/ops/", {
+      const pinRes = await apiPost(page, "/api/workspaces/qa-inv/inventory/ops/", {
         ops: [
           {
             v: 1,
@@ -78,6 +78,9 @@ export async function restoreSeed(page: Page) {
           },
         ],
       });
+      // oxlint-disable-next-line no-await-in-loop
+      const pinned = ((await pinRes.json()) as { results: { result: string }[] }).results[0];
+      expect(pinned?.result, `restoreSeed pin ${name}: ${JSON.stringify(pinned)}`).toBe("applied");
       // oxlint-disable-next-line no-await-in-loop
       Object.assign(now, await item(page, name));
     }

@@ -181,7 +181,10 @@ export function applyLocal(item: ItemState, entry: Entry, reverted?: Entry, befo
     case "change_mode": {
       const mode = args.mode as ItemState["mode"];
       if (mode === item.mode) return item;
-      const next: ItemState = { ...item, mode, needed: false, level: null, quantity: null };
+      // on_demand ⇄ pinned keeps `needed`, as the pin op does (engine._op_change_mode, APLANE-77).
+      const keepsNeeded =
+        (item.mode === "on_demand" || item.mode === "pinned") && (mode === "on_demand" || mode === "pinned");
+      const next: ItemState = { ...item, mode, needed: keepsNeeded && item.needed, level: null, quantity: null };
       if (mode === "level") next.level = (args.level as ItemState["level"]) ?? "ok";
       if (mode === "units") {
         next.quantity = num(args.quantity, 0);

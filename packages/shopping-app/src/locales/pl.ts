@@ -15,7 +15,6 @@ export const pl: Dictionary = {
   urgency_0: "Brak",
   urgency_1: "Mało",
   urgency_2: "Potrzebne",
-  urgency_3: "Przypięte",
   badge_out: "Brak",
   badge_low: "Mało",
   badge_needed: "Potrzebne",

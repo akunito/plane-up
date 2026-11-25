@@ -79,6 +79,17 @@ describe("pinned (APLANE-77): on_demand shown first in the inventory", () => {
     const od = start([item({ mode: "on_demand", needed: true, quantity: null, min_quantity: null })]);
     expect(view(tap(od, "pin", "milk", { pinned: true }, t())).milk).toMatchObject({ mode: "pinned", needed: true });
   });
+  it("a mode change between on_demand and pinned keeps needed; to any other mode clears it", () => {
+    const od = start([item({ mode: "on_demand", needed: true, quantity: null, min_quantity: null })]);
+    expect(view(tap(od, "change_mode", "milk", { mode: "pinned" }, t())).milk).toMatchObject({
+      mode: "pinned",
+      needed: true,
+    });
+    expect(view(tap(pinned(true), "change_mode", "milk", { mode: "level" }, t())).milk).toMatchObject({
+      mode: "level",
+      needed: false,
+    });
+  });
   it("a purchase takes it off the list", () => {
     expect(view(tap(pinned(true), "buy", "milk", {}, t())).milk!.needed).toBe(false);
   });
