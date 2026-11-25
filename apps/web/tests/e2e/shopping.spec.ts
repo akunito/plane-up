@@ -343,11 +343,14 @@ test.describe("shopping app @shopping", () => {
     await page.setViewportSize({ width: 360, height: 740 });
     await page.goto("/shopping/");
     await expect(page.getByRole("checkbox", { name: "Nappies: bought" })).toBeVisible();
-    const result = await page.evaluate(async () => {
+    const { out: result, scale } = await page.evaluate(async () => {
       // oxlint-disable-next-line unicorn/consistent-function-scoping
       const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-      // Android's font scale multiplies every font size; the app's sizes are px rules, so scaling the rules is the
-      // same thing (scaling elements instead compounds through nesting). Original sizes read once.
+      // Android's font scale multiplies every font size. Since APLANE-78 the app's sizes are calc(px × --font-scale)
+      // except the 16px inputs: the variable and the px rules are scaled (scaling elements instead compounds through
+      // nesting). Original values read once.
+      const root = document.documentElement;
+      const scale = parseFloat(getComputedStyle(root).getPropertyValue("--font-scale")) || 1;
       const base: [CSSStyleRule, number][] = [];
       // Inside evaluate: it runs in the page, so it cannot move out.
       // oxlint-disable-next-line unicorn/consistent-function-scoping
@@ -376,6 +379,7 @@ test.describe("shopping app @shopping", () => {
       > = {};
       for (const k of [1, 1.3, 2]) {
         for (const [r, px] of base) r.style.fontSize = `${px * k}px`;
+        root.style.setProperty("--font-scale", String(scale * k));
         // Sequential on purpose: each scale is measured after the previous one is replaced.
         // oxlint-disable-next-line no-await-in-loop
         await wait(200);
@@ -419,11 +423,13 @@ test.describe("shopping app @shopping", () => {
           ).length,
         };
       }
-      return out;
+      return { out, scale };
     });
+    // The floor was 60 px for 15 px text; it scales with the text (APLANE-78: × 0.8 → 48 px, the same letters).
+    const floor = 60 * scale;
     expect(result["1"]!.badgeShort, "badge wrapped at 100 %").toBe(0);
     for (const k of ["1", "1.3", "2"]) {
-      expect(result[k]!.name, `name width at ${k}`).toBeGreaterThan(60);
+      expect(result[k]!.name, `name width at ${k}`).toBeGreaterThan(floor);
       expect(result[k]!.overlap, `list name over the item name at ${k}`).toBe(0);
       expect(result[k]!.out, `badges off the row at ${k}`).toBe(0);
       expect(result[k]!.sideways, `rows scrolling sideways at ${k}`).toBe(0);
