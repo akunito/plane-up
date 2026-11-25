@@ -4,8 +4,7 @@
    safe areas. */
 
 :root {
-  /* Text 20 % smaller (owner, 2026-11-25, APLANE-78: too big on Aga's phone). Inputs stay at 16px: below it iOS zooms
-     into a focused field. */
+  /* Text 20 % smaller (owner, 2026-11-25, APLANE-78: too big on Aga's phone). Inputs too, except on iOS (below). */
   --font-scale: 0.8;
   --bg: #141415;
   --bg-raised: #191a1b;
@@ -795,7 +794,7 @@ button.stepper-value {
   border: 0;
   outline: 0;
   background: transparent;
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale));
 }
 
 /* ---------------------------------------------------------------- forms, sheet, dialog */
@@ -839,7 +838,7 @@ button.stepper-value {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-raised);
-  font-size: 16px; /* below 16px, mobile browsers zoom into the field */
+  font-size: calc(16px * var(--font-scale));
 }
 
 .field.inline input:not([type="checkbox"]),
@@ -1144,4 +1143,14 @@ button.stepper-value {
 
 .nav-sub {
   padding-left: 28px;
+}
+
+/* iOS Safari zooms into a focused field whose text is under 16px; Android browsers do not. Only WebKit on iOS knows
+   -webkit-touch-callout, so the fields keep 16px there and follow --font-scale elsewhere (APLANE-78). */
+@supports (-webkit-touch-callout: none) {
+  .search input,
+  .field input,
+  .field select {
+    font-size: 16px;
+  }
 }

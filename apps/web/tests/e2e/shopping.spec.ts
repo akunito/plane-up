@@ -621,8 +621,9 @@ const shot = async (page: Page, name: string, target?: Locator) => {
   await expect(target ?? page).toHaveScreenshot(`${name}.png`, { ...options, maxDiffPixelRatio: 0.01 });
 };
 
-// Every baseline renamed "-a77" at once (APLANE-77/78/81, 2026-11-25): text 20 % smaller, the pin counter gone,
+// Every baseline renamed "-a78" at once (APLANE-77/78/81, 2026-11-25): text 20 % smaller, the pin counter gone,
 // pinned rows first in the inventory, the sheet's Delete item. The new names create their baselines.
+// Renamed again "-a78": the fields follow the smaller text too (16px kept on iOS only).
 test.describe("@visual-shopping", () => {
   test.skip(!INV, "the image under test has no shopping app");
   test.use({ storageState: authFile("qa-inv-ana") });
@@ -638,27 +639,27 @@ test.describe("@visual-shopping", () => {
     // Renamed when pinned rows gained "bought … (by …)" (APLANE-67, S17): the new name creates its baseline.
     // Renamed again with the Plane menu toggle and the counter as icons in the top bar (APLANE-73; again when
     // the pin became the filled one: an earlier dev run had made a baseline with the outline pin).
-    await shot(page, "vs-01-list-a77");
+    await shot(page, "vs-01-list-a78");
   });
 
   test("VS-02 shopping mode", async ({ page }) => {
     await open(page, "#/shop");
     await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
-    await shot(page, "vs-02-shop-a77");
+    await shot(page, "vs-02-shop-a78");
   });
 
   test("VS-03 quick capture", async ({ page }) => {
     await open(page, "#/capture");
     await page.getByRole("searchbox").fill("nap");
     await expect(page.getByRole("button", { name: "Nappies: Running low" })).toBeVisible();
-    await shot(page, "vs-03-capture-a77");
+    await shot(page, "vs-03-capture-a78");
   });
 
   test("VS-04 inventory", async ({ page }) => {
     await open(page, "#/inventory");
     await expect(page.getByRole("link", { name: "Open Mulch" })).toBeVisible();
     // Renamed with the Plane menu toggle in the top bar (APLANE-73; renamed again for its final margins).
-    await shot(page, "vs-04-inventory-a77");
+    await shot(page, "vs-04-inventory-a78");
   });
 
   test("VS-05 item sheet", async ({ page }) => {
@@ -667,21 +668,21 @@ test.describe("@visual-shopping", () => {
     await expect(page.getByText(/set it to: In stock/)).toBeVisible();
     // Renamed with each change to this screen (APLANE-66 photo field, then the camera button on touch screens):
     // the new name creates its baseline.
-    await shot(page, "vs-05-item-a77");
+    await shot(page, "vs-05-item-a78");
   });
 
   test("VS-06 order dialog", async ({ page }) => {
     await open(page);
     await page.getByRole("button", { name: "Protein: Mark ordered" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    await shot(page, "vs-06-order-a77", page.getByRole("dialog"));
+    await shot(page, "vs-06-order-a78", page.getByRole("dialog"));
   });
 
   test("VS-07 arrival dialog", async ({ page }) => {
     await open(page);
     await page.getByRole("button", { name: "Magnesium: the order arrived" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    await shot(page, "vs-07-arrival-a77", page.getByRole("dialog"));
+    await shot(page, "vs-07-arrival-a78", page.getByRole("dialog"));
   });
 
   test("VS-09 Plane's menu (APLANE-73)", async ({ page }) => {
@@ -690,12 +691,12 @@ test.describe("@visual-shopping", () => {
     const nav = page.getByRole("dialog", { name: "Plane" });
     await expect(nav.getByRole("button", { name: /Home$/ })).toBeVisible();
     // Renamed when the entries gained Plane's icons, and for the filled pin in the counter behind the scrim.
-    await shot(page, "vs-09-menu-a77");
+    await shot(page, "vs-09-menu-a78");
   });
 
   test("VS-08 waiting and unapplied", async ({ page }) => {
     await open(page, "#/pending");
     await expect(page.getByText("Nothing waiting.")).toBeVisible();
-    await shot(page, "vs-08-pending-a77");
+    await shot(page, "vs-08-pending-a78");
   });
 });
