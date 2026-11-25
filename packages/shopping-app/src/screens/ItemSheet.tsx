@@ -41,6 +41,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
   const [historyTry, setHistoryTry] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const [modeDialog, setModeDialog] = useState<Mode | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [recount, setRecount] = useState(false);
   const [ordering, setOrdering] = useState(false);
   const [missing, setMissing] = useState(false);
@@ -277,7 +278,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
             />
           </div>
         ) : null}
-        {state.mode === "on_demand" ? (
+        {state.mode === "on_demand" || state.mode === "pinned" ? (
           <div className="row">
             <NeededButton
               item={item}
@@ -293,7 +294,7 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
             />
           </div>
         ) : null}
-        {state.mode === "pinned" && state.last_bought_at ? (
+        {(state.mode === "pinned" || state.mode === "on_demand") && state.last_bought_at ? (
           <p className="sub pad">
             <BoughtAgo at={state.last_bought_at} by={state.last_bought_by} />
           </p>
@@ -429,6 +430,11 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
             </li>
           ))}
         </ul>
+        <div className="pad">
+          <button type="button" className="text-button danger-text" onClick={() => setDeleting(true)}>
+            {t("delete_item")}
+          </button>
+        </div>
       </main>
       <footer className="bottombar">
         {data.purchase_url ? (
@@ -453,6 +459,32 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
           {t("mark_ordered")}
         </button>
       </footer>
+      {deleting ? (
+        <Dialog title={t("delete_item_title", { item })} onClose={() => setDeleting(false)}>
+          <p>{t("delete_item_body")}</p>
+          <div className="dialog-actions">
+            <button type="button" className="secondary" onClick={() => setDeleting(false)}>
+              {t("cancel")}
+            </button>
+            <button
+              type="button"
+              className="secondary danger-text"
+              onClick={async () => {
+                const out = await c.deleteItem(id);
+                setDeleting(false);
+                if (!out.ok)
+                  return setMessage(
+                    t("delete_failed", { error: out.error === "waiting" ? t("delete_waiting") : errorText(out.error) })
+                  );
+                c.showToast(t("toast_deleted", { item }));
+                window.location.hash = "#/inventory";
+              }}
+            >
+              {t("delete")}
+            </button>
+          </div>
+        </Dialog>
+      ) : null}
       {modeDialog === "units" ? <UnitsDialog id={id} name={item} onClose={() => setModeDialog(null)} /> : null}
       {recount ? (
         <RecountDialog id={id} name={item} value={String(shownQuantity(state))} onClose={() => setRecount(false)} />

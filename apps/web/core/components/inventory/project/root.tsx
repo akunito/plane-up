@@ -293,18 +293,23 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
                   </td>
                 </tr>
               ) : (
-                items.map((item) => (
-                  <ItemRow
-                    key={item.id}
-                    item={item}
-                    t={t}
-                    onOp={(name, args) => op(item, name, args)}
-                    onData={(data) => saveData(item, data)}
-                    onUnits={() => setDialog({ kind: "units", item })}
-                    onDetails={() => setDialog({ kind: "sheet", itemId: item.id })}
-                    onDelete={() => setDialog({ kind: "delete_item", item })}
-                  />
-                ))
+                // Pinned first, then the server's order (stable sort): what to check when reviewing what is needed
+                // (APLANE-77). es2022 lib: no toSorted.
+                [...items]
+                  // oxlint-disable-next-line unicorn/no-array-sort -- sorts a copy; es2022 has no toSorted
+                  .sort((a, b) => Number(b.mode === "pinned") - Number(a.mode === "pinned"))
+                  .map((item) => (
+                    <ItemRow
+                      key={item.id}
+                      item={item}
+                      t={t}
+                      onOp={(name, args) => op(item, name, args)}
+                      onData={(data) => saveData(item, data)}
+                      onUnits={() => setDialog({ kind: "units", item })}
+                      onDetails={() => setDialog({ kind: "sheet", itemId: item.id })}
+                      onDelete={() => setDialog({ kind: "delete_item", item })}
+                    />
+                  ))
               )}
             </tbody>
           </table>
@@ -486,9 +491,7 @@ function ItemRow(props: {
         <div className="flex flex-wrap items-center gap-1">
           <StateControl item={item} t={t} onOp={onOp} recount />
           {onOrder > 0 && <span className="text-11 text-accent-primary">{t("on_order", { n: onOrder })}</span>}
-          {toBuy > 0 && item.mode !== "pinned" && (
-            <span className="text-11 text-tertiary">{t("to_buy", { n: toBuy })}</span>
-          )}
+          {toBuy > 0 && <span className="text-11 text-tertiary">{t("to_buy", { n: toBuy })}</span>}
         </div>
       </td>
       <td className={CELL}>

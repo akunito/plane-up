@@ -4,7 +4,7 @@
 // item's revision (brief: Item state).
 
 import type { Entry, ItemState, Lists, Mode, QueueState, VisibleProject } from "@plane/inventory";
-import { counts, toBuy, view } from "@plane/inventory";
+import { toBuy, view } from "@plane/inventory";
 
 export interface ItemData extends ItemState {
   name: string;
@@ -186,9 +186,8 @@ export interface Board {
   done: Row[];
   /** Open orders with their item, for "On the way". */
   onTheWay: { order: Order; row: Row | null }[];
-  /** Rows of the sidebar counter: pinned ones never count. */
+  /** Rows of the sidebar counter: every row to buy, pinned ones too (APLANE-77). */
   count: number;
-  pinned: number;
 }
 
 export function rowFor(
@@ -242,8 +241,6 @@ export function board(
   const pending = new Set(queue.entries.map((e) => e.op.target));
   const toBuyRows: Row[] = [];
   const done: Row[] = [];
-  let count = 0;
-  let pinned = 0;
   for (const id of Object.keys(known)) {
     const row = rowFor(id, known, shown, orders, queue);
     if (!row) continue;
@@ -255,19 +252,16 @@ export function board(
     const trustLocal = pending.has(id) || row.state.rev > Math.max(k.data.rev, k.offRev ?? -1);
     if (row.quantity <= 0 || (!trustLocal && !k.onList)) continue;
     toBuyRows.push(row);
-    if (counts(row.state.mode)) count++;
-    else pinned++;
   }
   const onTheWay = orders.map((order) => ({ order, row: rowFor(order.item, known, shown, orders, queue) }));
-  return { toBuy: toBuyRows, done, onTheWay, count, pinned };
+  return { toBuy: toBuyRows, done, onTheWay, count: toBuyRows.length };
 }
 
-/** Urgency: out, then low or below the minimum, then needed, then pinned (brief: Designer defaults). */
+/** Urgency: out, then low or below the minimum, then needed (pinned or not) (brief: Designer defaults). */
 export function urgency(state: ItemState): number {
   if (state.mode === "level") return state.level === "out" ? 0 : 1;
   if (state.mode === "units") return (state.quantity ?? 0) <= 0 ? 0 : 1;
-  if (state.mode === "on_demand") return 2;
-  return 3;
+  return 2;
 }
 
 export interface Group {
@@ -315,13 +309,12 @@ export function group(rows: readonly Row[], grouping: Grouping, categoryOrder: r
   return out;
 }
 
-export type Badge = "out" | "low" | "below" | "needed" | "pinned" | "recount" | "ok" | null;
+export type Badge = "out" | "low" | "below" | "needed" | "recount" | "ok" | null;
 
 /** What the row says about the item's state; low and out are told apart by text and icon, not colour. */
 export function badge(state: ItemState): Badge {
   switch (state.mode) {
     case "pinned":
-      return "pinned";
     case "on_demand":
       return state.needed ? "needed" : null;
     case "level":

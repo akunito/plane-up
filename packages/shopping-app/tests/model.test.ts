@@ -175,10 +175,10 @@ describe("grouping and badges", () => {
 
   it("follows the person's aisle order, then names, with unnamed groups last", () => {
     const rows = [
-      row("a", "", state(uid(), "pinned")),
-      row("b", "Bakery", state(uid(), "pinned")),
-      row("c", "Dairy", state(uid(), "pinned")),
-      row("d", "Baby", state(uid(), "pinned")),
+      row("a", "", state(uid(), "pinned", { needed: true })),
+      row("b", "Bakery", state(uid(), "pinned", { needed: true })),
+      row("c", "Dairy", state(uid(), "pinned", { needed: true })),
+      row("d", "Baby", state(uid(), "pinned", { needed: true })),
     ];
     expect(group(rows, "category", ["dairy"]).map((g) => g.label)).toEqual(["Dairy", "Baby", "Bakery", ""]);
   });

@@ -88,10 +88,14 @@ def test_S07_tick_and_untick_a_units_item(make_item, ctx, alice, bob):
     assert fresh(item).quantity == 2
 
 
-def test_S10_pinned_then_unpinned_is_not_needed(make_item, ctx, alice):
+def test_S10_pin_and_unpin_keep_needed(make_item, ctx, alice):
+    # APLANE-77: a pin only moves the item to the top of the inventory; until 2026-11-25 it cleared `needed`.
     item = make_item(mode="on_demand", needed=True)
     go(ctx, alice, op("pin", item, {"pinned": True}, base_rev=0))
-    go(ctx, alice, op("pin", item, {"pinned": False}, base_rev=1))
+    assert (fresh(item).mode, fresh(item).needed, listed(fresh(item))) == ("pinned", True, 1)
+    go(ctx, alice, op("set_needed", item, {"needed": False}, base_rev=1))
+    assert listed(fresh(item)) == 0
+    go(ctx, alice, op("pin", item, {"pinned": False}, base_rev=2))
     item = fresh(item)
     assert (item.mode, item.needed) == ("on_demand", False)
 
@@ -136,11 +140,14 @@ def test_S14_part_of_an_order_now_the_rest_later_with_plus(make_item, ctx, alice
     assert fresh(item).quantity == 2
 
 
-def test_S17_a_bought_pinned_item_stays_listed_with_who_and_when(make_item, ctx, alice):
-    item = make_item(mode="pinned")
+def test_S17_a_bought_pinned_item_leaves_the_list_with_who_and_when(make_item, ctx, alice):
+    # APLANE-77: pinned = on_demand shown first in the inventory; a purchase clears `needed` as for on_demand.
+    item = make_item(mode="pinned", needed=True)
+    assert listed(fresh(item)) == 1
     go(ctx, alice, op("buy", item))
     item = fresh(item)
-    assert listed(item) == 1 and item.last_bought_by_id == alice.id and item.last_bought_at is not None
+    assert listed(item) == 0 and not item.needed
+    assert item.last_bought_by_id == alice.id and item.last_bought_at is not None
 
 
 def test_S37_two_offline_taps_from_one_queue_both_apply_in_order(make_item, ctx, alice):

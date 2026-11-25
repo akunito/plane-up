@@ -55,7 +55,13 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
         {showing.map((l) => {
           const items = Object.values(s.known)
             .filter((k) => k.data.list.id === l.id && shown[k.data.id])
-            .toSorted((a, b) => a.data.sort_order - b.data.sort_order || a.data.name.localeCompare(b.data.name));
+            // Pinned first: what to check when reviewing what is needed (owner, 2026-11-25, APLANE-77).
+            .toSorted(
+              (a, b) =>
+                Number(shown[b.data.id]!.mode === "pinned") - Number(shown[a.data.id]!.mode === "pinned") ||
+                a.data.sort_order - b.data.sort_order ||
+                a.data.name.localeCompare(b.data.name)
+            );
           return (
             <section key={l.id} aria-label={l.name}>
               <h2 className="group list-head">

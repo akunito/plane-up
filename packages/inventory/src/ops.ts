@@ -84,7 +84,7 @@ export function buildOp(
 
 function bought(item: ItemState, quantity: number | null, at: number): ItemState {
   const next = { ...item };
-  if (item.mode === "on_demand") next.needed = false;
+  if (item.mode === "on_demand" || item.mode === "pinned") next.needed = false;
   else if (item.mode === "level") next.level = "ok";
   else if (item.mode === "units" && quantity !== null) next.quantity = (item.quantity ?? 0) + quantity;
   const iso = new Date(at).toISOString();
@@ -131,7 +131,7 @@ export function predictRefused(item: ItemState, entry: Entry): boolean {
     case "set_level":
       return item.mode !== "level" || !LEVELS.has(a.level as string);
     case "set_needed":
-      return item.mode !== "on_demand" || typeof a.needed !== "boolean";
+      return (item.mode !== "on_demand" && item.mode !== "pinned") || typeof a.needed !== "boolean";
     case "pin":
       return typeof a.pinned !== "boolean" || (item.mode !== "pinned" && item.mode !== "on_demand");
     case "recount":
@@ -170,10 +170,12 @@ export function applyLocal(item: ItemState, entry: Entry, reverted?: Entry, befo
     case "set_level":
       return item.mode === "level" ? { ...item, level: args.level as ItemState["level"] } : item;
     case "set_needed":
-      return item.mode === "on_demand" && typeof args.needed === "boolean" ? { ...item, needed: args.needed } : item;
+      return (item.mode === "on_demand" || item.mode === "pinned") && typeof args.needed === "boolean"
+        ? { ...item, needed: args.needed }
+        : item;
     case "pin":
       if ((item.mode !== "pinned" && item.mode !== "on_demand") || typeof args.pinned !== "boolean") return item;
-      return { ...item, mode: args.pinned ? "pinned" : "on_demand", needed: false };
+      return { ...item, mode: args.pinned ? "pinned" : "on_demand" };
     case "recount":
       return item.mode === "units" ? { ...item, quantity: num(args.quantity, item.quantity ?? 0) } : item;
     case "change_mode": {

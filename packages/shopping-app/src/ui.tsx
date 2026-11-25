@@ -135,7 +135,7 @@ export const Icon = {
 export function StateBadge({ state }: { state: ItemState }) {
   const { t } = useCtx();
   const kind: BadgeKind = badge(state);
-  if (kind === null || kind === "ok" || kind === "pinned") return null;
+  if (kind === null || kind === "ok") return null;
   if (kind === "below")
     return (
       <span className="badge warn" data-badge="below">
@@ -316,22 +316,23 @@ export function ItemControl({ data, state, onRecount }: { data: ItemData; state:
           {...(onRecount ? { onValue: onRecount } : {})}
         />
       );
+    // Pinned = on_demand shown first in the inventory (APLANE-77): same controls, the pin filled.
     case "pinned":
-      return (
-        <PinButton
-          item={item}
-          pinned
-          withText
-          onToggle={() => void c.act("pin", data.id, { pinned: false }, { toast: t("toast_unpinned", { item }) })}
-        />
-      );
-    case "on_demand":
+    case "on_demand": {
+      const pinned = state.mode === "pinned";
       return (
         <div className="row-actions">
           <PinButton
             item={item}
-            pinned={false}
-            onToggle={() => void c.act("pin", data.id, { pinned: true }, { toast: t("toast_pinned", { item }) })}
+            pinned={pinned}
+            onToggle={() =>
+              void c.act(
+                "pin",
+                data.id,
+                { pinned: !pinned },
+                { toast: t(pinned ? "toast_unpinned" : "toast_pinned", { item }) }
+              )
+            }
           />
           <NeededButton
             item={item}
@@ -347,6 +348,7 @@ export function ItemControl({ data, state, onRecount }: { data: ItemData; state:
           />
         </div>
       );
+    }
   }
 }
 

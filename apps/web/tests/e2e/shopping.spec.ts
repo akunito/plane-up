@@ -15,7 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Locator, Page } from "@playwright/test";
-import { apiDelete, authFile, expect, expectNoHorizontalOverflow, test } from "./helpers";
+import { apiDelete, apiPost, authFile, expect, expectNoHorizontalOverflow, test } from "./helpers";
 import { INV, contextFor, item, restoreSeed, server } from "./inventory-helpers";
 
 const items = INV?.inventory.items ?? {};
@@ -51,22 +51,49 @@ test.describe("shopping app @shopping", () => {
   );
   test.afterEach(async ({ page }) => restoreSeed(page));
 
-  test("the to-buy list: rows, counter without pinned rows, On the way with the overdue order", async ({ page }) => {
+  test("the to-buy list: rows, counter with the needed pinned row, On the way with the overdue order", async ({
+    page,
+  }) => {
     await open(page);
-    // The sentence is for screen readers; the bar shows the numbers beside a cart and a pin (APLANE-73).
-    await expect(page.getByText("6 missing · 2 pinned")).toHaveClass(/\bvisually-hidden\b/);
-    await expect(page.locator(".topbar .count")).toHaveText(["6", "2"]);
+    // The sentence is for screen readers; the bar shows the number beside a cart (APLANE-73). Since APLANE-77 a
+    // pinned item is on the list only when needed, and then it counts: Bread yes, Eggs (not needed) no.
+    await expect(page.getByText("7 missing", { exact: true })).toHaveClass(/\bvisually-hidden\b/);
+    await expect(page.locator(".topbar .count")).toHaveText(["7"]);
     await Promise.all(
-      ["Milk", "Detergent", "Wipes", "Nappies", "Mulch", "Bread", "Eggs"].map((name) =>
+      ["Milk", "Detergent", "Wipes", "Nappies", "Mulch", "Bread"].map((name) =>
         expect(page.getByRole("checkbox", { name: `${name}: bought` })).toBeVisible()
       )
     );
     await expect(page.getByRole("checkbox", { name: "Salt: bought" })).toHaveCount(0);
+    await expect(page.getByRole("checkbox", { name: "Eggs: bought" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Protein: Mark ordered" })).toBeVisible();
     const onTheWay = page.getByRole("region", { name: "On the way · 2" });
     await expect(onTheWay.getByText("Overdue")).toHaveCount(1);
     await expect(onTheWay.getByText("Magnesium")).toBeVisible();
     await expectNoHorizontalOverflow(page);
+  });
+
+  test("APLANE-77: pinned items come first in the inventory and are marked needed like any other", async ({ page }) => {
+    await open(page, `#/inventory/${INV!.inventory.lists["Groceries"]}`);
+    const names = page.locator('section[aria-label="Groceries"] .row .name');
+    // Bread and Eggs are pinned; the rest of Groceries follows in the list's order.
+    await expect(names.nth(0)).toHaveText("Bread");
+    await expect(names.nth(1)).toHaveText("Eggs");
+    await expect(page.getByRole("button", { name: "Eggs: unpin" })).toHaveAttribute("aria-pressed", "true");
+    const needed = page.getByRole("button", { name: "Eggs: needed" });
+    await expect(needed).toHaveAttribute("aria-pressed", "false");
+    await needed.click();
+    await server(page, "Eggs", "needed").toBe(true);
+    await open(page);
+    await expect(page.getByRole("checkbox", { name: "Eggs: bought" })).toBeVisible();
+    await expect(page.locator(".topbar .count")).toHaveText(["8"]);
+    // Unpinning keeps it needed: on the list still, now as an on-demand item.
+    await open(page, `#/inventory/${INV!.inventory.lists["Groceries"]}`);
+    await page.getByRole("button", { name: "Eggs: unpin" }).click();
+    await server(page, "Eggs", "needed").toBe(true);
+    await expect(page.getByRole("button", { name: "Eggs: pin" })).toHaveAttribute("aria-pressed", "false");
+    await page.getByRole("button", { name: "Eggs: pin" }).click();
+    await expect(page.getByRole("button", { name: "Eggs: unpin" })).toBeVisible();
   });
 
   test("a tick buys at once, sits under Done, and Undo reverts it on the server", async ({ page }) => {
@@ -122,6 +149,28 @@ test.describe("shopping app @shopping", () => {
     const created = await item(page, name);
     expect(created.needed).toBe(true);
     await apiDelete(page, `/api/workspaces/qa-inv/projects/${INV!.projects.HOME.id}/inventory/items/${created.id}/`);
+  });
+
+  test("APLANE-81: an item is deleted from its sheet after a confirmation", async ({ page }) => {
+    const name = `QA e2e delete ${Date.now()}`;
+    const res = await apiPost(
+      page,
+      `/api/workspaces/qa-inv/projects/${INV!.projects.HOME.id}/inventory/lists/${INV!.inventory.lists["Groceries"]}/items/`,
+      { name }
+    );
+    const { id } = (await res.json()) as { id: string };
+    await open(page, `#/item/${id}`);
+    await page.getByRole("button", { name: "Delete item" }).click();
+    await page
+      .getByRole("dialog", { name: `Delete “${name}”?` })
+      .getByRole("button", { name: "Delete" })
+      .click();
+    await expect(page.getByText(`${name}: deleted.`)).toBeVisible();
+    await expect(page).toHaveURL(/#\/inventory$/);
+    const left = await (
+      await page.request.get(`/api/workspaces/qa-inv/inventory/suggestions/?q=${encodeURIComponent(name)}`)
+    ).json();
+    expect((left.items as { name: string }[]).some((i) => i.name === name)).toBe(false);
   });
 
   test("inventory: who can see each list, and a typed recount", async ({ page }) => {
@@ -460,9 +509,9 @@ test.describe("shopping app @shopping", () => {
     await page.setViewportSize({ width: 360, height: 740 });
     await open(page);
     // Rendered first, so the widening below really has two numbers to widen.
-    await expect(page.locator(".topbar .count")).toHaveText(["6", "2"]);
+    await expect(page.locator(".topbar .count")).toHaveText(["7"]);
     const row = await page.evaluate(() => {
-      // Two digits each: the widest a household list reaches in practice.
+      // Two digits: the widest a household list reaches in practice.
       for (const c of Array.from(document.querySelectorAll(".topbar .count"))) c.lastChild!.textContent = "12";
       const [toggle, tabs, counts] = [".nav-toggle", ".tabs", ".topbar .counts"].map((sel) => {
         const r = document.querySelector(sel)!.getBoundingClientRect();
@@ -566,6 +615,8 @@ const shot = async (page: Page, name: string, target?: Locator) => {
   await expect(target ?? page).toHaveScreenshot(`${name}.png`, { ...options, maxDiffPixelRatio: 0.01 });
 };
 
+// Every baseline renamed "-a77" at once (APLANE-77/78/81, 2026-11-25): text 20 % smaller, the pin counter gone,
+// pinned rows first in the inventory, the sheet's Delete item. The new names create their baselines.
 test.describe("@visual-shopping", () => {
   test.skip(!INV, "the image under test has no shopping app");
   test.use({ storageState: authFile("qa-inv-ana") });
@@ -581,27 +632,27 @@ test.describe("@visual-shopping", () => {
     // Renamed when pinned rows gained "bought … (by …)" (APLANE-67, S17): the new name creates its baseline.
     // Renamed again with the Plane menu toggle and the counter as icons in the top bar (APLANE-73; again when
     // the pin became the filled one: an earlier dev run had made a baseline with the outline pin).
-    await shot(page, "vs-01-list-counted");
+    await shot(page, "vs-01-list-a77");
   });
 
   test("VS-02 shopping mode", async ({ page }) => {
     await open(page, "#/shop");
     await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
-    await shot(page, "vs-02-shop");
+    await shot(page, "vs-02-shop-a77");
   });
 
   test("VS-03 quick capture", async ({ page }) => {
     await open(page, "#/capture");
     await page.getByRole("searchbox").fill("nap");
     await expect(page.getByRole("button", { name: "Nappies: Running low" })).toBeVisible();
-    await shot(page, "vs-03-capture");
+    await shot(page, "vs-03-capture-a77");
   });
 
   test("VS-04 inventory", async ({ page }) => {
     await open(page, "#/inventory");
     await expect(page.getByRole("link", { name: "Open Mulch" })).toBeVisible();
     // Renamed with the Plane menu toggle in the top bar (APLANE-73; renamed again for its final margins).
-    await shot(page, "vs-04-inventory-menu");
+    await shot(page, "vs-04-inventory-a77");
   });
 
   test("VS-05 item sheet", async ({ page }) => {
@@ -610,21 +661,21 @@ test.describe("@visual-shopping", () => {
     await expect(page.getByText(/set it to: In stock/)).toBeVisible();
     // Renamed with each change to this screen (APLANE-66 photo field, then the camera button on touch screens):
     // the new name creates its baseline.
-    await shot(page, "vs-05-item-camera");
+    await shot(page, "vs-05-item-a77");
   });
 
   test("VS-06 order dialog", async ({ page }) => {
     await open(page);
     await page.getByRole("button", { name: "Protein: Mark ordered" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    await shot(page, "vs-06-order", page.getByRole("dialog"));
+    await shot(page, "vs-06-order-a77", page.getByRole("dialog"));
   });
 
   test("VS-07 arrival dialog", async ({ page }) => {
     await open(page);
     await page.getByRole("button", { name: "Magnesium: the order arrived" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    await shot(page, "vs-07-arrival", page.getByRole("dialog"));
+    await shot(page, "vs-07-arrival-a77", page.getByRole("dialog"));
   });
 
   test("VS-09 Plane's menu (APLANE-73)", async ({ page }) => {
@@ -633,12 +684,12 @@ test.describe("@visual-shopping", () => {
     const nav = page.getByRole("dialog", { name: "Plane" });
     await expect(nav.getByRole("button", { name: /Home$/ })).toBeVisible();
     // Renamed when the entries gained Plane's icons, and for the filled pin in the counter behind the scrim.
-    await shot(page, "vs-09-menu-icons");
+    await shot(page, "vs-09-menu-a77");
   });
 
   test("VS-08 waiting and unapplied", async ({ page }) => {
     await open(page, "#/pending");
     await expect(page.getByText("Nothing waiting.")).toBeVisible();
-    await shot(page, "vs-08-pending");
+    await shot(page, "vs-08-pending-a77");
   });
 });

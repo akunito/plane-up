@@ -35,6 +35,7 @@ import {
   BACKOFF_MAX_MS,
   createItem,
   createQueue,
+  deleteItem,
   deviceLock,
   discard,
   discardHead,
@@ -926,6 +927,34 @@ export class Controller {
       return { ok: false, error: out.failure };
     }
     await this.learn([out.body as unknown as ItemData], startedAt, target);
+    return { ok: true };
+  }
+
+  /**
+   * Deletes the item (APLANE-81): online only, like the main app's delete (soft, the server's DELETE). Refused while
+   * the device still holds changes to it: they would come back "gone" and the person would not know they were lost.
+   */
+  async deleteItem(itemId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (this.openedOffline || !this.ownsStore()) {
+      void this.reconnect();
+      return { ok: false, error: "offline" };
+    }
+    const item = this.state.known[itemId]?.data;
+    if (!item) return { ok: false, error: "gone" };
+    if (this.state.queue.entries.some((e) => e.op.target === itemId)) return { ok: false, error: "waiting" };
+    const target = this.store;
+    const out = await deleteItem(this.client(), item.project.id, itemId);
+    if (out.kind === "failed") {
+      this.set({ connection: out.failure });
+      return { ok: false, error: out.failure };
+    }
+    if (out.kind === "refused") return { ok: false, error: out.status === 404 ? "gone" : out.error };
+    if (this.store !== target) return { ok: true }; // a workspace switch meanwhile: the next load reads the server
+    const known = { ...this.state.known };
+    delete known[itemId];
+    this.set({ known });
+    this.saveSnapshot();
+    void this.refresh();
     return { ok: true };
   }
 

@@ -120,7 +120,7 @@ test.describe("inventory in the main app @inventory-main", () => {
     await restoreSeed(page);
   });
 
-  test("counter, widget and list agree for two viewers; pinned rows are not counted (S20)", async ({
+  test("counter, widget and list agree for two viewers; a needed pinned row counts (S20, APLANE-77)", async ({
     page,
     browser,
   }, info) => {
@@ -136,8 +136,9 @@ test.describe("inventory in the main app @inventory-main", () => {
           );
       };
       // Ana sees Home, Mine and Open; Bo sees Home only.
-      await check("ana", page, 6);
-      await check("bo", bo.page, 4);
+      // Bread (pinned, needed) counts since APLANE-77; Eggs (pinned, not needed) is not on the list.
+      await check("ana", page, 7);
+      await check("bo", bo.page, 5);
     } finally {
       await bo.context.close();
     }

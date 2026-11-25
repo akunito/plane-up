@@ -10,16 +10,11 @@ import { ago, listNames } from "../i18n";
 import { Ago, Dialog, Icon, NumberField, Rich, parseIntStrict, useCtx } from "../ui";
 import { NavToggle } from "./Nav";
 
-/** counts: the to-buy counter as icons and numbers (cart: missing, pin: pinned), the sentence for screen readers.
+/** counts: the to-buy counter as an icon and a number (cart: missing; pinned rows count too since APLANE-77), the
+ * sentence for screen readers.
  * The sentence did not fit beside the Plane menu toggle and the tabs at 360 px in any language (APLANE-73
  * mockup: 0 of 6 cases on one line; icons: 6 of 6). */
-export function Tabs({
-  active,
-  counts,
-}: {
-  active: "shopping" | "inventory";
-  counts?: { missing: number; pinned: number };
-}) {
+export function Tabs({ active, counts }: { active: "shopping" | "inventory"; counts?: { missing: number } }) {
   const { t } = useCtx();
   return (
     <header className="topbar">
@@ -42,11 +37,6 @@ export function Tabs({
             <span className="count">
               {Icon.cart(14)}
               {counts.missing}
-            </span>
-            <span className="count">
-              {/* Filled: the rows' sign for pinned (the outline pin means not pinned). */}
-              {Icon.pin(true, 14)}
-              {counts.pinned}
             </span>
           </span>
         </span>

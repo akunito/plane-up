@@ -32,7 +32,7 @@ TABLE = [
     ("buy", {}, False, {m: "applied" for m in MODES}),
     ("mark_ordered", None, False, {m: "applied" for m in MODES}),
     ("set_level", {"level": "out"}, True, {"level": "applied"}),
-    ("set_needed", {"needed": False}, True, {"on_demand": "applied"}),
+    ("set_needed", {"needed": False}, True, {"on_demand": "applied", "pinned": "applied"}),
     ("pin", {"pinned": True}, True, {"on_demand": "applied", "pinned": "applied"}),
     ("recount", {"quantity": 5}, True, {"units": "applied"}),
 ]

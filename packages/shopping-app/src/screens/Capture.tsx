@@ -136,7 +136,7 @@ export function Capture({ s }: { s: AppState }) {
           if (!k || !state) return null;
           const hint =
             state.mode === "pinned"
-              ? t("always_on_list")
+              ? t("badge_pinned")
               : state.mode === "on_demand"
                 ? t("occasional")
                 : state.mode === "units"

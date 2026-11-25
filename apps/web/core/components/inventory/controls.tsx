@@ -6,7 +6,7 @@
 
 // The one-tap state control of an item, by mode, shared by Project › Inventory and the Home widget:
 // needed (occasional), the three levels, − and + with the count (units; the table also lets you type a
-// recount), and the pinned hint.
+// recount). Pinned items take the needed toggle too (APLANE-77).
 
 import type { InputHTMLAttributes } from "react";
 import { useEffect, useRef, useState } from "react";
@@ -92,8 +92,7 @@ export function StateControl(props: {
   recount?: boolean;
 }) {
   const { item, t, onOp, recount } = props;
-  if (item.mode === "pinned") return <span className="text-13 text-tertiary">{t("pinned_hint")}</span>;
-  if (item.mode === "on_demand")
+  if (item.mode === "on_demand" || item.mode === "pinned")
     return (
       <button
         type="button"

@@ -17,8 +17,8 @@ export interface DeriveInput {
 /** The quantity to buy, or 0 when the item is not on the to-buy list. */
 export function toBuy(i: DeriveInput): number {
   switch (i.mode) {
+    // Pinned = on_demand plus "shown first in the inventory" (APLANE-77): never always on the list.
     case "pinned":
-      return i.has_open_order ? 0 : 1;
     case "on_demand":
       return i.needed && !i.has_open_order ? 1 : 0;
     case "level":
@@ -31,9 +31,4 @@ export function toBuy(i: DeriveInput): number {
       return Math.max(1, target - have - i.on_order);
     }
   }
-}
-
-/** The sidebar counter counts what is really missing; pinned rows never do, or it never reaches 0. */
-export function counts(mode: Mode): boolean {
-  return mode !== "pinned";
 }

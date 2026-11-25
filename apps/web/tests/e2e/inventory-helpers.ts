@@ -13,6 +13,7 @@ export type Item = {
   id: string;
   name: string;
   rev: number;
+  mode: string;
   project: { id: string };
   needed: boolean;
   level: string | null;
@@ -44,9 +45,12 @@ export async function restoreSeed(page: Page) {
   // their operations and make them stale (phase 4 re-review).
   await page.goto("about:blank");
   const ops: Record<string, unknown>[] = [];
-  const want: [string, { needed?: boolean; quantity?: number; level?: string }][] = [
+  const want: [string, { needed?: boolean; quantity?: number; level?: string; pinned?: boolean }][] = [
     ["Milk", { needed: true }],
     ["Salt", { needed: false }],
+    // Pinned (APLANE-77): Bread needed, Eggs not.
+    ["Bread", { needed: true }],
+    ["Eggs", { needed: false, pinned: true }],
     ["Wipes", { quantity: 1 }],
     ["Protein", { quantity: 0 }],
     // Ticked by the offline spec (a buy sets a level item to "ok"); seeded "out".
@@ -57,6 +61,26 @@ export async function restoreSeed(page: Page) {
     // Sequential: each read gives the revision its own operation names.
     // oxlint-disable-next-line no-await-in-loop
     const now = await item(page, name);
+    // The pin goes in a batch of its own and the item is read again: the set_needed below needs the revision the
+    // pin produced (both are compare-and-set).
+    if (state.pinned !== undefined && (now.mode === "pinned") !== state.pinned) {
+      // oxlint-disable-next-line no-await-in-loop -- rare: only after a test stopped half-way
+      await apiPost(page, "/api/workspaces/qa-inv/inventory/ops/", {
+        ops: [
+          {
+            v: 1,
+            client_op_id: randomUUID(),
+            queue_id: null,
+            target: now.id,
+            op: "pin",
+            args: { pinned: state.pinned },
+            base_rev: now.rev,
+          },
+        ],
+      });
+      // oxlint-disable-next-line no-await-in-loop
+      Object.assign(now, await item(page, name));
+    }
     if (state.needed !== undefined && now.needed !== state.needed)
       ops.push({ target: now.id, op: "set_needed", args: { needed: state.needed }, base_rev: now.rev });
     if (state.quantity !== undefined && now.quantity !== state.quantity)

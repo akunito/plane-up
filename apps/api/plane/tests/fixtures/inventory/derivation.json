@@ -1,23 +1,149 @@
 {
   "about": "The to-buy rule, shared by the API (plane/app/inventory/derive.py) and the TypeScript package. Each case: item state, open orders, expected to_buy (0 = not on the list). Brief: Item state, Orders.",
   "cases": [
-    {"name": "pinned is always on the list", "mode": "pinned", "on_order": 0, "has_open_order": false, "to_buy": 1},
-    {"name": "pinned leaves the list while ordered", "mode": "pinned", "on_order": 1, "has_open_order": true, "to_buy": 0},
-    {"name": "on_demand needed", "mode": "on_demand", "needed": true, "on_order": 0, "has_open_order": false, "to_buy": 1},
-    {"name": "on_demand not needed", "mode": "on_demand", "needed": false, "on_order": 0, "has_open_order": false, "to_buy": 0},
-    {"name": "on_demand needed but ordered", "mode": "on_demand", "needed": true, "on_order": 1, "has_open_order": true, "to_buy": 0},
-    {"name": "level ok", "mode": "level", "level": "ok", "on_order": 0, "has_open_order": false, "to_buy": 0},
-    {"name": "level low", "mode": "level", "level": "low", "on_order": 0, "has_open_order": false, "to_buy": 1},
-    {"name": "level out", "mode": "level", "level": "out", "on_order": 0, "has_open_order": false, "to_buy": 1},
-    {"name": "level out but ordered", "mode": "level", "level": "out", "on_order": 1, "has_open_order": true, "to_buy": 0},
-    {"name": "units at the minimum is not on the list", "mode": "units", "quantity": 2, "min_quantity": 2, "on_order": 0, "has_open_order": false, "to_buy": 0},
-    {"name": "units below the minimum buys up to the minimum", "mode": "units", "quantity": 0, "min_quantity": 2, "on_order": 0, "has_open_order": false, "to_buy": 2},
-    {"name": "units below the minimum buys up to restock_to", "mode": "units", "quantity": 1, "min_quantity": 2, "restock_to": 6, "on_order": 0, "has_open_order": false, "to_buy": 5},
-    {"name": "units: an order covers part, the rest stays on the list", "mode": "units", "quantity": 0, "min_quantity": 4, "restock_to": 6, "on_order": 2, "has_open_order": true, "to_buy": 4},
-    {"name": "units: an order covers the minimum", "mode": "units", "quantity": 0, "min_quantity": 2, "on_order": 2, "has_open_order": true, "to_buy": 0},
-    {"name": "units: a negative quantity counts as 0", "mode": "units", "quantity": -3, "min_quantity": 1, "on_order": 0, "has_open_order": false, "to_buy": 1},
-    {"name": "units: -3 with minimum 1 and 2 on order is off the list (S47)", "mode": "units", "quantity": -3, "min_quantity": 1, "on_order": 2, "has_open_order": true, "to_buy": 0},
-    {"name": "units: an order that reaches the minimum takes it off the list", "mode": "units", "quantity": 1, "min_quantity": 2, "restock_to": 2, "on_order": 1, "has_open_order": true, "to_buy": 0},
-    {"name": "units: what is on order counts against the restock level", "mode": "units", "quantity": 0, "min_quantity": 3, "restock_to": 3, "on_order": 2, "has_open_order": true, "to_buy": 1}
+    {
+      "name": "pinned not needed is not on the list",
+      "mode": "pinned",
+      "needed": false,
+      "on_order": 0,
+      "has_open_order": false,
+      "to_buy": 0
+    },
+    {
+      "name": "pinned without needed is not on the list",
+      "mode": "pinned",
+      "on_order": 0,
+      "has_open_order": false,
+      "to_buy": 0
+    },
+    { "name": "pinned needed", "mode": "pinned", "needed": true, "on_order": 0, "has_open_order": false, "to_buy": 1 },
+    {
+      "name": "pinned needed but ordered",
+      "mode": "pinned",
+      "needed": true,
+      "on_order": 1,
+      "has_open_order": true,
+      "to_buy": 0
+    },
+    {
+      "name": "on_demand needed",
+      "mode": "on_demand",
+      "needed": true,
+      "on_order": 0,
+      "has_open_order": false,
+      "to_buy": 1
+    },
+    {
+      "name": "on_demand not needed",
+      "mode": "on_demand",
+      "needed": false,
+      "on_order": 0,
+      "has_open_order": false,
+      "to_buy": 0
+    },
+    {
+      "name": "on_demand needed but ordered",
+      "mode": "on_demand",
+      "needed": true,
+      "on_order": 1,
+      "has_open_order": true,
+      "to_buy": 0
+    },
+    { "name": "level ok", "mode": "level", "level": "ok", "on_order": 0, "has_open_order": false, "to_buy": 0 },
+    { "name": "level low", "mode": "level", "level": "low", "on_order": 0, "has_open_order": false, "to_buy": 1 },
+    { "name": "level out", "mode": "level", "level": "out", "on_order": 0, "has_open_order": false, "to_buy": 1 },
+    {
+      "name": "level out but ordered",
+      "mode": "level",
+      "level": "out",
+      "on_order": 1,
+      "has_open_order": true,
+      "to_buy": 0
+    },
+    {
+      "name": "units at the minimum is not on the list",
+      "mode": "units",
+      "quantity": 2,
+      "min_quantity": 2,
+      "on_order": 0,
+      "has_open_order": false,
+      "to_buy": 0
+    },
+    {
+      "name": "units below the minimum buys up to the minimum",
+      "mode": "units",
+      "quantity": 0,
+      "min_quantity": 2,
+      "on_order": 0,
+      "has_open_order": false,
+      "to_buy": 2
+    },
+    {
+      "name": "units below the minimum buys up to restock_to",
+      "mode": "units",
+      "quantity": 1,
+      "min_quantity": 2,
+      "restock_to": 6,
+      "on_order": 0,
+      "has_open_order": false,
+      "to_buy": 5
+    },
+    {
+      "name": "units: an order covers part, the rest stays on the list",
+      "mode": "units",
+      "quantity": 0,
+      "min_quantity": 4,
+      "restock_to": 6,
+      "on_order": 2,
+      "has_open_order": true,
+      "to_buy": 4
+    },
+    {
+      "name": "units: an order covers the minimum",
+      "mode": "units",
+      "quantity": 0,
+      "min_quantity": 2,
+      "on_order": 2,
+      "has_open_order": true,
+      "to_buy": 0
+    },
+    {
+      "name": "units: a negative quantity counts as 0",
+      "mode": "units",
+      "quantity": -3,
+      "min_quantity": 1,
+      "on_order": 0,
+      "has_open_order": false,
+      "to_buy": 1
+    },
+    {
+      "name": "units: -3 with minimum 1 and 2 on order is off the list (S47)",
+      "mode": "units",
+      "quantity": -3,
+      "min_quantity": 1,
+      "on_order": 2,
+      "has_open_order": true,
+      "to_buy": 0
+    },
+    {
+      "name": "units: an order that reaches the minimum takes it off the list",
+      "mode": "units",
+      "quantity": 1,
+      "min_quantity": 2,
+      "restock_to": 2,
+      "on_order": 1,
+      "has_open_order": true,
+      "to_buy": 0
+    },
+    {
+      "name": "units: what is on order counts against the restock level",
+      "mode": "units",
+      "quantity": 0,
+      "min_quantity": 3,
+      "restock_to": 3,
+      "on_order": 2,
+      "has_open_order": true,
+      "to_buy": 1
+    }
   ]
 }
