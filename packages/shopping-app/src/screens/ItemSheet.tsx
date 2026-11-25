@@ -474,8 +474,14 @@ export function ItemSheet({ s, id }: { s: AppState; id: string }) {
               onClick={async () => {
                 // One request at a time; Cancel waits too, or a tap after it would queue an op on a deleted item.
                 setDeleteBusy(true);
-                const out = await c.deleteItem(id);
-                setDeleteBusy(false);
+                let out: Awaited<ReturnType<typeof c.deleteItem>>;
+                try {
+                  out = await c.deleteItem(id);
+                } catch {
+                  out = { ok: false, error: "server" };
+                } finally {
+                  setDeleteBusy(false);
+                }
                 setDeleting(false);
                 if (!out.ok)
                   return setMessage(
