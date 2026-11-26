@@ -1,7 +1,7 @@
 // Inventory by list: every item, with its one-tap control, typing a recount, the "recount" mark, and
 // orders on the way (mockup Inventario). Lists load when shown and reload with every refresh.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { view } from "@plane/inventory";
 import type { AppState } from "../controller";
 import type { ItemData, Order } from "../model";
@@ -92,6 +92,20 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
   }
   const pinned = listed.filter((k) => shown[k.data.id]!.mode === "pinned");
 
+  // A pin adds or removes a row in the Pinned section ABOVE the lists, which moves every row below it by a row's
+  // height: the row just tapped is put back where it was on the screen (audit 2026-11-26; browser scroll anchoring
+  // does not do it at the top of the page, and iOS has none). Only for a tap of the last two seconds.
+  const main = useRef<HTMLElement>(null);
+  const anchor = useRef<{ el: Element; top: number; at: number } | null>(null);
+  const pinnedKey = pinned.map((k) => k.data.id).join(",");
+  useLayoutEffect(() => {
+    const a = anchor.current;
+    anchor.current = null;
+    if (!a || !main.current || !a.el.isConnected || Date.now() - a.at > 2000) return;
+    const moved = a.el.getBoundingClientRect().top - a.top;
+    if (moved) main.current.scrollTop += moved;
+  }, [pinnedKey]);
+
   return (
     <div className="screen">
       <Tabs active="inventory" />
@@ -111,7 +125,14 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
         ))}
       </nav>
       <QueueStatus s={s} />
-      <main className="scroll">
+      <main
+        className="scroll"
+        ref={main}
+        onClickCapture={(e) => {
+          const el = (e.target as Element).closest(".row");
+          anchor.current = el ? { el, top: el.getBoundingClientRect().top, at: Date.now() } : null;
+        }}
+      >
         {pinned.length > 0 ? (
           // Pinned: what to check first when reviewing what is needed. Shown again in their list below, so pinning
           // never moves a row away from under the finger (owner, 2026-11-26, APLANE-77).

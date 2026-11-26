@@ -1,5 +1,5 @@
 // Small shared pieces. Real buttons and labels; every action's accessible name includes the item;
-// touch targets at least 44 px (style.css); low and out told apart by text and icon, not colour alone.
+// icon-only touch targets 44 px, labelled controls 44 px × --control-scale (style.css); low and out told apart by text and icon, not colour alone.
 
 import { Fragment, createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";

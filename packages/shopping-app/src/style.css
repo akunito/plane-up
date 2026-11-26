@@ -115,6 +115,14 @@ select {
   white-space: nowrap;
 }
 
+/* Icon-only buttons keep a 44 px target: --control-scale trims the room between a label and its border, and these
+   have no label (audit 2026-11-26: the pin and the stepper's ± had shrunk to 37 px). */
+.icon-button,
+.icon {
+  min-height: 44px;
+  min-width: 44px;
+}
+
 .screen {
   height: 100%;
   display: flex;
@@ -403,8 +411,8 @@ select {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: calc(44px * var(--control-scale));
-  min-width: calc(44px * var(--control-scale));
+  min-height: 44px;
+  min-width: 44px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: transparent;
@@ -538,7 +546,7 @@ select {
 /* In a row the list name and hint shrink and wrap, right-aligned, and the name keeps a floor: with text at 130 %
    a pinned row's "Pinned · bought …" took the whole width and squeezed the name to one letter per line (phase 9,
    measured on the Realme). The 130 % / 200 % measurements below were made at the text sizes before APLANE-78
-   (text since ×0.8, the em floors scale with it). */
+   (text since × 0.9, the em floors scale with it). */
 .row > .sub.inline {
   /* Flex shrink is shared in proportion to factor x base size, never in order: any share wraps the badge's text
      ('Running low' at 100 % with a long list name: an equal factor took 25 px, 100x still a fraction of a pixel
@@ -765,7 +773,7 @@ button.stepper-value {
   padding: 8px 16px;
 }
 
-/* A chip in a row that scrolls must not shrink: .chip's min-width (44px × --control-scale) replaces the automatic minimum, so with
+/* A chip in a row that scrolls must not shrink: .chip's min-width (44px × scale) replaces the automatic minimum, so with
    more lists than fit the chips shrank below their text and the names ran into each other (prod, 2026-11-23,
    five HOME lists on a phone). */
 .chips.scroll-x > .chip {
@@ -985,11 +993,11 @@ button.stepper-value {
 }
 
 /* Plane's sidebar as a drawer (APLANE-73). The toggle sits where the main app's does on mobile (left of the
-   header). Its 20 px icon is centred in a 44 px target (× --control-scale since 2026-11-26), (target - 20) / 2 in
-   from each side: minus that puts the icon on the 16 px content edge and ends the target where the tabs begin. */
+   header). Its 20 px icon is centred in a 44 px target, 12 px in from each side: -12 px puts the icon on the
+   16 px content edge and ends the target exactly where the tabs begin. */
 .topbar > .nav-toggle {
-  margin-left: calc((20px - 44px * var(--control-scale)) / 2);
-  margin-right: calc((20px - 44px * var(--control-scale)) / 2);
+  margin-left: -12px;
+  margin-right: -12px;
 }
 
 /* The to-buy counter as icons and numbers: the same width in every language (APLANE-73 mockup). */

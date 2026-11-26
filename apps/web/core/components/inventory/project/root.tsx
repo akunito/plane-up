@@ -8,7 +8,7 @@
 // the item sheet, the aisle-order editor and the bulk rename of a category. Online only: state changes go
 // to ops/ one at a time with a fresh queue id (online.ts); data changes go to the item endpoint.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Lists, ProjectList } from "@plane/inventory";
 import {
   audience,
@@ -74,6 +74,29 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
   const [dialog, setDialog] = useState<Dialog>(null);
   const [newName, setNewName] = useState("");
   const loadSeq = useRef(0);
+  // A pin (the Tracking select) adds or removes a row in the Pinned group ABOVE the list, moving every row below:
+  // the row just changed is put back where it was on the screen (audit 2026-11-26). Only for the last two seconds.
+  const anchor = useRef<{ el: Element; top: number; at: number } | null>(null);
+  const pinnedKey =
+    items
+      ?.filter((i) => i.mode === "pinned")
+      .map((i) => i.id)
+      .join(",") ?? "";
+  useLayoutEffect(() => {
+    const a = anchor.current;
+    anchor.current = null;
+    if (!a || !a.el.isConnected || Date.now() - a.at > 2000) return;
+    const moved = a.el.getBoundingClientRect().top - a.top;
+    if (!moved) return;
+    let box: Element | null = a.el.parentElement;
+    while (box && !(box.scrollHeight > box.clientHeight && /auto|scroll/.test(getComputedStyle(box).overflowY)))
+      box = box.parentElement;
+    (box ?? document.scrollingElement)?.scrollBy(0, moved);
+  }, [pinnedKey]);
+  const markRow = (e: { target: EventTarget }) => {
+    const el = (e.target as Element).closest("tr");
+    anchor.current = el ? { el, top: el.getBoundingClientRect().top, at: Date.now() } : null;
+  };
   const listsSeq = useRef(0);
 
   const loadLists = useCallback(async () => {
@@ -109,7 +132,10 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
         setItems([]);
         return;
       }
-      setItems(out.items as Item[]);
+      // Alphabetical once per load, not on every render: a rename must not move the row (and the focus) under the
+      // person's cursor (audit 2026-11-26). es2022 lib: no toSorted.
+      // oxlint-disable-next-line unicorn/no-array-sort -- sorts the fresh array it owns
+      setItems((out.items as Item[]).sort((a, b) => a.name.localeCompare(b.name)));
     },
     [opts, projectId, t]
   );
@@ -265,7 +291,11 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
               <option key={c} value={c} />
             ))}
           </datalist>
-          <table className="w-full min-w-[960px] border-collapse text-left text-13">
+          <table
+            className="w-full min-w-[960px] border-collapse text-left text-13"
+            onClickCapture={markRow}
+            onChangeCapture={markRow}
+          >
             <thead className="text-11 text-tertiary uppercase">
               <tr>
                 <th className={`${CELL} w-[22%]`}>{t("col_item")}</th>
@@ -279,61 +309,55 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
                 <th className={CELL} />
               </tr>
             </thead>
-            <tbody>
-              {items === null ? (
+            {items === null || items.length === 0 ? (
+              <tbody>
                 <tr>
                   <td className={CELL} colSpan={9}>
-                    <span className="text-tertiary">{t("loading")}</span>
+                    <span className="text-tertiary">{t(items === null ? "loading" : "list_empty")}</span>
                   </td>
                 </tr>
-              ) : items.length === 0 ? (
-                <tr>
-                  <td className={CELL} colSpan={9}>
-                    <span className="text-tertiary">{t("list_empty")}</span>
-                  </td>
-                </tr>
-              ) : (
-                (() => {
-                  const row = (item: Item, key: string) => (
-                    <ItemRow
-                      key={key}
-                      item={item}
-                      t={t}
-                      onOp={(name, args) => op(item, name, args)}
-                      onData={(data) => saveData(item, data)}
-                      onUnits={() => setDialog({ kind: "units", item })}
-                      onDetails={() => setDialog({ kind: "sheet", itemId: item.id })}
-                      onDelete={() => setDialog({ kind: "delete_item", item })}
-                    />
-                  );
-                  // Pinned rows gathered at the top AND kept in the alphabetical list below, so pinning never moves a
-                  // row (owner, 2026-11-26, APLANE-77). es2022 lib: no toSorted.
-                  // oxlint-disable-next-line unicorn/no-array-sort -- sorts a copy; es2022 has no toSorted
-                  const all = [...items].sort((a, b) => a.name.localeCompare(b.name));
-                  const pinned = all.filter((i) => i.mode === "pinned");
-                  return (
-                    <>
-                      {pinned.length > 0 && (
-                        <>
-                          <tr>
-                            <th scope="rowgroup" colSpan={9} className={`${CELL} text-11 text-tertiary uppercase`}>
-                              {t("section_pinned")}
-                            </th>
-                          </tr>
-                          {pinned.map((item) => row(item, `pinned-${item.id}`))}
-                          <tr>
-                            <th scope="rowgroup" colSpan={9} className={`${CELL} text-11 text-tertiary uppercase`}>
-                              {t("section_all")}
-                            </th>
-                          </tr>
-                        </>
-                      )}
-                      {all.map((item) => row(item, item.id))}
-                    </>
-                  );
-                })()
-              )}
-            </tbody>
+              </tbody>
+            ) : (
+              (() => {
+                const row = (item: Item, key: string) => (
+                  <ItemRow
+                    key={key}
+                    item={item}
+                    t={t}
+                    onOp={(name, args) => op(item, name, args)}
+                    onData={(data) => saveData(item, data)}
+                    onUnits={() => setDialog({ kind: "units", item })}
+                    onDetails={() => setDialog({ kind: "sheet", itemId: item.id })}
+                    onDelete={() => setDialog({ kind: "delete_item", item })}
+                  />
+                );
+                // Pinned rows gathered at the top AND kept in the alphabetical list below (owner, 2026-11-26,
+                // APLANE-77); the order is the load's (see the fetch), so neither a pin nor a rename reorders rows.
+                // Two row groups, each with its own header (a rowgroup header covers only its <tbody>).
+                const pinned = items.filter((i) => i.mode === "pinned");
+                const head = (label: string) => (
+                  <tr>
+                    <th scope="rowgroup" colSpan={9} className={`${CELL} text-11 text-tertiary uppercase`}>
+                      {label}
+                    </th>
+                  </tr>
+                );
+                return (
+                  <>
+                    {pinned.length > 0 && (
+                      <tbody data-testid="inventory-pinned">
+                        {head(t("section_pinned"))}
+                        {pinned.map((item) => row(item, `pinned-${item.id}`))}
+                      </tbody>
+                    )}
+                    <tbody>
+                      {pinned.length > 0 && head(t("section_all"))}
+                      {items.map((item) => row(item, item.id))}
+                    </tbody>
+                  </>
+                );
+              })()
+            )}
           </table>
           {current && (
             <form

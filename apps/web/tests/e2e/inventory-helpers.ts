@@ -47,7 +47,7 @@ export async function restoreSeed(page: Page) {
   const ops: Record<string, unknown>[] = [];
   const want: [string, { needed?: boolean; quantity?: number; level?: string; pinned?: boolean }][] = [
     ["Milk", { needed: true }],
-    ["Salt", { needed: false }],
+    ["Salt", { needed: false, pinned: false }],
     // Pinned (APLANE-77): Bread needed, Eggs not.
     ["Bread", { needed: true, pinned: true }],
     ["Eggs", { needed: false, pinned: true }],

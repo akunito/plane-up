@@ -102,6 +102,18 @@ test.describe("shopping app @shopping", () => {
     await groceries.getByRole("button", { name: "Eggs: pin" }).click();
     await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs"]);
     await expect(names).toHaveText(before);
+    // On the screen too: a short phone, scrolled so Groceries sits under the Pinned section; pinning Salt adds a row
+    // above it, and the tapped row stays where it was (the app moves the scroll by the new row's height).
+    await page.setViewportSize({ width: 360, height: 520 });
+    const salt = groceries.locator(".row", { has: page.getByRole("button", { name: "Salt: pin" }) });
+    await page.locator("main.scroll").evaluate((m) => (m.scrollTop = 120));
+    const top = (await salt.boundingBox())!.y;
+    await salt.getByRole("button", { name: "Salt: pin" }).click();
+    await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs", "Salt"]);
+    const pinnedSalt = groceries.locator(".row", { has: page.getByRole("button", { name: "Salt: unpin" }) });
+    expect(Math.abs((await pinnedSalt.boundingBox())!.y - top)).toBeLessThanOrEqual(1);
+    await pinnedSalt.getByRole("button", { name: "Salt: unpin" }).click();
+    await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs"]);
   });
 
   test("a tick buys at once, sits under Done, and Undo reverts it on the server", async ({ page }) => {
@@ -433,7 +445,7 @@ test.describe("shopping app @shopping", () => {
       }
       return { out, scale };
     });
-    // The floor was 60 px for 15 px text; it scales with the text (APLANE-78: × 0.8 → 48 px, the same letters).
+    // The floor was 60 px for 15 px text; it scales with the text (APLANE-78: × 0.9 → 54 px, the same letters).
     const floor = 60 * fontScale;
     expect(result["1"]!.badgeShort, "badge wrapped at 100 %").toBe(0);
     for (const k of ["1", "1.3", "2"]) {

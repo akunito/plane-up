@@ -3,7 +3,7 @@
  * item's state only (engine item_state); a data edit answers with the full payload. Phase 5 re-review: a
  * state-only answer swapped into the row blanked its name and fields.
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeInventoryT } from "@/components/inventory/i18n";
 import { ProjectInventoryRoot } from "@/components/inventory/project/root";
@@ -35,11 +35,13 @@ const json = (status: number, body: unknown) =>
 let holdReload: Promise<void> | null = null;
 let patchStatus = 200;
 let listGets = 0;
+let listItems: unknown[] = [salt];
 
 beforeEach(() => {
   holdReload = null;
   patchStatus = 200;
   listGets = 0;
+  listItems = [salt];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init: RequestInit) => {
@@ -56,7 +58,7 @@ beforeEach(() => {
       if (url.endsWith("/lists/l1/items/")) {
         listGets += 1;
         if (listGets > 1 && holdReload) await holdReload;
-        return json(200, { items: [salt], open_orders: [] });
+        return json(200, { items: listItems, open_orders: [] });
       }
       if (url.endsWith("/inventory/ops/"))
         return json(200, {
@@ -89,6 +91,32 @@ afterEach(() => vi.unstubAllGlobals());
 const mount = () => render(<ProjectInventoryRoot workspaceSlug="home" projectId="p1" t={makeInventoryT("en")} />);
 
 describe("Project › Inventory table", () => {
+  it("APLANE-77: pinned rows are also gathered in a group at the top; the list below is alphabetical", async () => {
+    listItems = [
+      { ...salt, id: "z1", name: "Zucchini" },
+      { ...salt, id: "b1", name: "Bread", mode: "pinned", needed: true },
+      salt,
+    ];
+    const { container } = mount();
+    const pinned = await screen.findByTestId("inventory-pinned");
+    const names = (el: HTMLElement) =>
+      within(el)
+        .getAllByLabelText("Name")
+        .map((i) => (i as HTMLInputElement).value);
+    expect(within(pinned).getByText("Pinned")).toBeTruthy();
+    expect(names(pinned)).toEqual(["Bread"]);
+    const all = container.querySelectorAll("tbody")[1] as HTMLElement;
+    expect(within(all).getByText("All items")).toBeTruthy();
+    expect(names(all)).toEqual(["Bread", "Salt", "Zucchini"]);
+  });
+
+  it("APLANE-77: with nothing pinned there is no group and no header", async () => {
+    mount();
+    await screen.findByRole("button", { name: "Salt: Needed" });
+    expect(screen.queryByTestId("inventory-pinned")).toBeNull();
+    expect(screen.queryByText("All items")).toBeNull();
+  });
+
   it("a state-only operation answer is merged: the row keeps its name and fields", async () => {
     holdReload = new Promise(() => {}); // the quiet reload never answers: only the merge can show the row
     mount();
