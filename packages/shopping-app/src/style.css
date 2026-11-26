@@ -115,14 +115,6 @@ select {
   white-space: nowrap;
 }
 
-/* Icon-only buttons keep a 44 px target: --control-scale trims the room between a label and its border, and these
-   have no label (audit 2026-11-26: the pin and the stepper's ± had shrunk to 37 px). */
-.icon-button,
-.icon {
-  min-height: 44px;
-  min-width: 44px;
-}
-
 .screen {
   height: 100%;
   display: flex;
@@ -324,6 +316,14 @@ select {
   cursor: pointer;
   text-decoration: none;
   white-space: nowrap;
+}
+
+/* Icon-only buttons keep a 44 px target: --control-scale trims the room between a label and its border, and these
+   have no label. After the group rule above, or it loses the cascade (audit 2026-11-26: the ± had shrunk to 37 px). */
+.icon-button,
+.icon {
+  min-height: 44px;
+  min-width: 44px;
 }
 
 .primary {

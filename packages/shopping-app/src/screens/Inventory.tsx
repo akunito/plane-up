@@ -93,8 +93,9 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
   const pinned = listed.filter((k) => shown[k.data.id]!.mode === "pinned");
 
   // A pin adds or removes a row in the Pinned section ABOVE the lists, which moves every row below it by a row's
-  // height: the row just tapped is put back where it was on the screen (audit 2026-11-26; browser scroll anchoring
-  // does not do it at the top of the page, and iOS has none). Only for a tap of the last two seconds.
+  // height: the row just tapped is put back where it was on the screen, as far as the scroll allows (at the top, a
+  // row removed above still pulls it up) (audit 2026-11-26; browser scroll anchoring does not do it at the top of
+  // the page, and iOS has none). Only within two seconds of the tap and until the person scrolls.
   const main = useRef<HTMLElement>(null);
   const anchor = useRef<{ el: Element; top: number; at: number } | null>(null);
   const pinnedKey = pinned.map((k) => k.data.id).join(",");
@@ -128,6 +129,10 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
       <main
         className="scroll"
         ref={main}
+        // The person's own scroll ends the anchor: applied later it would undo that scroll.
+        onScroll={() => {
+          anchor.current = null;
+        }}
         onClickCapture={(e) => {
           const el = (e.target as Element).closest(".row");
           anchor.current = el ? { el, top: el.getBoundingClientRect().top, at: Date.now() } : null;

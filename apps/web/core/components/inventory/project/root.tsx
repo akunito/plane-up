@@ -75,7 +75,8 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
   const [newName, setNewName] = useState("");
   const loadSeq = useRef(0);
   // A pin (the Tracking select) adds or removes a row in the Pinned group ABOVE the list, moving every row below:
-  // the row just changed is put back where it was on the screen (audit 2026-11-26). Only for the last two seconds.
+  // the row just changed is put back where it was on the screen, as far as the scroll allows (at the top a row
+  // removed above still pulls it up) (audit 2026-11-26). Only within two seconds and until the person scrolls.
   const anchor = useRef<{ el: Element; top: number; at: number } | null>(null);
   const pinnedKey =
     items
@@ -93,6 +94,14 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
       box = box.parentElement;
     (box ?? document.scrollingElement)?.scrollBy(0, moved);
   }, [pinnedKey]);
+  // The person's own scroll ends the anchor: applied later it would undo that scroll (audit 2026-11-26).
+  useEffect(() => {
+    const drop = () => {
+      anchor.current = null;
+    };
+    window.addEventListener("scroll", drop, { capture: true, passive: true });
+    return () => window.removeEventListener("scroll", drop, { capture: true });
+  }, []);
   const markRow = (e: { target: EventTarget }) => {
     const el = (e.target as Element).closest("tr");
     anchor.current = el ? { el, top: el.getBoundingClientRect().top, at: Date.now() } : null;
@@ -132,10 +141,22 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
         setItems([]);
         return;
       }
-      // Alphabetical once per load, not on every render: a rename must not move the row (and the focus) under the
-      // person's cursor (audit 2026-11-26). es2022 lib: no toSorted.
-      // oxlint-disable-next-line unicorn/no-array-sort -- sorts the fresh array it owns
-      setItems((out.items as Item[]).sort((a, b) => a.name.localeCompare(b.name)));
+      // Alphabetical when the list is opened; a quiet reload (after every edit) keeps the order on screen and adds
+      // new rows at the end, so a rename never moves the row and its focus under the cursor (audit 2026-11-26).
+      // es2022 lib: no toSorted.
+      const fresh = out.items as Item[];
+      if (!quiet) {
+        // oxlint-disable-next-line unicorn/no-array-sort -- sorts the fresh array it owns
+        setItems(fresh.sort((a, b) => a.name.localeCompare(b.name)));
+        return;
+      }
+      setItems((rows) => {
+        const at = new Map((rows ?? []).map((r, i) => [r.id, i]));
+        // oxlint-disable-next-line unicorn/no-array-sort -- sorts the fresh array it owns
+        return fresh.sort(
+          (a, b) => (at.get(a.id) ?? Infinity) - (at.get(b.id) ?? Infinity) || a.name.localeCompare(b.name)
+        );
+      });
     },
     [opts, projectId, t]
   );

@@ -106,7 +106,11 @@ test.describe("shopping app @shopping", () => {
     // above it, and the tapped row stays where it was (the app moves the scroll by the new row's height).
     await page.setViewportSize({ width: 360, height: 520 });
     const salt = groceries.locator(".row", { has: page.getByRole("button", { name: "Salt: pin" }) });
-    await page.locator("main.scroll").evaluate((m) => (m.scrollTop = 120));
+    const scrolled = await page.locator("main.scroll").evaluate((m) => {
+      m.scrollTop = 120;
+      return m.scrollTop;
+    });
+    expect(scrolled, "main must scroll at this size, or the check below proves nothing").toBeGreaterThan(40);
     const top = (await salt.boundingBox())!.y;
     await salt.getByRole("button", { name: "Salt: pin" }).click();
     await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs", "Salt"]);
