@@ -129,6 +129,9 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
       <main
         className="scroll"
         ref={main}
+        // The manual anchor below is the only correction: Chrome's own scroll anchoring could add a second one when
+        // the Pinned section is above the viewport (re-review 2026-11-26).
+        style={{ overflowAnchor: "none" }}
         // The person's own scroll ends the anchor: applied later it would undo that scroll.
         onScroll={() => {
           anchor.current = null;

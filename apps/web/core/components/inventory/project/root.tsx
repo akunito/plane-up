@@ -75,7 +75,8 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
   const [newName, setNewName] = useState("");
   const loadSeq = useRef(0);
   // A pin (the Tracking select) adds or removes a row in the Pinned group ABOVE the list, moving every row below:
-  // the row just changed is put back where it was on the screen, as far as the scroll allows (at the top a row
+  // the row just changed is put back where it was on the screen (the scroller has overflow-anchor: none, so this is the
+  // only correction), as far as the scroll allows (at the top a row
   // removed above still pulls it up) (audit 2026-11-26). Only within two seconds and until the person scrolls.
   const anchor = useRef<{ el: Element; top: number; at: number } | null>(null);
   const pinnedKey =
@@ -252,7 +253,10 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
   const who = audienceText(visible, projectId, t);
 
   return (
-    <div className="flex h-full w-full flex-col gap-3 overflow-auto p-4" data-testid="project-inventory">
+    <div
+      className="flex h-full w-full flex-col gap-3 overflow-auto p-4 [overflow-anchor:none]"
+      data-testid="project-inventory"
+    >
       <div className="flex flex-wrap items-center gap-2">
         <div role="tablist" className="flex flex-wrap gap-1">
           {lists.map((l) => (
