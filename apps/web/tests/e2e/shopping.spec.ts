@@ -127,7 +127,10 @@ test.describe("shopping app @shopping", () => {
     expect(scrolled, "main must scroll at this size, or the check below proves nothing").toBeGreaterThan(40);
     // Fully in view first: Playwright scrolls a partly hidden target into view before clicking, and that scroll is
     // not the app's to undo.
-    await salt.scrollIntoViewIfNeeded();
+    // Centred in the list: near an edge Playwright's click scrolls the target again, after `top` is read (the 2026-11-26
+    // failures: +130 px of Playwright's own scroll on top of the anchor's correct +56). A real tap on the Realme kept
+    // the row to the pixel (st 440 → 496, row 402 → 402).
+    await salt.evaluate((el) => el.scrollIntoView({ block: "center" }));
     expect(await page.locator("main.scroll").evaluate((m) => m.scrollTop)).toBeGreaterThan(40);
     const top = (await salt.boundingBox())!.y;
     // What the page looked like, kept in the failure message (the 2026-11-26 failures needed a debug run each).
