@@ -142,15 +142,6 @@ test.describe("shopping app @shopping", () => {
         return se.apply(this, args as []);
       };
       document.addEventListener("focusin", (e) => log.push(`focus ${(e.target as Element).outerHTML.slice(0, 80)}`));
-      const saltRow = Array.from(m.querySelectorAll('section[aria-label="Groceries"] .row')).find((r) =>
-        r.textContent?.startsWith("Salt")
-      )!;
-      new MutationObserver((muts) => {
-        const kids = Array.from(m.children).map((c) => `${c.getAttribute("aria-label")}:${Math.round(c.getBoundingClientRect().height)}`);
-        log.push(
-          `mut n=${muts.length} h=${m.scrollHeight} st=${m.scrollTop} salt=${Math.round(saltRow.getBoundingClientRect().top - m.getBoundingClientRect().top)} conn=${saltRow.isConnected} status=${!!document.querySelector(".status")} kids=${kids.join(",")} added=${muts.flatMap((x) => Array.from(x.addedNodes).map((n) => (n as Element).className || n.nodeName)).join("/")}`
-        );
-      }).observe(m, { childList: true, subtree: true, characterData: true });
     });
     await salt.getByRole("button", { name: "Salt: pin" }).click();
     await page.waitForTimeout(1500);
