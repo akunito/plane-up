@@ -145,15 +145,6 @@ test.describe("shopping app @shopping", () => {
       const saltRow = Array.from(m.querySelectorAll('section[aria-label="Groceries"] .row')).find((r) =>
         r.textContent?.startsWith("Salt")
       )!;
-      for (const type of ["pointerdown", "touchstart", "mousedown", "click"])
-        m.addEventListener(
-          type,
-          (e) =>
-            log.push(
-              `${type} rel=${Math.round(saltRow.getBoundingClientRect().top - m.getBoundingClientRect().top)} mainTop=${Math.round(m.getBoundingClientRect().top)} st=${m.scrollTop} target=${(e.target as Element).getAttribute("aria-label") ?? (e.target as Element).tagName} status=${!!document.querySelector(".status")}`
-            ),
-          true
-        );
       new MutationObserver((muts) => {
         const kids = Array.from(m.children).map((c) => `${c.getAttribute("aria-label")}:${Math.round(c.getBoundingClientRect().height)}`);
         log.push(
