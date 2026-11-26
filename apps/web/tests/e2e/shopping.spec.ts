@@ -83,7 +83,9 @@ test.describe("shopping app @shopping", () => {
     // Bread and Eggs are pinned: at the top, and again in Groceries, which is alphabetical (owner, 2026-11-26).
     await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs"]);
     const before = await names.allTextContents();
-    expect(before).toEqual(before.toSorted((a, b) => a.localeCompare(b)));
+    // es2022 lib (L0-02 typecheck): no toSorted.
+    // oxlint-disable-next-line unicorn/no-array-sort -- sorts a copy
+    expect(before).toEqual([...before].sort((a, b) => a.localeCompare(b)));
     await expect(groceries.getByRole("button", { name: "Eggs: unpin" })).toHaveAttribute("aria-pressed", "true");
     const needed = groceries.getByRole("button", { name: "Eggs: needed" });
     await expect(needed).toHaveAttribute("aria-pressed", "false");
