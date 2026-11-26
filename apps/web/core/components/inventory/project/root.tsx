@@ -8,7 +8,7 @@
 // the item sheet, the aisle-order editor and the bulk rename of a category. Online only: state changes go
 // to ops/ one at a time with a fresh queue id (online.ts); data changes go to the item endpoint.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Lists, ProjectList } from "@plane/inventory";
 import {
   audience,
@@ -74,6 +74,45 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
   const [dialog, setDialog] = useState<Dialog>(null);
   const [newName, setNewName] = useState("");
   const loadSeq = useRef(0);
+  // A pin (the Tracking select) adds or removes a row in the Pinned group ABOVE the list, moving every row below:
+  // the row just changed is put back where it was on the screen (the scroller has overflow-anchor: none, so this is the
+  // only correction), as far as the scroll allows (at the top a row
+  // removed above still pulls it up) (audit 2026-11-26). Only within two seconds, and only if it has not scrolled since.
+  const anchor = useRef<{ el: Element; top: number; at: number; box: Element | null; scroll: number } | null>(null);
+  const pinnedKey =
+    items
+      ?.filter((i) => i.mode === "pinned")
+      .map((i) => i.id)
+      .join(",") ?? "";
+  useLayoutEffect(() => {
+    const a = anchor.current;
+    anchor.current = null;
+    if (!a || !a.el.isConnected || Date.now() - a.at > 2000) return;
+    const box = a.box ?? document.scrollingElement;
+    // A scroll since the change is the person's own: leave it (compared, not listened for).
+    if (!box || box.scrollTop !== a.scroll) return;
+    // Inside the scroller's box: something appearing above the scroller moves the box, not the rows in it.
+    const moved = a.el.getBoundingClientRect().top - (a.box?.getBoundingClientRect().top ?? 0) - a.top;
+    if (moved) box.scrollBy(0, moved);
+  }, [pinnedKey]);
+  const markRow = (e: { target: EventTarget }) => {
+    const el = (e.target as Element).closest("tr");
+    if (!el) {
+      anchor.current = null;
+      return;
+    }
+    let box: Element | null = el.parentElement;
+    while (box && !(box.scrollHeight > box.clientHeight && /auto|scroll/.test(getComputedStyle(box).overflowY)))
+      box = box.parentElement;
+    const scroller = box ?? document.scrollingElement;
+    anchor.current = {
+      el,
+      top: el.getBoundingClientRect().top - (box?.getBoundingClientRect().top ?? 0),
+      at: Date.now(),
+      box,
+      scroll: scroller?.scrollTop ?? 0,
+    };
+  };
   const listsSeq = useRef(0);
 
   const loadLists = useCallback(async () => {
@@ -220,7 +259,10 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
   const who = audienceText(visible, projectId, t);
 
   return (
-    <div className="flex h-full w-full flex-col gap-3 overflow-auto p-4" data-testid="project-inventory">
+    <div
+      className="flex h-full w-full flex-col gap-3 overflow-auto p-4 [overflow-anchor:none]"
+      data-testid="project-inventory"
+    >
       <div className="flex flex-wrap items-center gap-2">
         <div role="tablist" className="flex flex-wrap gap-1">
           {lists.map((l) => (
@@ -280,7 +322,11 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
               <option key={c} value={c} />
             ))}
           </datalist>
-          <table className="w-full min-w-[960px] border-collapse text-left text-13">
+          <table
+            className="w-full min-w-[960px] border-collapse text-left text-13"
+            onClickCapture={markRow}
+            onChangeCapture={markRow}
+          >
             <thead className="text-11 text-tertiary uppercase">
               <tr>
                 <th className={`${CELL} w-[22%]`}>{t("col_item")}</th>

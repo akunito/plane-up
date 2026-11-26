@@ -1,7 +1,7 @@
 // Inventory by list: every item, with its one-tap control, typing a recount, the "recount" mark, and
 // orders on the way (mockup Inventario). Lists load when shown and reload with every refresh.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { view } from "@plane/inventory";
 import type { AppState } from "../controller";
 import type { ItemData, Order } from "../model";
@@ -92,9 +92,23 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
   }
   const pinned = listed.filter((k) => shown[k.data.id]!.mode === "pinned");
 
-  // A pin adds or removes a row in the Pinned section above the lists; the browser's own scroll anchoring keeps the
-  // rows on screen in place when that section is above the viewport. A manual anchor was tried on 2026-11-26 and
-  // over-corrected on desktop (dev E2E: +186 px for a 56 px row, cause not found): removed.
+  // A pin adds or removes a row in the Pinned section ABOVE the lists, which moves every row below it by a row's
+  // height: the row just tapped is put back where it was on the screen, as far as the scroll allows (at the top, a
+  // row removed above still pulls it up) (audit 2026-11-26; browser scroll anchoring does not do it at the top of
+  // the page, and iOS has none). Only within two seconds of the tap, and only if the list has not scrolled since: a
+  // scroll in between is the person's own (compared, not listened for: a scroll event can arrive after the tap).
+  const main = useRef<HTMLElement>(null);
+  const anchor = useRef<{ el: Element; top: number; at: number; scroll: number } | null>(null);
+  const pinnedKey = pinned.map((k) => k.data.id).join(",");
+  useLayoutEffect(() => {
+    const a = anchor.current;
+    anchor.current = null;
+    if (!a || !main.current || !a.el.isConnected || Date.now() - a.at > 2000) return;
+    if (main.current.scrollTop !== a.scroll) return;
+    // Measured inside the list's box: a status line appearing above the list moves the box, not the rows in it.
+    const moved = a.el.getBoundingClientRect().top - main.current.getBoundingClientRect().top - a.top;
+    if (moved) main.current.scrollTop += moved;
+  }, [pinnedKey]);
 
   return (
     <div className="screen">
@@ -115,7 +129,24 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
         ))}
       </nav>
       <QueueStatus s={s} />
-      <main className="scroll">
+      <main
+        className="scroll"
+        ref={main}
+        // The manual anchor below is the only correction: Chrome's own scroll anchoring could add a second one when
+        // the Pinned section is above the viewport (re-review 2026-11-26).
+        style={{ overflowAnchor: "none" }}
+        onClickCapture={(e) => {
+          const el = (e.target as Element).closest(".row");
+          anchor.current = el
+            ? {
+                el,
+                top: el.getBoundingClientRect().top - e.currentTarget.getBoundingClientRect().top,
+                at: Date.now(),
+                scroll: e.currentTarget.scrollTop,
+              }
+            : null;
+        }}
+      >
         {pinned.length > 0 ? (
           // Pinned: what to check first when reviewing what is needed. Shown again in their list below, so pinning
           // never moves a row away from under the finger (owner, 2026-11-26, APLANE-77).

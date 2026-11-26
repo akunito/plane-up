@@ -109,6 +109,50 @@ test.describe("shopping app @shopping", () => {
     await groceries.getByRole("button", { name: "Eggs: pin" }).click();
     await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs"]);
     await expect(names).toHaveText(before);
+    // On the screen too: a short phone, scrolled so Groceries sits under the Pinned section; pinning Salt adds a row
+    // above it, and the tapped row stays where it was (the app moves the scroll by the new row's height).
+    await page.setViewportSize({ width: 360, height: 520 });
+    // Every list, so Salt is not the last row: at the very end of the scroll a box growing back (the status line
+    // leaving) clamps scrollTop and shifts the rows, which is the browser's doing (5 px on android, 2026-11-26).
+    await open(page, "#/inventory");
+    // Every list loads on its own when shown: one landing after the measurement below changes what sits above Salt
+    // (rows came and went in the 2026-11-26 debug log), which is not the pin's doing.
+    await page.waitForLoadState("networkidle");
+    await settled(page);
+    const salt = groceries.locator(".row", { has: page.getByRole("button", { name: "Salt: pin" }) });
+    const scrolled = await page.locator("main.scroll").evaluate((m) => {
+      m.scrollTop = 120;
+      return m.scrollTop;
+    });
+    expect(scrolled, "main must scroll at this size, or the check below proves nothing").toBeGreaterThan(40);
+    // Fully in view first: Playwright scrolls a partly hidden target into view before clicking, and that scroll is
+    // not the app's to undo.
+    await salt.scrollIntoViewIfNeeded();
+    expect(await page.locator("main.scroll").evaluate((m) => m.scrollTop)).toBeGreaterThan(40);
+    const top = (await salt.boundingBox())!.y;
+    // What the page looked like, kept in the failure message (the 2026-11-26 failures needed a debug run each).
+    const layout = () =>
+      page.locator("main.scroll").evaluate((m) => ({
+        scrollTop: Math.round(m.scrollTop),
+        mainTop: Math.round(m.getBoundingClientRect().top),
+        sections: Array.from(m.children).map(
+          (c) => `${c.getAttribute("aria-label")}:${Math.round(c.getBoundingClientRect().height)}`
+        ),
+      }));
+    const layoutBefore = JSON.stringify(await layout());
+    await salt.getByRole("button", { name: "Salt: pin" }).click();
+    await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs", "Salt"]);
+    const pinnedSalt = groceries.locator(".row", { has: page.getByRole("button", { name: "Salt: unpin" }) });
+    // Answered first: while the tap waits, the queue's status line sits above the list and shifts it ~16 px (flaked
+    // once on desktop, 2026-11-26), which is not the pin's doing.
+    await settled(page);
+    const layoutAfter = JSON.stringify(await layout());
+    expect(
+      Math.abs((await pinnedSalt.boundingBox())!.y - top),
+      `before ${layoutBefore} after ${layoutAfter}`
+    ).toBeLessThanOrEqual(1);
+    await pinnedSalt.getByRole("button", { name: "Salt: unpin" }).click();
+    await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs"]);
   });
 
   test("a tick buys at once, sits under Done, and Undo reverts it on the server", async ({ page }) => {
