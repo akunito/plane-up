@@ -293,14 +293,10 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
                   </td>
                 </tr>
               ) : (
-                // Pinned first, then the server's order (stable sort): what to check when reviewing what is needed
-                // (APLANE-77). es2022 lib: no toSorted.
-                [...items]
-                  // oxlint-disable-next-line unicorn/no-array-sort -- sorts a copy; es2022 has no toSorted
-                  .sort((a, b) => Number(b.mode === "pinned") - Number(a.mode === "pinned"))
-                  .map((item) => (
+                (() => {
+                  const row = (item: Item, key: string) => (
                     <ItemRow
-                      key={item.id}
+                      key={key}
                       item={item}
                       t={t}
                       onOp={(name, args) => op(item, name, args)}
@@ -309,7 +305,33 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
                       onDetails={() => setDialog({ kind: "sheet", itemId: item.id })}
                       onDelete={() => setDialog({ kind: "delete_item", item })}
                     />
-                  ))
+                  );
+                  // Pinned rows gathered at the top AND kept in the alphabetical list below, so pinning never moves a
+                  // row (owner, 2026-11-26, APLANE-77). es2022 lib: no toSorted.
+                  // oxlint-disable-next-line unicorn/no-array-sort -- sorts a copy; es2022 has no toSorted
+                  const all = [...items].sort((a, b) => a.name.localeCompare(b.name));
+                  const pinned = all.filter((i) => i.mode === "pinned");
+                  return (
+                    <>
+                      {pinned.length > 0 && (
+                        <>
+                          <tr>
+                            <th scope="rowgroup" colSpan={9} className={`${CELL} text-11 text-tertiary uppercase`}>
+                              {t("section_pinned")}
+                            </th>
+                          </tr>
+                          {pinned.map((item) => row(item, `pinned-${item.id}`))}
+                          <tr>
+                            <th scope="rowgroup" colSpan={9} className={`${CELL} text-11 text-tertiary uppercase`}>
+                              {t("section_all")}
+                            </th>
+                          </tr>
+                        </>
+                      )}
+                      {all.map((item) => row(item, item.id))}
+                    </>
+                  );
+                })()
               )}
             </tbody>
           </table>

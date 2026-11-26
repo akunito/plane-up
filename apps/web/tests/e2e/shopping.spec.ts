@@ -73,27 +73,35 @@ test.describe("shopping app @shopping", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("APLANE-77: pinned items come first in the inventory and are marked needed like any other", async ({ page }) => {
+  test("APLANE-77: pinned items are gathered at the top, stay in their list, and are marked needed like any other", async ({
+    page,
+  }) => {
     await open(page, `#/inventory/${INV!.inventory.lists["Groceries"]}`);
-    const names = page.locator('section[aria-label="Groceries"] .row .name');
-    // Bread and Eggs are pinned; the rest of Groceries follows in the list's order.
-    await expect(names.nth(0)).toHaveText("Bread");
-    await expect(names.nth(1)).toHaveText("Eggs");
-    await expect(page.getByRole("button", { name: "Eggs: unpin" })).toHaveAttribute("aria-pressed", "true");
-    const needed = page.getByRole("button", { name: "Eggs: needed" });
+    const pinnedSection = page.getByRole("region", { name: "Pinned" });
+    const groceries = page.getByRole("region", { name: "Groceries" });
+    const names = groceries.locator(".row .name");
+    // Bread and Eggs are pinned: at the top, and again in Groceries, which is alphabetical (owner, 2026-11-26).
+    await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs"]);
+    const before = await names.allTextContents();
+    expect(before).toEqual(before.toSorted((a, b) => a.localeCompare(b)));
+    await expect(groceries.getByRole("button", { name: "Eggs: unpin" })).toHaveAttribute("aria-pressed", "true");
+    const needed = groceries.getByRole("button", { name: "Eggs: needed" });
     await expect(needed).toHaveAttribute("aria-pressed", "false");
     await needed.click();
     await server(page, "Eggs", "needed").toBe(true);
     await open(page);
     await expect(page.getByRole("checkbox", { name: "Eggs: bought" })).toBeVisible();
     await expect(page.locator(".topbar .count")).toHaveText(["8"]);
-    // Unpinning keeps it needed: on the list still, now as an on-demand item.
+    // Unpinning keeps it needed, takes it out of the Pinned section, and leaves its Groceries row where it was.
     await open(page, `#/inventory/${INV!.inventory.lists["Groceries"]}`);
-    await page.getByRole("button", { name: "Eggs: unpin" }).click();
+    await groceries.getByRole("button", { name: "Eggs: unpin" }).click();
     await server(page, "Eggs", "needed").toBe(true);
-    await expect(page.getByRole("button", { name: "Eggs: pin" })).toHaveAttribute("aria-pressed", "false");
-    await page.getByRole("button", { name: "Eggs: pin" }).click();
-    await expect(page.getByRole("button", { name: "Eggs: unpin" })).toBeVisible();
+    await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread"]);
+    await expect(names).toHaveText(before);
+    await expect(groceries.getByRole("button", { name: "Eggs: pin" })).toHaveAttribute("aria-pressed", "false");
+    await groceries.getByRole("button", { name: "Eggs: pin" }).click();
+    await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs"]);
+    await expect(names).toHaveText(before);
   });
 
   test("a tick buys at once, sits under Done, and Undo reverts it on the server", async ({ page }) => {
@@ -343,7 +351,7 @@ test.describe("shopping app @shopping", () => {
     await page.setViewportSize({ width: 360, height: 740 });
     await page.goto("/shopping/");
     await expect(page.getByRole("checkbox", { name: "Nappies: bought" })).toBeVisible();
-    const { out: result, scale } = await page.evaluate(async () => {
+    const { out: result, scale: fontScale } = await page.evaluate(async () => {
       // oxlint-disable-next-line unicorn/consistent-function-scoping
       const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
       // Android's font scale multiplies every font size. Since APLANE-78 the app's sizes are calc(px × --font-scale)
@@ -426,7 +434,7 @@ test.describe("shopping app @shopping", () => {
       return { out, scale };
     });
     // The floor was 60 px for 15 px text; it scales with the text (APLANE-78: × 0.8 → 48 px, the same letters).
-    const floor = 60 * scale;
+    const floor = 60 * fontScale;
     expect(result["1"]!.badgeShort, "badge wrapped at 100 %").toBe(0);
     for (const k of ["1", "1.3", "2"]) {
       expect(result[k]!.name, `name width at ${k}`).toBeGreaterThan(floor);
@@ -621,9 +629,10 @@ const shot = async (page: Page, name: string, target?: Locator) => {
   await expect(target ?? page).toHaveScreenshot(`${name}.png`, { ...options, maxDiffPixelRatio: 0.01 });
 };
 
-// Every baseline renamed "-a78" at once (APLANE-77/78/81, 2026-11-25): text 20 % smaller, the pin counter gone,
+// Every baseline renamed "-a77" at once (APLANE-77/78/81, 2026-11-25): text 20 % smaller, the pin counter gone,
 // pinned rows first in the inventory, the sheet's Delete item. The new names create their baselines.
 // Renamed again "-a78": the fields follow the smaller text too (16px kept on iOS only).
+// Renamed "-b26" (2026-11-26): text back to × 0.9, controls × 0.85, the Pinned section in the inventory.
 test.describe("@visual-shopping", () => {
   test.skip(!INV, "the image under test has no shopping app");
   test.use({ storageState: authFile("qa-inv-ana") });
@@ -639,27 +648,27 @@ test.describe("@visual-shopping", () => {
     // Renamed when pinned rows gained "bought … (by …)" (APLANE-67, S17): the new name creates its baseline.
     // Renamed again with the Plane menu toggle and the counter as icons in the top bar (APLANE-73; again when
     // the pin became the filled one: an earlier dev run had made a baseline with the outline pin).
-    await shot(page, "vs-01-list-a78");
+    await shot(page, "vs-01-list-b26");
   });
 
   test("VS-02 shopping mode", async ({ page }) => {
     await open(page, "#/shop");
     await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
-    await shot(page, "vs-02-shop-a78");
+    await shot(page, "vs-02-shop-b26");
   });
 
   test("VS-03 quick capture", async ({ page }) => {
     await open(page, "#/capture");
     await page.getByRole("searchbox").fill("nap");
     await expect(page.getByRole("button", { name: "Nappies: Running low" })).toBeVisible();
-    await shot(page, "vs-03-capture-a78");
+    await shot(page, "vs-03-capture-b26");
   });
 
   test("VS-04 inventory", async ({ page }) => {
     await open(page, "#/inventory");
     await expect(page.getByRole("link", { name: "Open Mulch" })).toBeVisible();
     // Renamed with the Plane menu toggle in the top bar (APLANE-73; renamed again for its final margins).
-    await shot(page, "vs-04-inventory-a78");
+    await shot(page, "vs-04-inventory-b26");
   });
 
   test("VS-05 item sheet", async ({ page }) => {
@@ -668,21 +677,21 @@ test.describe("@visual-shopping", () => {
     await expect(page.getByText(/set it to: In stock/)).toBeVisible();
     // Renamed with each change to this screen (APLANE-66 photo field, then the camera button on touch screens):
     // the new name creates its baseline.
-    await shot(page, "vs-05-item-a78");
+    await shot(page, "vs-05-item-b26");
   });
 
   test("VS-06 order dialog", async ({ page }) => {
     await open(page);
     await page.getByRole("button", { name: "Protein: Mark ordered" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    await shot(page, "vs-06-order-a78", page.getByRole("dialog"));
+    await shot(page, "vs-06-order-b26", page.getByRole("dialog"));
   });
 
   test("VS-07 arrival dialog", async ({ page }) => {
     await open(page);
     await page.getByRole("button", { name: "Magnesium: the order arrived" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    await shot(page, "vs-07-arrival-a78", page.getByRole("dialog"));
+    await shot(page, "vs-07-arrival-b26", page.getByRole("dialog"));
   });
 
   test("VS-09 Plane's menu (APLANE-73)", async ({ page }) => {
@@ -691,12 +700,12 @@ test.describe("@visual-shopping", () => {
     const nav = page.getByRole("dialog", { name: "Plane" });
     await expect(nav.getByRole("button", { name: /Home$/ })).toBeVisible();
     // Renamed when the entries gained Plane's icons, and for the filled pin in the counter behind the scrim.
-    await shot(page, "vs-09-menu-a78");
+    await shot(page, "vs-09-menu-b26");
   });
 
   test("VS-08 waiting and unapplied", async ({ page }) => {
     await open(page, "#/pending");
     await expect(page.getByText("Nothing waiting.")).toBeVisible();
-    await shot(page, "vs-08-pending-a78");
+    await shot(page, "vs-08-pending-b26");
   });
 });

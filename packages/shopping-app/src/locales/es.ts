@@ -81,6 +81,7 @@ export const es: Dictionary = {
   toast_undone: "Deshecho.",
   toast_cannot_undo: "Esto ya no se puede deshacer.",
   undo: "Deshacer",
+  inventory_pinned: "Fijados",
   inventory_all: "Todas",
   new_item: "Nuevo artículo",
   list_project: "proyecto {project}",

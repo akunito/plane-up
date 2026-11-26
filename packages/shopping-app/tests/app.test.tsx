@@ -465,26 +465,33 @@ describe("inventory", () => {
     expect(api.ops().map((o) => [o.op, o.args.level])).toEqual([["set_level", "low"]]);
   });
 
-  it("the pin toggles pinned and occasional in one tap and keeps needed; pinned items come first (APLANE-77)", async () => {
+  it("the pin toggles pinned and occasional in one tap and keeps needed; pinned items are gathered at the top and stay in their list (APLANE-77)", async () => {
     await boot(catalog(), "#/inventory");
-    // Groceries: Bread (pinned) before Detergent, Milk and Salt.
+    const names = (region: HTMLElement) => [...region.querySelectorAll(".row .name")].map((a) => a.textContent);
+    // Groceries alphabetical, Bread included; Bread also in the Pinned section at the top.
     const groceries = await screen.findByRole("region", { name: "Groceries" });
-    expect([...groceries.querySelectorAll(".row .name")].map((a) => a.textContent)).toEqual([
-      "Bread",
-      "Detergent",
-      "Milk",
-      "Salt",
-    ]);
+    expect(names(groceries)).toEqual(["Bread", "Detergent", "Milk", "Salt"]);
+    expect(names(screen.getByRole("region", { name: "Pinned" }))).toEqual(["Bread"]);
     expect(within(groceries).getByRole("button", { name: "Bread: needed" }).getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(screen.getByRole("button", { name: "Bread: unpin" }));
+    // Unpinned: it leaves the Pinned section and stays where it was in its list (no jump under the finger).
+    fireEvent.click(within(groceries).getByRole("button", { name: "Bread: unpin" }));
     await settle();
     expect(api.server.items.get(BREAD)).toMatchObject({ mode: "on_demand", needed: true });
-    expect(screen.getByRole("button", { name: "Bread: pin" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Bread: pin" }));
+    expect(screen.queryByRole("region", { name: "Pinned" })).toBeNull();
+    expect(names(screen.getByRole("region", { name: "Groceries" }))).toEqual(["Bread", "Detergent", "Milk", "Salt"]);
+    // Pinning Milk: it appears at the top too, and its row in Groceries does not move.
+    fireEvent.click(
+      within(screen.getByRole("region", { name: "Groceries" })).getByRole("button", { name: "Milk: pin" })
+    );
     await settle();
-    fireEvent.click(screen.getByRole("button", { name: "Bread: needed" }));
+    expect(names(screen.getByRole("region", { name: "Pinned" }))).toEqual(["Milk"]);
+    expect(names(screen.getByRole("region", { name: "Groceries" }))).toEqual(["Bread", "Detergent", "Milk", "Salt"]);
+    // Either copy of the row acts on the item: needed off from the Pinned section.
+    fireEvent.click(
+      within(screen.getByRole("region", { name: "Pinned" })).getByRole("button", { name: "Milk: needed" })
+    );
     await settle();
-    expect(api.server.items.get(BREAD)).toMatchObject({ mode: "pinned", needed: false });
+    expect(api.server.items.get(MILK)).toMatchObject({ mode: "pinned", needed: false });
   });
 });
 

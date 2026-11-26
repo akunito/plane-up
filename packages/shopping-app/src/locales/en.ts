@@ -81,6 +81,7 @@ export const en = {
   toast_undone: "Undone.",
   toast_cannot_undo: "This can no longer be undone.",
   undo: "Undo",
+  inventory_pinned: "Pinned",
   inventory_all: "All",
   new_item: "New item",
   list_project: "project {project}",

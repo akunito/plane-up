@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { view } from "@plane/inventory";
 import type { AppState } from "../controller";
-import type { Order } from "../model";
+import type { ItemData, Order } from "../model";
 import { badge, openOrders } from "../model";
 import { Ago, Dialog, Icon, ItemControl, Rich, NumberField, parseIntStrict, useCtx, useTick } from "../ui";
 import { ArrivalDialog, AudienceText, BottomBar, QueueStatus, Tabs } from "./common";
@@ -32,6 +32,66 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
   const [recount, setRecount] = useState<{ id: string; name: string; value: string } | null>(null);
   const [arriving, setArriving] = useState<{ itemId: string; name: string; orders: Order[] } | null>(null);
 
+  // One row, in the pinned section (with its list's name) or in its list.
+  const row = (data: ItemData, pinnedRow: boolean) => {
+    const state = shown[data.id]!;
+    const mine = orders.filter((o) => o.item === data.id);
+    const kind = badge(state);
+    return (
+      <div className="row tall" key={pinnedRow ? `pinned-${data.id}` : data.id} data-item={data.id}>
+        <div className="grow">
+          <a href={`#/item/${data.id}`} className="name block" aria-label={t("open_item", { item: data.name })}>
+            {data.name}
+          </a>
+          {pinnedRow ? <span className="sub block">{data.list.name}</span> : null}
+          {kind === "below" ? (
+            <span className="sub warn-text block">{t("below_min", { min: state.min_quantity ?? 0 })}</span>
+          ) : null}
+          {kind === "recount" ? (
+            <span className="sub danger-text block" data-badge="recount">
+              {t("badge_recount")}
+            </span>
+          ) : null}
+          {mine.map((o) => (
+            <span key={o.id} className="sub accent block">
+              {Icon.truck()} <Rich k="ordered_line" vars={{ n: o.quantity, when: <Ago at={o.ordered_at} /> }} />
+            </span>
+          ))}
+        </div>
+        {mine.length > 0 ? (
+          <button
+            type="button"
+            className="secondary"
+            aria-label={t("arrived_label", { item: data.name })}
+            onClick={() => setArriving({ itemId: data.id, name: data.name, orders: mine })}
+          >
+            {t("arrived")}
+          </button>
+        ) : (
+          <ItemControl
+            data={data}
+            state={state}
+            onRecount={() =>
+              setRecount({ id: data.id, name: data.name, value: String(Math.max(state.quantity ?? 0, 0)) })
+            }
+          />
+        )}
+      </div>
+    );
+  };
+
+  // Alphabetical within a list (owner, 2026-11-26); pinned rows are also gathered at the top, across the lists shown.
+  const listed = Object.values(s.known)
+    .filter((k) => shown[k.data.id] && showing.some((l) => l.id === k.data.list.id))
+    .toSorted((a, b) => a.data.name.localeCompare(b.data.name));
+  const byList = new Map<string, typeof listed>();
+  for (const k of listed) {
+    const at = byList.get(k.data.list.id);
+    if (at) at.push(k);
+    else byList.set(k.data.list.id, [k]);
+  }
+  const pinned = listed.filter((k) => shown[k.data.id]!.mode === "pinned");
+
   return (
     <div className="screen">
       <Tabs active="inventory" />
@@ -52,16 +112,18 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
       </nav>
       <QueueStatus s={s} />
       <main className="scroll">
+        {pinned.length > 0 ? (
+          // Pinned: what to check first when reviewing what is needed. Shown again in their list below, so pinning
+          // never moves a row away from under the finger (owner, 2026-11-26, APLANE-77).
+          <section aria-label={t("inventory_pinned")}>
+            <h2 className="group list-head">
+              <span>{t("inventory_pinned")}</span>
+            </h2>
+            {pinned.map(({ data }) => row(data, true))}
+          </section>
+        ) : null}
         {showing.map((l) => {
-          const items = Object.values(s.known)
-            .filter((k) => k.data.list.id === l.id && shown[k.data.id])
-            // Pinned first: what to check when reviewing what is needed (owner, 2026-11-25, APLANE-77).
-            .toSorted(
-              (a, b) =>
-                Number(shown[b.data.id]!.mode === "pinned") - Number(shown[a.data.id]!.mode === "pinned") ||
-                a.data.sort_order - b.data.sort_order ||
-                a.data.name.localeCompare(b.data.name)
-            );
+          const items = byList.get(l.id) ?? [];
           return (
             <section key={l.id} aria-label={l.name}>
               <h2 className="group list-head">
@@ -71,56 +133,7 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
                 </span>
               </h2>
               {items.length === 0 ? <p className="empty small">{t("list_empty")}</p> : null}
-              {items.map(({ data }) => {
-                const state = shown[data.id]!;
-                const mine = orders.filter((o) => o.item === data.id);
-                const kind = badge(state);
-                return (
-                  <div className="row tall" key={data.id} data-item={data.id}>
-                    <div className="grow">
-                      <a
-                        href={`#/item/${data.id}`}
-                        className="name block"
-                        aria-label={t("open_item", { item: data.name })}
-                      >
-                        {data.name}
-                      </a>
-                      {kind === "below" ? (
-                        <span className="sub warn-text block">{t("below_min", { min: state.min_quantity ?? 0 })}</span>
-                      ) : null}
-                      {kind === "recount" ? (
-                        <span className="sub danger-text block" data-badge="recount">
-                          {t("badge_recount")}
-                        </span>
-                      ) : null}
-                      {mine.map((o) => (
-                        <span key={o.id} className="sub accent block">
-                          {Icon.truck()}{" "}
-                          <Rich k="ordered_line" vars={{ n: o.quantity, when: <Ago at={o.ordered_at} /> }} />
-                        </span>
-                      ))}
-                    </div>
-                    {mine.length > 0 ? (
-                      <button
-                        type="button"
-                        className="secondary"
-                        aria-label={t("arrived_label", { item: data.name })}
-                        onClick={() => setArriving({ itemId: data.id, name: data.name, orders: mine })}
-                      >
-                        {t("arrived")}
-                      </button>
-                    ) : (
-                      <ItemControl
-                        data={data}
-                        state={state}
-                        onRecount={() =>
-                          setRecount({ id: data.id, name: data.name, value: String(Math.max(state.quantity ?? 0, 0)) })
-                        }
-                      />
-                    )}
-                  </div>
-                );
-              })}
+              {items.map(({ data }) => row(data, false))}
             </section>
           );
         })}

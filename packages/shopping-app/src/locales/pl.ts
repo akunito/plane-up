@@ -81,6 +81,7 @@ export const pl: Dictionary = {
   toast_undone: "Cofnięto.",
   toast_cannot_undo: "Tego nie można już cofnąć.",
   undo: "Cofnij",
+  inventory_pinned: "Przypięte",
   inventory_all: "Wszystkie",
   new_item: "Nowy produkt",
   list_project: "projekt {project}",
