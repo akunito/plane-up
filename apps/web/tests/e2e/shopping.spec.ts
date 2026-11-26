@@ -110,6 +110,10 @@ test.describe("shopping app @shopping", () => {
     // Every list, so Salt is not the last row: at the very end of the scroll a box growing back (the status line
     // leaving) clamps scrollTop and shifts the rows, which is the browser's doing (5 px on android, 2026-11-26).
     await open(page, "#/inventory");
+    // Every list loads on its own when shown: one landing after the measurement below changes what sits above Salt
+    // (rows came and went in the 2026-11-26 debug log), which is not the pin's doing.
+    await page.waitForLoadState("networkidle");
+    await settled(page);
     const salt = groceries.locator(".row", { has: page.getByRole("button", { name: "Salt: pin" }) });
     const scrolled = await page.locator("main.scroll").evaluate((m) => {
       m.scrollTop = 120;
