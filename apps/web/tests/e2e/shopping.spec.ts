@@ -125,13 +125,27 @@ test.describe("shopping app @shopping", () => {
     await salt.scrollIntoViewIfNeeded();
     expect(await page.locator("main.scroll").evaluate((m) => m.scrollTop)).toBeGreaterThan(40);
     const top = (await salt.boundingBox())!.y;
+    // What the page looked like, kept in the failure message (the 2026-11-26 failures needed a debug run each).
+    const layout = () =>
+      page.locator("main.scroll").evaluate((m) => ({
+        scrollTop: Math.round(m.scrollTop),
+        mainTop: Math.round(m.getBoundingClientRect().top),
+        sections: Array.from(m.children).map(
+          (c) => `${c.getAttribute("aria-label")}:${Math.round(c.getBoundingClientRect().height)}`
+        ),
+      }));
+    const layoutBefore = JSON.stringify(await layout());
     await salt.getByRole("button", { name: "Salt: pin" }).click();
     await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs", "Salt"]);
     const pinnedSalt = groceries.locator(".row", { has: page.getByRole("button", { name: "Salt: unpin" }) });
     // Answered first: while the tap waits, the queue's status line sits above the list and shifts it ~16 px (flaked
     // once on desktop, 2026-11-26), which is not the pin's doing.
     await settled(page);
-    expect(Math.abs((await pinnedSalt.boundingBox())!.y - top)).toBeLessThanOrEqual(1);
+    const layoutAfter = JSON.stringify(await layout());
+    expect(
+      Math.abs((await pinnedSalt.boundingBox())!.y - top),
+      `before ${layoutBefore} after ${layoutAfter}`
+    ).toBeLessThanOrEqual(1);
     await pinnedSalt.getByRole("button", { name: "Salt: unpin" }).click();
     await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs"]);
   });
