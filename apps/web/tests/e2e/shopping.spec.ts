@@ -121,6 +121,9 @@ test.describe("shopping app @shopping", () => {
     await salt.getByRole("button", { name: "Salt: pin" }).click();
     await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs", "Salt"]);
     const pinnedSalt = groceries.locator(".row", { has: page.getByRole("button", { name: "Salt: unpin" }) });
+    // Answered first: while the tap waits, the queue's status line sits above the list and shifts it ~16 px (flaked
+    // once on desktop, 2026-11-26), which is not the pin's doing.
+    await settled(page);
     expect(Math.abs((await pinnedSalt.boundingBox())!.y - top)).toBeLessThanOrEqual(1);
     await pinnedSalt.getByRole("button", { name: "Salt: unpin" }).click();
     await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs"]);
