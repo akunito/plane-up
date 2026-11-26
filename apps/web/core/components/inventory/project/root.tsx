@@ -91,7 +91,8 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
     const box = a.box ?? document.scrollingElement;
     // A scroll since the change is the person's own: leave it (compared, not listened for).
     if (!box || box.scrollTop !== a.scroll) return;
-    const moved = a.el.getBoundingClientRect().top - a.top;
+    // Inside the scroller's box: something appearing above the scroller moves the box, not the rows in it.
+    const moved = a.el.getBoundingClientRect().top - (a.box?.getBoundingClientRect().top ?? 0) - a.top;
     if (moved) box.scrollBy(0, moved);
   }, [pinnedKey]);
   const markRow = (e: { target: EventTarget }) => {
@@ -104,7 +105,13 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
     while (box && !(box.scrollHeight > box.clientHeight && /auto|scroll/.test(getComputedStyle(box).overflowY)))
       box = box.parentElement;
     const scroller = box ?? document.scrollingElement;
-    anchor.current = { el, top: el.getBoundingClientRect().top, at: Date.now(), box, scroll: scroller?.scrollTop ?? 0 };
+    anchor.current = {
+      el,
+      top: el.getBoundingClientRect().top - (box?.getBoundingClientRect().top ?? 0),
+      at: Date.now(),
+      box,
+      scroll: scroller?.scrollTop ?? 0,
+    };
   };
   const listsSeq = useRef(0);
 

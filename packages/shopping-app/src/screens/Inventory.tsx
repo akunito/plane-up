@@ -105,7 +105,8 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
     anchor.current = null;
     if (!a || !main.current || !a.el.isConnected || Date.now() - a.at > 2000) return;
     if (main.current.scrollTop !== a.scroll) return;
-    const moved = a.el.getBoundingClientRect().top - a.top;
+    // Measured inside the list's box: a status line appearing above the list moves the box, not the rows in it.
+    const moved = a.el.getBoundingClientRect().top - main.current.getBoundingClientRect().top - a.top;
     if (moved) main.current.scrollTop += moved;
   }, [pinnedKey]);
 
@@ -137,7 +138,12 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
         onClickCapture={(e) => {
           const el = (e.target as Element).closest(".row");
           anchor.current = el
-            ? { el, top: el.getBoundingClientRect().top, at: Date.now(), scroll: e.currentTarget.scrollTop }
+            ? {
+                el,
+                top: el.getBoundingClientRect().top - e.currentTarget.getBoundingClientRect().top,
+                at: Date.now(),
+                scroll: e.currentTarget.scrollTop,
+              }
             : null;
         }}
       >
