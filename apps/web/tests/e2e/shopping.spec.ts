@@ -107,6 +107,9 @@ test.describe("shopping app @shopping", () => {
     // On the screen too: a short phone, scrolled so Groceries sits under the Pinned section; pinning Salt adds a row
     // above it, and the tapped row stays where it was (the app moves the scroll by the new row's height).
     await page.setViewportSize({ width: 360, height: 520 });
+    // Every list, so Salt is not the last row: at the very end of the scroll a box growing back (the status line
+    // leaving) clamps scrollTop and shifts the rows, which is the browser's doing (5 px on android, 2026-11-26).
+    await open(page, "#/inventory");
     const salt = groceries.locator(".row", { has: page.getByRole("button", { name: "Salt: pin" }) });
     const scrolled = await page.locator("main.scroll").evaluate((m) => {
       m.scrollTop = 120;
