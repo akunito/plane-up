@@ -97,6 +97,8 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
   // row removed above still pulls it up) (audit 2026-11-26; browser scroll anchoring does not do it at the top of
   // the page, and iOS has none). Only within two seconds of the tap, and only if the list has not scrolled since: a
   // scroll in between is the person's own (compared, not listened for: a scroll event can arrive after the tap).
+  // Dropped once (61113c3744) after a desktop E2E over-corrected by +186 px; back after the real cause was measured on
+  // the Realme: the 'Waiting to be sent' line flashed above the list on every tap (now shown only after 2 s).
   const main = useRef<HTMLElement>(null);
   const anchor = useRef<{ el: Element; top: number; at: number; scroll: number } | null>(null);
   const pinnedKey = pinned.map((k) => k.data.id).join(",");
