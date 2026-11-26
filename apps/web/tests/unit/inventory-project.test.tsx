@@ -103,10 +103,11 @@ describe("Project › Inventory table", () => {
       within(el)
         .getAllByLabelText("Name")
         .map((i) => (i as HTMLInputElement).value);
-    expect(within(pinned).getByText("Pinned")).toBeTruthy();
+    // "Pinned" is also an option of every row's Tracking select: the group's header is the <th>.
+    expect(within(pinned).getByText("Pinned", { selector: "th" })).toBeTruthy();
     expect(names(pinned)).toEqual(["Bread"]);
     const all = container.querySelectorAll("tbody")[1] as HTMLElement;
-    expect(within(all).getByText("All items")).toBeTruthy();
+    expect(within(all).getByText("All items", { selector: "th" })).toBeTruthy();
     expect(names(all)).toEqual(["Bread", "Salt", "Zucchini"]);
   });
 
