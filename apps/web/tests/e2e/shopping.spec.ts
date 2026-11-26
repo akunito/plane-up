@@ -113,6 +113,10 @@ test.describe("shopping app @shopping", () => {
       return m.scrollTop;
     });
     expect(scrolled, "main must scroll at this size, or the check below proves nothing").toBeGreaterThan(40);
+    // Fully in view first: Playwright scrolls a partly hidden target into view before clicking, and that scroll is
+    // not the app's to undo.
+    await salt.scrollIntoViewIfNeeded();
+    expect(await page.locator("main.scroll").evaluate((m) => m.scrollTop)).toBeGreaterThan(40);
     const top = (await salt.boundingBox())!.y;
     await salt.getByRole("button", { name: "Salt: pin" }).click();
     await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs", "Salt"]);

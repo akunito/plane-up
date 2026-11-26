@@ -77,8 +77,8 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
   // A pin (the Tracking select) adds or removes a row in the Pinned group ABOVE the list, moving every row below:
   // the row just changed is put back where it was on the screen (the scroller has overflow-anchor: none, so this is the
   // only correction), as far as the scroll allows (at the top a row
-  // removed above still pulls it up) (audit 2026-11-26). Only within two seconds and until the person scrolls.
-  const anchor = useRef<{ el: Element; top: number; at: number } | null>(null);
+  // removed above still pulls it up) (audit 2026-11-26). Only within two seconds, and only if it has not scrolled since.
+  const anchor = useRef<{ el: Element; top: number; at: number; box: Element | null; scroll: number } | null>(null);
   const pinnedKey =
     items
       ?.filter((i) => i.mode === "pinned")
@@ -88,24 +88,23 @@ export function ProjectInventoryRoot(props: { workspaceSlug: string; projectId: 
     const a = anchor.current;
     anchor.current = null;
     if (!a || !a.el.isConnected || Date.now() - a.at > 2000) return;
+    const box = a.box ?? document.scrollingElement;
+    // A scroll since the change is the person's own: leave it (compared, not listened for).
+    if (!box || box.scrollTop !== a.scroll) return;
     const moved = a.el.getBoundingClientRect().top - a.top;
-    if (!moved) return;
-    let box: Element | null = a.el.parentElement;
-    while (box && !(box.scrollHeight > box.clientHeight && /auto|scroll/.test(getComputedStyle(box).overflowY)))
-      box = box.parentElement;
-    (box ?? document.scrollingElement)?.scrollBy(0, moved);
+    if (moved) box.scrollBy(0, moved);
   }, [pinnedKey]);
-  // The person's own scroll ends the anchor: applied later it would undo that scroll (audit 2026-11-26).
-  useEffect(() => {
-    const drop = () => {
-      anchor.current = null;
-    };
-    window.addEventListener("scroll", drop, { capture: true, passive: true });
-    return () => window.removeEventListener("scroll", drop, { capture: true });
-  }, []);
   const markRow = (e: { target: EventTarget }) => {
     const el = (e.target as Element).closest("tr");
-    anchor.current = el ? { el, top: el.getBoundingClientRect().top, at: Date.now() } : null;
+    if (!el) {
+      anchor.current = null;
+      return;
+    }
+    let box: Element | null = el.parentElement;
+    while (box && !(box.scrollHeight > box.clientHeight && /auto|scroll/.test(getComputedStyle(box).overflowY)))
+      box = box.parentElement;
+    const scroller = box ?? document.scrollingElement;
+    anchor.current = { el, top: el.getBoundingClientRect().top, at: Date.now(), box, scroll: scroller?.scrollTop ?? 0 };
   };
   const listsSeq = useRef(0);
 

@@ -95,14 +95,16 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
   // A pin adds or removes a row in the Pinned section ABOVE the lists, which moves every row below it by a row's
   // height: the row just tapped is put back where it was on the screen, as far as the scroll allows (at the top, a
   // row removed above still pulls it up) (audit 2026-11-26; browser scroll anchoring does not do it at the top of
-  // the page, and iOS has none). Only within two seconds of the tap and until the person scrolls.
+  // the page, and iOS has none). Only within two seconds of the tap, and only if the list has not scrolled since: a
+  // scroll in between is the person's own (compared, not listened for: a scroll event can arrive after the tap).
   const main = useRef<HTMLElement>(null);
-  const anchor = useRef<{ el: Element; top: number; at: number } | null>(null);
+  const anchor = useRef<{ el: Element; top: number; at: number; scroll: number } | null>(null);
   const pinnedKey = pinned.map((k) => k.data.id).join(",");
   useLayoutEffect(() => {
     const a = anchor.current;
     anchor.current = null;
     if (!a || !main.current || !a.el.isConnected || Date.now() - a.at > 2000) return;
+    if (main.current.scrollTop !== a.scroll) return;
     const moved = a.el.getBoundingClientRect().top - a.top;
     if (moved) main.current.scrollTop += moved;
   }, [pinnedKey]);
@@ -132,13 +134,11 @@ export function Inventory({ s, listId }: { s: AppState; listId?: string }) {
         // The manual anchor below is the only correction: Chrome's own scroll anchoring could add a second one when
         // the Pinned section is above the viewport (re-review 2026-11-26).
         style={{ overflowAnchor: "none" }}
-        // The person's own scroll ends the anchor: applied later it would undo that scroll.
-        onScroll={() => {
-          anchor.current = null;
-        }}
         onClickCapture={(e) => {
           const el = (e.target as Element).closest(".row");
-          anchor.current = el ? { el, top: el.getBoundingClientRect().top, at: Date.now() } : null;
+          anchor.current = el
+            ? { el, top: el.getBoundingClientRect().top, at: Date.now(), scroll: e.currentTarget.scrollTop }
+            : null;
         }}
       >
         {pinned.length > 0 ? (
