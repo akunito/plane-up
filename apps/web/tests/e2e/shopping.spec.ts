@@ -29,6 +29,11 @@ async function open(page: Page, hash = "#/") {
 
 /** Every tap has been answered: nothing is waiting in the queue. */
 async function settled(page: Page) {
+  // The queue's real length (the "Waiting to be sent" line shows only after 2 s, so its absence proves nothing).
+  // Screens without the status line (the item sheet) have no counter: there only the text check applies.
+  const counter = page.locator("[data-waiting]");
+  if ((await counter.count()) > 0)
+    await expect(counter.first()).toHaveAttribute("data-waiting", "0", { timeout: 15_000 });
   await expect(page.getByText(/Waiting to be sent/)).toHaveCount(0);
 }
 
@@ -484,7 +489,9 @@ test.describe("shopping app @shopping", () => {
             sameLine: Math.abs(labels[0]!.top - labels[1]!.top),
             overflow:
               bar.scrollWidth - bar.clientWidth + Math.max(0, document.scrollingElement!.scrollWidth - innerWidth),
-            outside: labels.filter((r) => r.right > bar.getBoundingClientRect().right + 1 || r.width < 40).length,
+            outside:
+              labels.filter((r) => r.right > bar.getBoundingClientRect().right + 1).length +
+              [group!, list!].filter((sel) => sel.clientWidth < 40).length,
           };
         }
         root.style.removeProperty("--font-scale");

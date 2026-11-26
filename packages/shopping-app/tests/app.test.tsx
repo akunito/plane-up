@@ -524,6 +524,8 @@ describe("the queue's status line", () => {
     await new Promise((r) => setTimeout(r, 1000));
     expect(screen.queryByText(/Waiting to be sent/)).toBeNull();
     await waitFor(() => expect(screen.getByText(/Waiting to be sent: 1/)).toBeTruthy(), { timeout: 2500 });
+    // Let the slow answer land inside this test, not the next one.
+    await waitFor(() => expect(controller.get().queue.entries.length).toBe(0), { timeout: 3000 });
   });
 });
 

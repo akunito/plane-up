@@ -63,9 +63,11 @@ export function QueueStatus({ s }: { s: AppState }) {
   const failure = s.queue.failure;
   const notices = s.queue.notices.length;
   const oldest = s.queue.entries[0]?.tappedAt ?? 0;
+  // A tap "from the future" (the clock moved back) counts as old: shown, never hidden for the length of the skew.
+  const age = now() - oldest;
   const quietFor =
-    n > 0 && held === 0 && notices === 0 && !failure && !s.connection && !s.storageProblem
-      ? WAITING_SHOWN_AFTER_MS - (now() - oldest)
+    n > 0 && held === 0 && notices === 0 && !failure && !s.connection && !s.storageProblem && age >= 0
+      ? WAITING_SHOWN_AFTER_MS - age
       : 0;
   // Render again when the quiet time is over, in case nothing else does.
   const [, wake] = useState(0);
@@ -74,8 +76,9 @@ export function QueueStatus({ s }: { s: AppState }) {
     const id = setTimeout(() => wake((x) => x + 1), quietFor + 50);
     return () => clearTimeout(id);
   }, [quietFor]);
-  if (quietFor > 0) return null;
-  if (n === 0 && notices === 0 && !failure && !s.connection && !s.storageProblem) return null;
+  // data-waiting: the queue's real length for the E2E (the line itself now waits 2 s before showing).
+  if (quietFor > 0 || (n === 0 && notices === 0 && !failure && !s.connection && !s.storageProblem))
+    return <span hidden data-waiting={n} />;
   let text: string | null = null;
   // No network is said plainly, with the age of what is shown when the app opened from its snapshot.
   if (s.connection === "offline" || (s.offlineSince !== null && s.connection))
@@ -88,7 +91,11 @@ export function QueueStatus({ s }: { s: AppState }) {
     text = t(`failure_${failure.kind}`, { error: failure.error ?? String(failure.status ?? "") });
   else if (s.connection) text = t("refresh_failed");
   return (
-    <div className={`status${failure || s.connection || held > 0 || s.storageProblem ? " warn" : ""}`} role="status">
+    <div
+      className={`status${failure || s.connection || held > 0 || s.storageProblem ? " warn" : ""}`}
+      role="status"
+      data-waiting={n}
+    >
       <span className="grow">
         {s.storageProblem ? <span className="block">{t(`storage_${s.storageProblem}`)}</span> : null}
         {text ? <span className="block">{text}</span> : null}
