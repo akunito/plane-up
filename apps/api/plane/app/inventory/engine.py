@@ -206,7 +206,7 @@ def _buy_effect(item, quantity, ctx, occurred_at, stamp_orders=True):
     """A purchase, applied according to the item's mode at the moment it is applied (brief)."""
     changed = ["last_bought_at", "last_bought_by"]
     extra = {"quantity_delta": 0, "stamped_orders": []}
-    if item.mode == InventoryMode.ON_DEMAND:
+    if item.mode in (InventoryMode.ON_DEMAND, InventoryMode.PINNED):
         item.needed, item.needed_by, item.needed_at = False, None, None
         changed += ["needed", "needed_by", "needed_at"]
     elif item.mode == InventoryMode.LEVEL:
@@ -317,7 +317,7 @@ def _op_set_level(item, args, ctx, parsed):
 
 
 def _op_set_needed(item, args, ctx, parsed):
-    _require_mode(item, InventoryMode.ON_DEMAND)
+    _require_mode(item, InventoryMode.ON_DEMAND, InventoryMode.PINNED)
     needed = args.get("needed")
     if not isinstance(needed, bool):
         raise _Invalid("needed")
@@ -331,10 +331,10 @@ def _op_pin(item, args, ctx, parsed):
     if not isinstance(pinned, bool):
         raise _Invalid("pinned")
     _require_mode(item, InventoryMode.PINNED, InventoryMode.ON_DEMAND)
-    # Pinning clears `needed`; unpinning gives on_demand with needed = false (brief).
+    # Pin and unpin keep `needed`: both modes share it, a pin only moves the item to the top of the inventory
+    # (APLANE-77; until 2026-11-25 pinning cleared it, as a pinned item was always on the list).
     item.mode = InventoryMode.PINNED if pinned else InventoryMode.ON_DEMAND
-    item.needed, item.needed_by, item.needed_at = False, None, None
-    return ["mode", "needed", "needed_by", "needed_at"], {}, None
+    return ["mode"], {}, None
 
 
 def _op_change_mode(item, args, ctx, parsed):
@@ -345,8 +345,11 @@ def _op_change_mode(item, args, ctx, parsed):
         raise _Rejected("invalid_for_mode")
     changed = ["mode", "needed", "needed_by", "needed_at", "level", "quantity"]
     # Clears the state fields the new mode does not use; min_quantity and restock_to are data and stay.
+    # on_demand ⇄ pinned keeps `needed`, as the pin op does (APLANE-77 audit: the main app pins through this op).
+    keeps_needed = {item.mode, mode} <= {InventoryMode.ON_DEMAND, InventoryMode.PINNED}
     item.mode = mode
-    item.needed, item.needed_by, item.needed_at = False, None, None
+    if not keeps_needed:
+        item.needed, item.needed_by, item.needed_at = False, None, None
     item.level = None
     item.quantity = None
     if mode == InventoryMode.LEVEL:

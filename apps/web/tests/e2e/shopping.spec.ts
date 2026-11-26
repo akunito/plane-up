@@ -15,7 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Locator, Page } from "@playwright/test";
-import { apiDelete, authFile, expect, expectNoHorizontalOverflow, test } from "./helpers";
+import { apiDelete, apiPost, authFile, expect, expectNoHorizontalOverflow, test } from "./helpers";
 import { INV, contextFor, item, restoreSeed, server } from "./inventory-helpers";
 
 const items = INV?.inventory.items ?? {};
@@ -29,6 +29,11 @@ async function open(page: Page, hash = "#/") {
 
 /** Every tap has been answered: nothing is waiting in the queue. */
 async function settled(page: Page) {
+  // The queue's real length (the "Waiting to be sent" line shows only after 2 s, so its absence proves nothing).
+  // Screens without the status line (the item sheet) have no counter: there only the text check applies.
+  const counter = page.locator("[data-waiting]");
+  if ((await counter.count()) > 0)
+    await expect(counter.first()).toHaveAttribute("data-waiting", "0", { timeout: 15_000 });
   await expect(page.getByText(/Waiting to be sent/)).toHaveCount(0);
 }
 
@@ -51,22 +56,106 @@ test.describe("shopping app @shopping", () => {
   );
   test.afterEach(async ({ page }) => restoreSeed(page));
 
-  test("the to-buy list: rows, counter without pinned rows, On the way with the overdue order", async ({ page }) => {
+  test("the to-buy list: rows, counter with the needed pinned row, On the way with the overdue order", async ({
+    page,
+  }) => {
     await open(page);
-    // The sentence is for screen readers; the bar shows the numbers beside a cart and a pin (APLANE-73).
-    await expect(page.getByText("6 missing · 2 pinned")).toHaveClass(/\bvisually-hidden\b/);
-    await expect(page.locator(".topbar .count")).toHaveText(["6", "2"]);
+    // The sentence is for screen readers; the bar shows the number beside a cart (APLANE-73). Since APLANE-77 a
+    // pinned item is on the list only when needed, and then it counts: Bread yes, Eggs (not needed) no.
+    await expect(page.getByText("7 missing", { exact: true })).toHaveClass(/\bvisually-hidden\b/);
+    await expect(page.locator(".topbar .count")).toHaveText(["7"]);
     await Promise.all(
-      ["Milk", "Detergent", "Wipes", "Nappies", "Mulch", "Bread", "Eggs"].map((name) =>
+      ["Milk", "Detergent", "Wipes", "Nappies", "Mulch", "Bread"].map((name) =>
         expect(page.getByRole("checkbox", { name: `${name}: bought` })).toBeVisible()
       )
     );
     await expect(page.getByRole("checkbox", { name: "Salt: bought" })).toHaveCount(0);
+    await expect(page.getByRole("checkbox", { name: "Eggs: bought" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Protein: Mark ordered" })).toBeVisible();
     const onTheWay = page.getByRole("region", { name: "On the way · 2" });
     await expect(onTheWay.getByText("Overdue")).toHaveCount(1);
     await expect(onTheWay.getByText("Magnesium")).toBeVisible();
     await expectNoHorizontalOverflow(page);
+  });
+
+  test("APLANE-77: pinned items are gathered at the top, stay in their list, and are marked needed like any other", async ({
+    page,
+  }) => {
+    await open(page, `#/inventory/${INV!.inventory.lists["Groceries"]}`);
+    const pinnedSection = page.getByRole("region", { name: "Pinned" });
+    const groceries = page.getByRole("region", { name: "Groceries" });
+    const names = groceries.locator(".row .name");
+    // Bread and Eggs are pinned: at the top, and again in Groceries, which is alphabetical (owner, 2026-11-26).
+    await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs"]);
+    const before = await names.allTextContents();
+    // es2022 lib (L0-02 typecheck): no toSorted.
+    // oxlint-disable-next-line unicorn/no-array-sort -- sorts a copy
+    expect(before).toEqual([...before].sort((a, b) => a.localeCompare(b)));
+    await expect(groceries.getByRole("button", { name: "Eggs: unpin" })).toHaveAttribute("aria-pressed", "true");
+    const needed = groceries.getByRole("button", { name: "Eggs: needed" });
+    await expect(needed).toHaveAttribute("aria-pressed", "false");
+    await needed.click();
+    await server(page, "Eggs", "needed").toBe(true);
+    await open(page);
+    await expect(page.getByRole("checkbox", { name: "Eggs: bought" })).toBeVisible();
+    await expect(page.locator(".topbar .count")).toHaveText(["8"]);
+    // Unpinning keeps it needed, takes it out of the Pinned section, and leaves its Groceries row where it was.
+    await open(page, `#/inventory/${INV!.inventory.lists["Groceries"]}`);
+    await groceries.getByRole("button", { name: "Eggs: unpin" }).click();
+    await server(page, "Eggs", "needed").toBe(true);
+    await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread"]);
+    await expect(names).toHaveText(before);
+    await expect(groceries.getByRole("button", { name: "Eggs: pin" })).toHaveAttribute("aria-pressed", "false");
+    await groceries.getByRole("button", { name: "Eggs: pin" }).click();
+    await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs"]);
+    await expect(names).toHaveText(before);
+    // On the screen too: a short phone, scrolled so Groceries sits under the Pinned section; pinning Salt adds a row
+    // above it, and the tapped row stays where it was (the app moves the scroll by the new row's height).
+    await page.setViewportSize({ width: 360, height: 520 });
+    // Every list, so Salt is not the last row: at the very end of the scroll a box growing back (the status line
+    // leaving) clamps scrollTop and shifts the rows, which is the browser's doing (5 px on android, 2026-11-26).
+    await open(page, "#/inventory");
+    // Every list loads on its own when shown: one landing after the measurement below changes what sits above Salt
+    // (rows came and went in the 2026-11-26 debug log), which is not the pin's doing.
+    await page.waitForLoadState("networkidle");
+    await settled(page);
+    const salt = groceries.locator(".row", { has: page.getByRole("button", { name: "Salt: pin" }) });
+    const scrolled = await page.locator("main.scroll").evaluate((m) => {
+      m.scrollTop = 120;
+      return m.scrollTop;
+    });
+    expect(scrolled, "main must scroll at this size, or the check below proves nothing").toBeGreaterThan(40);
+    // Fully in view first: Playwright scrolls a partly hidden target into view before clicking, and that scroll is
+    // not the app's to undo.
+    // Centred in the list: near an edge Playwright's click scrolls the target again, after `top` is read (the 2026-11-26
+    // failures: +130 px of Playwright's own scroll on top of the anchor's correct +56). A real tap on the Realme kept
+    // the row to the pixel (st 440 → 496, row 402 → 402).
+    await salt.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    expect(await page.locator("main.scroll").evaluate((m) => m.scrollTop)).toBeGreaterThan(40);
+    const top = (await salt.boundingBox())!.y;
+    // What the page looked like, kept in the failure message (the 2026-11-26 failures needed a debug run each).
+    const layout = () =>
+      page.locator("main.scroll").evaluate((m) => ({
+        scrollTop: Math.round(m.scrollTop),
+        mainTop: Math.round(m.getBoundingClientRect().top),
+        sections: Array.from(m.children).map(
+          (c) => `${c.getAttribute("aria-label")}:${Math.round(c.getBoundingClientRect().height)}`
+        ),
+      }));
+    const layoutBefore = JSON.stringify(await layout());
+    await salt.getByRole("button", { name: "Salt: pin" }).click();
+    await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs", "Salt"]);
+    const pinnedSalt = groceries.locator(".row", { has: page.getByRole("button", { name: "Salt: unpin" }) });
+    // Answered first: while the tap waits, the queue's status line sits above the list and shifts it ~16 px (flaked
+    // once on desktop, 2026-11-26), which is not the pin's doing.
+    await settled(page);
+    const layoutAfter = JSON.stringify(await layout());
+    expect(
+      Math.abs((await pinnedSalt.boundingBox())!.y - top),
+      `before ${layoutBefore} after ${layoutAfter}`
+    ).toBeLessThanOrEqual(1);
+    await pinnedSalt.getByRole("button", { name: "Salt: unpin" }).click();
+    await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs"]);
   });
 
   test("a tick buys at once, sits under Done, and Undo reverts it on the server", async ({ page }) => {
@@ -122,6 +211,28 @@ test.describe("shopping app @shopping", () => {
     const created = await item(page, name);
     expect(created.needed).toBe(true);
     await apiDelete(page, `/api/workspaces/qa-inv/projects/${INV!.projects.HOME.id}/inventory/items/${created.id}/`);
+  });
+
+  test("APLANE-81: an item is deleted from its sheet after a confirmation", async ({ page }) => {
+    const name = `QA e2e delete ${Date.now()}`;
+    const res = await apiPost(
+      page,
+      `/api/workspaces/qa-inv/projects/${INV!.projects.HOME.id}/inventory/lists/${INV!.inventory.lists["Groceries"]}/items/`,
+      { name }
+    );
+    const { id } = (await res.json()) as { id: string };
+    await open(page, `#/item/${id}`);
+    await page.getByRole("button", { name: "Delete item" }).click();
+    await page
+      .getByRole("dialog", { name: `Delete “${name}”?` })
+      .getByRole("button", { name: "Delete" })
+      .click();
+    await expect(page.getByText(`${name}: deleted.`)).toBeVisible();
+    await expect(page).toHaveURL(/#\/inventory$/);
+    const left = await (
+      await page.request.get(`/api/workspaces/qa-inv/inventory/suggestions/?q=${encodeURIComponent(name)}`)
+    ).json();
+    expect((left.items as { name: string }[]).some((i) => i.name === name)).toBe(false);
   });
 
   test("inventory: who can see each list, and a typed recount", async ({ page }) => {
@@ -294,11 +405,14 @@ test.describe("shopping app @shopping", () => {
     await page.setViewportSize({ width: 360, height: 740 });
     await page.goto("/shopping/");
     await expect(page.getByRole("checkbox", { name: "Nappies: bought" })).toBeVisible();
-    const result = await page.evaluate(async () => {
+    const { out: result, scale: fontScale } = await page.evaluate(async () => {
       // oxlint-disable-next-line unicorn/consistent-function-scoping
       const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-      // Android's font scale multiplies every font size; the app's sizes are px rules, so scaling the rules is the
-      // same thing (scaling elements instead compounds through nesting). Original sizes read once.
+      // Android's font scale multiplies every font size. Since APLANE-78 the app's sizes are calc(px × --font-scale)
+      // except the 16px inputs: the variable and the px rules are scaled (scaling elements instead compounds through
+      // nesting). Original values read once.
+      const root = document.documentElement;
+      const scale = parseFloat(getComputedStyle(root).getPropertyValue("--font-scale")) || 1;
       const base: [CSSStyleRule, number][] = [];
       // Inside evaluate: it runs in the page, so it cannot move out.
       // oxlint-disable-next-line unicorn/consistent-function-scoping
@@ -327,6 +441,7 @@ test.describe("shopping app @shopping", () => {
       > = {};
       for (const k of [1, 1.3, 2]) {
         for (const [r, px] of base) r.style.fontSize = `${px * k}px`;
+        root.style.setProperty("--font-scale", String(scale * k));
         // Sequential on purpose: each scale is measured after the previous one is replaced.
         // oxlint-disable-next-line no-await-in-loop
         await wait(200);
@@ -370,15 +485,70 @@ test.describe("shopping app @shopping", () => {
           ).length,
         };
       }
-      return out;
+      return { out, scale };
     });
+    // The floor was 60 px for 15 px text; it scales with the text (APLANE-78: × 0.9 → 54 px, the same letters).
+    const floor = 60 * fontScale;
     expect(result["1"]!.badgeShort, "badge wrapped at 100 %").toBe(0);
     for (const k of ["1", "1.3", "2"]) {
-      expect(result[k]!.name, `name width at ${k}`).toBeGreaterThan(60);
+      expect(result[k]!.name, `name width at ${k}`).toBeGreaterThan(floor);
       expect(result[k]!.overlap, `list name over the item name at ${k}`).toBe(0);
       expect(result[k]!.out, `badges off the row at ${k}`).toBe(0);
       expect(result[k]!.sideways, `rows scrolling sideways at ${k}`).toBe(0);
       expect(result[k]!.edge, `top bar or workspace picker past the edge at ${k}`).toBe(0);
+    }
+  });
+
+  test("the grouping and the list filter share one line at every width and text size, with the longest names (prod 2026-11-26)", async ({
+    page,
+  }) => {
+    // Prod wrapped them onto two lines with the ES/PL list names; the longest real one is about this long.
+    // Sequential on purpose: one viewport at a time.
+    for (const width of [320, 360, 412]) {
+      // oxlint-disable-next-line no-await-in-loop
+      await page.setViewportSize({ width, height: 740 });
+      // oxlint-disable-next-line no-await-in-loop
+      await open(page);
+      // oxlint-disable-next-line no-await-in-loop
+      const result = await page.evaluate(async () => {
+        // oxlint-disable-next-line unicorn/consistent-function-scoping
+        const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+        const root = document.documentElement;
+        const scale = parseFloat(getComputedStyle(root).getPropertyValue("--font-scale")) || 1;
+        const [group, list] = Array.from(document.querySelectorAll<HTMLSelectElement>(".toolbar select"));
+        group!.options[group!.selectedIndex]!.text = "Grupuj: Kategoria sklepowa";
+        const long = document.createElement("option");
+        long.value = "long";
+        long.text = "Botiquín y suplementos / Apteczka i suplementy domowe";
+        list!.append(long);
+        list!.value = "long";
+        const out: Record<string, { sameLine: number; overflow: number; outside: number }> = {};
+        for (const k of [1, 1.3, 2]) {
+          root.style.setProperty("--font-scale", String(scale * k));
+          // Sequential on purpose: each size is measured after the previous one is replaced.
+          // oxlint-disable-next-line no-await-in-loop
+          await wait(150);
+          const labels = Array.from(document.querySelectorAll(".toolbar > .select")).map((l) =>
+            l.getBoundingClientRect()
+          );
+          const bar = document.querySelector(".toolbar")!;
+          out[String(k)] = {
+            sameLine: Math.abs(labels[0]!.top - labels[1]!.top),
+            overflow:
+              bar.scrollWidth - bar.clientWidth + Math.max(0, document.scrollingElement!.scrollWidth - innerWidth),
+            outside:
+              labels.filter((r) => r.right > bar.getBoundingClientRect().right + 1).length +
+              [group!, list!].filter((sel) => sel.clientWidth < 40).length,
+          };
+        }
+        root.style.removeProperty("--font-scale");
+        return out;
+      });
+      for (const [k, r] of Object.entries(result)) {
+        expect(r.sameLine, `${width} px, text ×${k}: the two selects on one line`).toBeLessThanOrEqual(1);
+        expect(r.overflow, `${width} px, text ×${k}: nothing scrolls sideways`).toBeLessThanOrEqual(0);
+        expect(r.outside, `${width} px, text ×${k}: both inside the bar, neither squeezed to nothing`).toBe(0);
+      }
     }
   });
 
@@ -460,9 +630,9 @@ test.describe("shopping app @shopping", () => {
     await page.setViewportSize({ width: 360, height: 740 });
     await open(page);
     // Rendered first, so the widening below really has two numbers to widen.
-    await expect(page.locator(".topbar .count")).toHaveText(["6", "2"]);
+    await expect(page.locator(".topbar .count")).toHaveText(["7"]);
     const row = await page.evaluate(() => {
-      // Two digits each: the widest a household list reaches in practice.
+      // Two digits: the widest a household list reaches in practice.
       for (const c of Array.from(document.querySelectorAll(".topbar .count"))) c.lastChild!.textContent = "12";
       const [toggle, tabs, counts] = [".nav-toggle", ".tabs", ".topbar .counts"].map((sel) => {
         const r = document.querySelector(sel)!.getBoundingClientRect();
@@ -566,6 +736,10 @@ const shot = async (page: Page, name: string, target?: Locator) => {
   await expect(target ?? page).toHaveScreenshot(`${name}.png`, { ...options, maxDiffPixelRatio: 0.01 });
 };
 
+// Every baseline renamed "-a77" at once (APLANE-77/78/81, 2026-11-25): text 20 % smaller, the pin counter gone,
+// pinned rows first in the inventory, the sheet's Delete item. The new names create their baselines.
+// Renamed again "-a78": the fields follow the smaller text too (16px kept on iOS only).
+// Renamed "-b26" (2026-11-26): text back to × 0.9, controls × 0.85, the Pinned section in the inventory.
 test.describe("@visual-shopping", () => {
   test.skip(!INV, "the image under test has no shopping app");
   test.use({ storageState: authFile("qa-inv-ana") });
@@ -581,27 +755,27 @@ test.describe("@visual-shopping", () => {
     // Renamed when pinned rows gained "bought … (by …)" (APLANE-67, S17): the new name creates its baseline.
     // Renamed again with the Plane menu toggle and the counter as icons in the top bar (APLANE-73; again when
     // the pin became the filled one: an earlier dev run had made a baseline with the outline pin).
-    await shot(page, "vs-01-list-counted");
+    await shot(page, "vs-01-list-b26");
   });
 
   test("VS-02 shopping mode", async ({ page }) => {
     await open(page, "#/shop");
     await expect(page.getByRole("checkbox", { name: "Milk: bought" })).toBeVisible();
-    await shot(page, "vs-02-shop");
+    await shot(page, "vs-02-shop-b26");
   });
 
   test("VS-03 quick capture", async ({ page }) => {
     await open(page, "#/capture");
     await page.getByRole("searchbox").fill("nap");
     await expect(page.getByRole("button", { name: "Nappies: Running low" })).toBeVisible();
-    await shot(page, "vs-03-capture");
+    await shot(page, "vs-03-capture-b26");
   });
 
   test("VS-04 inventory", async ({ page }) => {
     await open(page, "#/inventory");
     await expect(page.getByRole("link", { name: "Open Mulch" })).toBeVisible();
     // Renamed with the Plane menu toggle in the top bar (APLANE-73; renamed again for its final margins).
-    await shot(page, "vs-04-inventory-menu");
+    await shot(page, "vs-04-inventory-b26");
   });
 
   test("VS-05 item sheet", async ({ page }) => {
@@ -610,21 +784,21 @@ test.describe("@visual-shopping", () => {
     await expect(page.getByText(/set it to: In stock/)).toBeVisible();
     // Renamed with each change to this screen (APLANE-66 photo field, then the camera button on touch screens):
     // the new name creates its baseline.
-    await shot(page, "vs-05-item-camera");
+    await shot(page, "vs-05-item-b26");
   });
 
   test("VS-06 order dialog", async ({ page }) => {
     await open(page);
     await page.getByRole("button", { name: "Protein: Mark ordered" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    await shot(page, "vs-06-order", page.getByRole("dialog"));
+    await shot(page, "vs-06-order-b26", page.getByRole("dialog"));
   });
 
   test("VS-07 arrival dialog", async ({ page }) => {
     await open(page);
     await page.getByRole("button", { name: "Magnesium: the order arrived" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    await shot(page, "vs-07-arrival", page.getByRole("dialog"));
+    await shot(page, "vs-07-arrival-b26", page.getByRole("dialog"));
   });
 
   test("VS-09 Plane's menu (APLANE-73)", async ({ page }) => {
@@ -633,12 +807,12 @@ test.describe("@visual-shopping", () => {
     const nav = page.getByRole("dialog", { name: "Plane" });
     await expect(nav.getByRole("button", { name: /Home$/ })).toBeVisible();
     // Renamed when the entries gained Plane's icons, and for the filled pin in the counter behind the scrim.
-    await shot(page, "vs-09-menu-icons");
+    await shot(page, "vs-09-menu-b26");
   });
 
   test("VS-08 waiting and unapplied", async ({ page }) => {
     await open(page, "#/pending");
     await expect(page.getByText("Nothing waiting.")).toBeVisible();
-    await shot(page, "vs-08-pending");
+    await shot(page, "vs-08-pending-b26");
   });
 });

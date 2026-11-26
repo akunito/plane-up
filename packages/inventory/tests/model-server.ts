@@ -123,7 +123,7 @@ export class ModelServer {
 
   private bought(item: ItemState, quantity: number): void {
     if (item.mode === "units") item.quantity = (item.quantity ?? 0) + quantity;
-    if (item.mode === "on_demand") item.needed = false;
+    if (item.mode === "on_demand" || item.mode === "pinned") item.needed = false;
     if (item.mode === "level") item.level = "ok";
   }
 
@@ -165,7 +165,7 @@ export class ModelServer {
         item.level = a.level as ItemState["level"];
         return undefined;
       case "set_needed":
-        if (item.mode !== "on_demand") return "invalid_for_mode";
+        if (item.mode !== "on_demand" && item.mode !== "pinned") return "invalid_for_mode";
         if (typeof a.needed !== "boolean") return "invalid";
         item.needed = a.needed;
         return undefined;
@@ -178,7 +178,6 @@ export class ModelServer {
         if (typeof a.pinned !== "boolean") return "invalid";
         if (item.mode !== "pinned" && item.mode !== "on_demand") return "invalid_for_mode";
         item.mode = a.pinned ? "pinned" : "on_demand";
-        item.needed = false;
         return undefined;
       case "change_mode": {
         if (!MODES.has(a.mode as string)) return "invalid";
@@ -186,7 +185,9 @@ export class ModelServer {
         const mode = a.mode as ItemState["mode"];
         if (mode === "level" && a.level !== undefined && !LEVELS.has(a.level as string)) return "invalid";
         if (mode === "units" && !isInt(a.quantity)) return "invalid";
-        Object.assign(item, { mode, needed: false, level: null, quantity: null });
+        const keepsNeeded =
+          (item.mode === "on_demand" || item.mode === "pinned") && (mode === "on_demand" || mode === "pinned");
+        Object.assign(item, { mode, needed: keepsNeeded && item.needed, level: null, quantity: null });
         if (mode === "level") item.level = (a.level as ItemState["level"]) ?? "ok";
         if (mode === "units") item.quantity = a.quantity as number;
         return undefined;

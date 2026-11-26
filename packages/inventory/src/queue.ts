@@ -506,7 +506,7 @@ export function view(state: QueueState): Record<string, ItemState> {
     }
     // Refused (already_done, gone, invalid, wrong mode): nothing changes and the revision stays, so the
     // last step stays what it was. Everything else the server applies advances the revision, even when
-    // it changes no state (an order, a cancel, a buy of a pinned item).
+    // it changes no state (an order, a cancel).
     const status = orders.get(entry.op.args.order_id as string);
     if (
       predictRefused(item, entry) ||

@@ -269,7 +269,7 @@ function run(seed: number) {
         Object.assign(op, { op: "recount", args: { quantity: pickOf([1, 4]) }, base_rev: item.rev });
       else if (item.mode === "level" && r() < 0.5)
         Object.assign(op, { op: "set_level", args: { level: "low" }, base_rev: item.rev });
-      else if (item.mode === "on_demand" && r() < 0.5)
+      else if ((item.mode === "on_demand" || item.mode === "pinned") && r() < 0.5)
         Object.assign(op, { op: "set_needed", args: { needed: true }, base_rev: item.rev });
       if (r() < 0.15) {
         const mode = pickOf(["units", "level", "on_demand", "pinned"] as const);

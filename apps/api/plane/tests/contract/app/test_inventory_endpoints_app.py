@@ -189,7 +189,8 @@ def test_a_member_who_lost_access_sees_nothing_and_may_change_nothing(setup, wor
 
 
 def test_the_to_buy_list_counter_and_on_the_way(workspace, people, home, groceries):
-    _item(groceries, "Bread", "pinned")
+    _item(groceries, "Bread", "pinned", needed=True)
+    _item(groceries, "Eggs", "pinned", needed=False)
     _item(groceries, "Milk", "on_demand", needed=True)
     _item(groceries, "Salt", "on_demand", needed=False)
     _item(groceries, "Rice", "level", level="low")
@@ -200,7 +201,7 @@ def test_the_to_buy_list_counter_and_on_the_way(workspace, people, home, groceri
     body = _client(people["bob"]).get(ws(workspace.slug, "shopping-list/")).json()
     to_buy = {i["name"]: i["to_buy"] for i in body["items"]}
     assert to_buy == {"Bread": 1, "Milk": 1, "Rice": 1, "Water": 5}
-    assert body["count"] == 3, "pinned rows do not count"
+    assert body["count"] == 4, "a needed pinned row counts (APLANE-77); Eggs, pinned not needed, is not listed"
     assert [(o["item_name"], o["overdue"]) for o in body["on_the_way"]] == [("Coffee", True)]
     # Coffee is covered by its order, so it is off the list, but the device needs its state for "Arrived".
     assert [(i["name"], i["to_buy"], i["on_order"]) for i in body["on_the_way_items"]] == [("Coffee", 0, 1)]
@@ -603,7 +604,7 @@ def test_s21_a_public_project_s_lists_become_visible_once_the_person_joins(works
         ("on_demand", lambda b: b["needed"] is True),
         ("level", lambda b: b["level"] == "low"),
         ("units", lambda b: (b["quantity"], b["min_quantity"]) == (0, 1)),
-        ("pinned", lambda b: True),
+        ("pinned", lambda b: b["needed"] is True),  # APLANE-77: on the list because needed, as on_demand
     ],
 )
 def test_s28_an_item_created_without_a_mode_takes_its_list_s_default_and_is_on_the_to_buy_list(
@@ -626,7 +627,7 @@ def test_s20_a_units_item_partly_on_order_is_counted_for_what_is_still_missing(w
     body = _client(people["bob"]).get(ws(workspace.slug, "shopping-list/")).json()
     rows = {i["name"]: (i["to_buy"], i["on_order"]) for i in body["items"]}
     assert rows["Water"] == (2, 1)
-    assert body["count"] == 1, "Water counts (2 still missing); the pinned Bread does not"
+    assert body["count"] == 1, "Water counts (2 still missing); Bread, pinned and not needed, is not listed"
 
 
 def test_s50_a_deleted_list_leaves_the_to_buy_list_and_the_counter(workspace, people, home, groceries):

@@ -124,9 +124,9 @@ function Widget({ workspaceSlug }: THomeWidgetProps) {
     if (pending.has(item.id)) return;
     setPending((p) => new Set(p).add(item.id));
     const out = await act(item, "buy", item.mode === "units" ? { quantity } : {});
-    // Bought: off the list now, unless pinned (always on it); the reload confirms either way. Only when
-    // applied: a refused tick keeps its row even if the reload fails.
-    if (out.ok && item.mode !== "pinned") setRows((r) => r?.filter((x) => x.id !== item.id) ?? r);
+    // Bought: off the list now; the reload confirms. Only when applied: a refused tick keeps its row even if the
+    // reload fails.
+    if (out.ok) setRows((r) => r?.filter((x) => x.id !== item.id) ?? r);
     setPending((p) => {
       const next = new Set(p);
       next.delete(item.id);

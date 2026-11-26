@@ -31,7 +31,7 @@ from plane.app.inventory.access import (
     visible_lists,
     visible_projects,
 )
-from plane.app.inventory.derive import OVERDUE_AFTER, counts, to_buy
+from plane.app.inventory.derive import OVERDUE_AFTER, to_buy
 from plane.api.middleware.api_authentication import APIKeyAuthentication as ApiKeyAuth
 from plane.app.middleware.api_authentication import APIKeyAuthentication as AppApiKeyAuth
 from plane.db.models import (
@@ -199,12 +199,10 @@ class InventoryShoppingListEndpoint(InventoryBaseView):
             return _forbidden()
         now = timezone.now()
         rows = []
-        count = 0
         for item in with_orders(visible_items(request.user, workspace.pk)).order_by("category", "name_normalised"):
             payload = item_payload(item, item.on_order, item.open_count > 0)
             if payload["to_buy"]:
                 rows.append(payload)
-                count += counts(item.mode)
         on_the_way = list(
             InventoryOrder.objects.filter(
                 status=InventoryOrderStatus.OPEN, item__in=visible_items(request.user, workspace.pk)
@@ -223,7 +221,7 @@ class InventoryShoppingListEndpoint(InventoryBaseView):
         return Response(
             {
                 "items": rows,
-                "count": count,
+                "count": len(rows),
                 "on_the_way": [order_payload(o, now) for o in on_the_way],
                 "on_the_way_items": on_the_way_items,
                 "generated_at": now.isoformat(),
@@ -681,7 +679,7 @@ class ProjectInventoryItemsEndpoint(ProjectInventoryBaseView):
         # A new item goes onto the to-buy list at once (brief, Item state).
         now = timezone.now()
         state = {"mode": mode}
-        if mode == InventoryMode.ON_DEMAND:
+        if mode in (InventoryMode.ON_DEMAND, InventoryMode.PINNED):
             state.update(needed=True, needed_by=request.user, needed_at=now)
         elif mode == InventoryMode.LEVEL:
             state["level"] = InventoryLevel.LOW

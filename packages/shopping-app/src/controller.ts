@@ -35,6 +35,7 @@ import {
   BACKOFF_MAX_MS,
   createItem,
   createQueue,
+  deleteItem,
   deviceLock,
   discard,
   discardHead,
@@ -174,6 +175,8 @@ export class Controller {
   /** Lists an inventory screen is showing: reloaded with every refresh. */
   private watched = new Set<string>();
   private toastSeq = 0;
+  /** Items this page deleted (APLANE-81): a read that started before the DELETE answered would bring them back. */
+  private deleted = new Set<string>();
   private readonly snapshots: SnapshotStore;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   /** Opened from a snapshot: the next sign of a connection starts the app again in full. */
@@ -600,7 +603,7 @@ export class Controller {
     await this.updateQueue((s) => refreshed(s, payloads), target);
     if (this.store !== target) return;
     this.set({
-      known: mergeSnapshot(this.state.known, payloads, startedAt, revsAtStart),
+      known: this.alive(mergeSnapshot(this.state.known, payloads, startedAt, revsAtStart)),
       orders: out.list.on_the_way as unknown as Order[],
       covered,
       connection: null,
@@ -634,7 +637,9 @@ export class Controller {
     const orders = new Map(this.state.orders.map((o) => [o.id, o]));
     for (const o of out.open_orders as unknown as Order[]) orders.set(o.id, o);
     this.set({
-      known: dropMissingFromList(mergeFetched(this.state.known, payloads, startedAt), listId, payloads, startedAt),
+      known: this.alive(
+        dropMissingFromList(mergeFetched(this.state.known, payloads, startedAt), listId, payloads, startedAt)
+      ),
       orders: [...orders.values()],
       connection: null,
     });
@@ -658,7 +663,7 @@ export class Controller {
     const payloads = out.body.items as unknown as ItemData[];
     await this.updateQueue((s) => refreshed(s, payloads), target);
     if (this.store !== target) return null;
-    this.set({ known: mergeFetched(this.state.known, payloads, startedAt), connection: null });
+    this.set({ known: this.alive(mergeFetched(this.state.known, payloads, startedAt)), connection: null });
     return { ids: payloads.map((p) => p.id), categories: out.body.categories, stores: out.body.stores };
   }
 
@@ -929,6 +934,45 @@ export class Controller {
     return { ok: true };
   }
 
+  /**
+   * Deletes the item (APLANE-81): online only, like the main app's delete (soft, the server's DELETE). Refused while
+   * the device still holds changes to it: they would come back "gone" and the person would not know they were lost.
+   */
+  async deleteItem(itemId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (this.openedOffline || !this.ownsStore()) {
+      void this.reconnect();
+      return { ok: false, error: "offline" };
+    }
+    const item = this.state.known[itemId]?.data;
+    if (!item) return { ok: false, error: "gone" };
+    if (this.state.queue.entries.some((e) => e.op.target === itemId)) return { ok: false, error: "waiting" };
+    const target = this.store;
+    const out = await deleteItem(this.client(), item.project.id, itemId);
+    if (out.kind === "failed") {
+      this.set({ connection: out.failure });
+      return { ok: false, error: out.failure };
+    }
+    // 404: already deleted (another phone, the main app): the same outcome for the person.
+    if (out.kind === "refused" && out.status !== 404) return { ok: false, error: out.error };
+    this.deleted.add(itemId);
+    if (this.store !== target) return { ok: true }; // a workspace switch meanwhile: the next load reads the server
+    this.set({ known: this.alive(this.state.known) });
+    this.saveSnapshot();
+    void this.refresh();
+    return { ok: true };
+  }
+
+  private alive(known: Record<string, Known>): Record<string, Known> {
+    if (this.deleted.size === 0) return known;
+    let out: Record<string, Known> | null = null;
+    for (const id of this.deleted)
+      if (id in known) {
+        out ??= { ...known };
+        delete out[id];
+      }
+    return out ?? known;
+  }
+
   /** The item's photo (APLANE-66): shrunk on the device, then uploaded; online only, like every data edit. */
   async setPhoto(itemId: string, file: Blob): Promise<{ ok: true } | { ok: false; error: string }> {
     return this.photoEdit(itemId, async (projectId, confirming) => {
@@ -982,7 +1026,7 @@ export class Controller {
     if (!target || this.store !== target || this.openedOffline || !this.ownsStore()) return; // a switch meanwhile
     await this.updateQueue((s) => refreshed(s, payloads), target);
     if (this.store !== target) return;
-    this.set({ known: mergeFetched(this.state.known, payloads, startedAt) });
+    this.set({ known: this.alive(mergeFetched(this.state.known, payloads, startedAt)) });
     this.saveSnapshot();
   }
 

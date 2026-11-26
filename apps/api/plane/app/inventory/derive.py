@@ -15,9 +15,8 @@ def to_buy(mode, needed, level, quantity, min_quantity, restock_to, on_order, ha
 
     `on_order` is the summed quantity of open orders; `has_open_order` whether any is open. Every mode
     but `units` leaves the list while an order is open; `units` stays for the part no order covers."""
-    if mode == "pinned":
-        return 0 if has_open_order else 1
-    if mode == "on_demand":
+    # Pinned is on_demand plus "shown first in the inventory" (owner, 2026-11-25, APLANE-77): never always on the list.
+    if mode in ("on_demand", "pinned"):
         return 1 if needed and not has_open_order else 0
     if mode == "level":
         return 1 if level in ("low", "out") and not has_open_order else 0
@@ -29,8 +28,3 @@ def to_buy(mode, needed, level, quantity, min_quantity, restock_to, on_order, ha
         target = restock_to if restock_to is not None else minimum
         return max(1, target - have - on_order)
     return 0
-
-
-def counts(mode):
-    """The sidebar counter counts what is really missing; pinned rows never do, or it never reaches 0."""
-    return mode != "pinned"

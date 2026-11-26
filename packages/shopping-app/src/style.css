@@ -4,6 +4,12 @@
    safe areas. */
 
 :root {
+  /* Text 10 % smaller (owner: 20 % on 2026-11-25 for Aga's phone, too small on 2026-11-26 → 10 %, APLANE-78). Inputs
+     too, except on iOS (below). */
+  --font-scale: 0.9;
+  /* Controls 15 % more compact (owner, 2026-11-26): heights and side padding of buttons, segments, selects, fields,
+     tabs and menu entries; rows and tick boxes keep their size. */
+  --control-scale: 0.85;
   --bg: #141415;
   --bg-raised: #191a1b;
   --bg-control: #1e1f20;
@@ -72,7 +78,7 @@ body {
     "Segoe UI",
     Roboto,
     sans-serif;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale));
   line-height: 1.35;
   -webkit-tap-highlight-color: transparent;
 }
@@ -134,7 +140,7 @@ select {
 }
 
 .message {
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale));
   max-width: 34em;
 }
 
@@ -159,7 +165,7 @@ select {
 
 .title {
   margin: 0;
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale));
   font-weight: 600;
   flex: 1;
   min-width: 0;
@@ -176,8 +182,8 @@ select {
 .tab {
   display: flex;
   align-items: center;
-  min-height: 44px;
-  padding: 0 14px;
+  min-height: calc(44px * var(--control-scale));
+  padding: 0 calc(14px * var(--control-scale));
   border-radius: 4px;
   color: var(--text-2);
   text-decoration: none;
@@ -195,11 +201,41 @@ select {
   min-width: 0;
 }
 
+/* Grouping and list filter always share one line (owner, 2026-11-26: prod wrapped them with the ES/PL list names).
+   A native select is as wide as its longest option, so both may shrink: the grouping to its content at most, the
+   list filter takes the rest, and a name that does not fit ends in "…". */
 .toolbar {
   display: flex;
   gap: 8px;
   padding: 8px 16px 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+.toolbar > .select {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.toolbar > .select:last-child {
+  flex: 1 1 0;
+}
+
+/* The grouping never takes more than half, whatever the language or text size. */
+.toolbar > .select:first-child {
+  max-width: 50%;
+}
+
+.toolbar > .select select {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolbar > .select > svg {
+  flex: none;
 }
 
 .select {
@@ -207,8 +243,8 @@ select {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 44px;
-  padding: 0 12px;
+  min-height: calc(44px * var(--control-scale));
+  padding: 0 calc(12px * var(--control-scale));
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text-2);
@@ -218,8 +254,8 @@ select {
   appearance: none;
   border: 0;
   background: transparent;
-  min-height: 42px;
-  font-size: 13px;
+  min-height: calc(42px * var(--control-scale));
+  font-size: calc(13px * var(--font-scale));
   padding-right: 4px;
 }
 
@@ -257,8 +293,8 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 44px;
-  padding: 0 12px;
+  min-height: calc(44px * var(--control-scale));
+  padding: 0 calc(12px * var(--control-scale));
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-raised);
@@ -271,7 +307,7 @@ select {
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
   background: var(--bg-raised);
   border-bottom: 1px solid var(--divider);
 }
@@ -304,16 +340,24 @@ select {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 44px;
-  min-width: 44px;
+  min-height: calc(44px * var(--control-scale));
+  min-width: calc(44px * var(--control-scale));
   border-radius: 6px;
   cursor: pointer;
   text-decoration: none;
   white-space: nowrap;
 }
 
+/* Icon-only buttons keep a 44 px target: --control-scale trims the room between a label and its border, and these
+   have no label. After the group rule above, or it loses the cascade (audit 2026-11-26: the ± had shrunk to 37 px). */
+.icon-button,
+.icon {
+  min-height: 44px;
+  min-width: 44px;
+}
+
 .primary {
-  padding: 0 14px;
+  padding: 0 calc(14px * var(--control-scale));
   border: 0;
   background: var(--primary);
   color: var(--on-primary);
@@ -326,26 +370,26 @@ select {
 }
 
 .secondary {
-  padding: 0 12px;
+  padding: 0 calc(12px * var(--control-scale));
   border: 1px solid var(--border-strong);
   background: var(--bg-control);
   color: var(--text);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
   font-weight: 500;
 }
 
 .wide {
   flex: 1;
-  min-height: 48px;
-  font-size: 15px;
+  min-height: calc(48px * var(--control-scale));
+  font-size: calc(15px * var(--font-scale));
 }
 
 .chip {
-  padding: 0 12px;
+  padding: 0 calc(12px * var(--control-scale));
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text-2);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
 }
 
 .chip[aria-pressed="true"],
@@ -359,16 +403,16 @@ select {
 
 .dashed {
   justify-content: flex-start;
-  padding: 0 12px;
+  padding: 0 calc(12px * var(--control-scale));
   border: 1px dashed var(--border-strong);
   background: transparent;
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale));
   text-align: left;
   white-space: normal;
 }
 
 .text-button {
-  padding: 0 8px;
+  padding: 0 calc(8px * var(--control-scale));
   border: 0;
   /* As a <button> it otherwise keeps the browser's grey fill and reads as disabled (Realme, 2026-11-22). */
   background: transparent;
@@ -387,8 +431,8 @@ select {
   background: transparent;
   color: var(--accent);
   font-weight: 600;
-  min-height: 44px;
-  padding: 0 8px;
+  min-height: calc(44px * var(--control-scale));
+  padding: 0 calc(8px * var(--control-scale));
   cursor: pointer;
 }
 
@@ -407,8 +451,8 @@ select {
 }
 
 .pin.with-text {
-  padding: 0 12px;
-  font-size: 13px;
+  padding: 0 calc(12px * var(--control-scale));
+  font-size: calc(13px * var(--font-scale));
 }
 
 .pin.on {
@@ -428,7 +472,7 @@ select {
 .group {
   margin: 0;
   padding: 12px 16px 2px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -507,18 +551,18 @@ select {
 }
 
 .name {
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale));
   color: var(--text);
   text-decoration: none;
   overflow-wrap: anywhere;
 }
 
 .row.big .name {
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale));
 }
 
 .sub {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   color: var(--muted);
 }
 
@@ -531,7 +575,8 @@ select {
 
 /* In a row the list name and hint shrink and wrap, right-aligned, and the name keeps a floor: with text at 130 %
    a pinned row's "Pinned · bought …" took the whole width and squeezed the name to one letter per line (phase 9,
-   measured on the Realme). */
+   measured on the Realme). The 130 % / 200 % measurements below were made at the text sizes before APLANE-78
+   (text since × 0.9, the em floors scale with it). */
 .row > .sub.inline {
   /* Flex shrink is shared in proportion to factor x base size, never in order: any share wraps the badge's text
      ('Running low' at 100 % with a long list name: an equal factor took 25 px, 100x still a fraction of a pixel
@@ -574,7 +619,7 @@ select {
 }
 
 .small {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
 }
 
 .center {
@@ -615,7 +660,7 @@ select {
   gap: 6px;
   padding: 3px 8px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   font-weight: 500;
   white-space: nowrap;
   flex: none;
@@ -641,7 +686,7 @@ select {
   padding: 8px 10px;
   border-radius: 6px;
   background: var(--bg-raised);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
 }
 
 .notice.warn {
@@ -677,12 +722,12 @@ select {
 }
 
 .stepper-value {
-  min-width: 36px;
-  min-height: 44px;
+  min-width: calc(36px * var(--control-scale));
+  min-height: calc(44px * var(--control-scale));
   border: 0;
   background: transparent;
   text-align: center;
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale));
   font-weight: 600;
   display: inline-flex;
   align-items: center;
@@ -710,13 +755,13 @@ button.stepper-value {
 }
 
 .seg {
-  min-height: 44px;
-  padding: 0 10px;
+  min-height: calc(44px * var(--control-scale));
+  padding: 0 calc(10px * var(--control-scale));
   border: 0;
   border-left: 1px solid var(--border);
   background: transparent;
   color: var(--text-2);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
   cursor: pointer;
 }
 
@@ -758,7 +803,7 @@ button.stepper-value {
   padding: 8px 16px;
 }
 
-/* A chip in a row that scrolls must not shrink: .chip's min-width (44px) replaces the automatic minimum, so with
+/* A chip in a row that scrolls must not shrink: .chip's min-width (44px × scale) replaces the automatic minimum, so with
    more lists than fit the chips shrank below their text and the names ran into each other (prod, 2026-11-23,
    five HOME lists on a phone). */
 .chips.scroll-x > .chip {
@@ -778,8 +823,8 @@ button.stepper-value {
   min-width: 0;
   display: flex;
   align-items: center;
-  min-height: 44px;
-  padding: 0 12px;
+  min-height: calc(44px * var(--control-scale));
+  padding: 0 calc(12px * var(--control-scale));
   border: 1px solid var(--accent);
   border-radius: 6px;
   background: var(--bg-raised);
@@ -791,7 +836,7 @@ button.stepper-value {
   border: 0;
   outline: 0;
   background: transparent;
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale));
 }
 
 /* ---------------------------------------------------------------- forms, sheet, dialog */
@@ -830,12 +875,12 @@ button.stepper-value {
 
 .field input,
 .field select {
-  min-height: 40px;
-  padding: 0 10px;
+  min-height: calc(40px * var(--control-scale));
+  padding: 0 calc(10px * var(--control-scale));
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-raised);
-  font-size: 16px; /* below 16px, mobile browsers zoom into the field */
+  font-size: calc(16px * var(--font-scale));
 }
 
 .field.inline input:not([type="checkbox"]),
@@ -897,7 +942,7 @@ button.stepper-value {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 44px;
+  min-height: calc(44px * var(--control-scale));
 }
 
 .history {
@@ -910,7 +955,7 @@ button.stepper-value {
   display: flex;
   gap: 12px;
   padding: 4px 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
 }
 
 .history .when {
@@ -944,7 +989,7 @@ button.stepper-value {
 
 .dialog-title {
   margin: 0 0 12px;
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale));
 }
 
 .dialog-actions {
@@ -968,7 +1013,7 @@ button.stepper-value {
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   background: var(--bg-control);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
   z-index: 5;
 }
 
@@ -1049,7 +1094,7 @@ button.stepper-value {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale));
   font-weight: 500;
 }
 
@@ -1066,8 +1111,8 @@ button.stepper-value {
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 44px;
-  padding: 0 8px;
+  min-height: calc(44px * var(--control-scale));
+  padding: 0 calc(8px * var(--control-scale));
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -1089,21 +1134,21 @@ button.stepper-value {
 
 .nav-count {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
 }
 
 .nav-section {
   margin: 12px 0 4px;
   padding: 0 8px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
   font-weight: 600;
 }
 
 .nav-note {
   margin: 0 8px 8px;
   color: var(--warn);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
 }
 
 .nav-name {
@@ -1119,13 +1164,13 @@ button.stepper-value {
   height: 20px;
   border-radius: 4px;
   background: var(--bg-control);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   font-weight: 600;
 }
 
 .nav-logo.emoji {
   background: transparent;
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale));
 }
 
 .nav-chevron {
@@ -1140,4 +1185,14 @@ button.stepper-value {
 
 .nav-sub {
   padding-left: 28px;
+}
+
+/* iOS Safari zooms into a focused field whose text is under 16px; Android browsers do not. Only WebKit on iOS knows
+   -webkit-touch-callout, so the fields keep 16px there and follow --font-scale elsewhere (APLANE-78). */
+@supports (-webkit-touch-callout: none) {
+  .search input,
+  .field input,
+  .field select {
+    font-size: 16px;
+  }
 }

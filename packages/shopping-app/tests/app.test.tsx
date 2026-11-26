@@ -25,7 +25,11 @@ function catalog(): { state: ItemState; data: Data }[] {
   return [
     { state: state(MILK, "on_demand", { needed: true }), data: { name: "Milk", list: GROCERIES, category: "Dairy" } },
     {
-      state: state(BREAD, "pinned", { last_bought_at: new Date(Date.now() - 4 * 86_400_000).toISOString() }),
+      // Pinned and needed: on the list (APLANE-77: a pinned item is on it only when needed).
+      state: state(BREAD, "pinned", {
+        needed: true,
+        last_bought_at: new Date(Date.now() - 4 * 86_400_000).toISOString(),
+      }),
       data: { name: "Bread", list: GROCERIES, category: "Bakery" },
     },
     {
@@ -94,10 +98,10 @@ afterEach(() => {
 });
 
 describe("the to-buy list", () => {
-  it("shows what is missing, grouped by category, with the counter leaving pinned rows out", async () => {
+  it("shows what is missing, grouped by category, with the counter counting the needed pinned row", async () => {
     await boot();
-    // Milk, Detergent, Wipes, Nappies, Protein count; Bread is pinned.
-    expect(screen.getByText("5 missing · 1 pinned")).toBeTruthy();
+    // Milk, Detergent, Wipes, Nappies, Protein and Bread (pinned, needed) count (APLANE-77).
+    expect(screen.getByText("6 missing")).toBeTruthy();
     expect(screen.getByRole("region", { name: "Dairy" })).toBeTruthy();
     expect(screen.queryByText("Salt")).toBeNull();
     expect(within(screen.getByRole("region", { name: "Cleaning" })).getByText("Out")).toBeTruthy();
@@ -125,14 +129,16 @@ describe("the to-buy list", () => {
     expect(screen.getByRole("checkbox", { name: "Wipes: bought" })).toBeTruthy();
   });
 
-  it("a ticked pinned row stays under Done until Finish shopping, then comes back unticked", async () => {
+  it("a ticked pinned row stays under Done until Finish shopping, then leaves the list: bought, no longer needed", async () => {
     await boot();
     fireEvent.click(screen.getByRole("checkbox", { name: "Bread: bought" }));
     await settle();
     expect(screen.queryByRole("checkbox", { name: "Bread: bought" })).toBeNull();
     expect(screen.getByRole("checkbox", { name: "Bread: not bought after all" })).toBeTruthy();
+    expect(api.server.items.get(BREAD)!.needed).toBe(false);
     await act(async () => controller.finishShopping());
-    expect(screen.getByRole("checkbox", { name: "Bread: bought" })).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: "Bread: bought" })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "Bread: not bought after all" })).toBeNull();
   });
 
   it("S18: Done survives a reload, and empties after six hours without a tick", async () => {
@@ -159,12 +165,15 @@ describe("the to-buy list", () => {
     await start();
     fireEvent.click(screen.getByRole("checkbox", { name: "Bread: bought" }));
     await settle();
+    // Someone needs it again, so it is on the list the reload fetches: a reload knows only what the list sends,
+    // and a bought pinned item left it (APLANE-77; before, a pinned item never left the list).
+    api.server.items.get(BREAD)!.needed = true;
     // A reload: a new page over the same stored queue.
     await start();
     expect(screen.getByRole("checkbox", { name: "Bread: not bought after all" })).toBeTruthy();
     clock += DONE_RESET_MS + 60_000;
     await start();
-    expect(screen.getByRole("checkbox", { name: "Bread: bought" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: /^Done/ })).toBeNull();
     expect(screen.queryByRole("checkbox", { name: "Bread: not bought after all" })).toBeNull();
   });
 
@@ -251,19 +260,22 @@ describe("the to-buy list", () => {
     expect(screen.getByText("Detergent: not applied (someone changed it first).")).toBeTruthy();
   });
 
-  it("S17: a pinned item someone else bought stays on the list, saying who bought it and when", async () => {
+  it("S17 (APLANE-77): a pinned item someone else bought is off the list; its sheet says who bought it and when", async () => {
     // The model server keeps no last_bought_*: the item arrives as the engine sends it after B's purchase.
     const items = catalog();
     const bread = items.find((i) => i.state.id === BREAD)!;
-    bread.state.last_bought_by = BO.id;
+    Object.assign(bread.state, { needed: false, last_bought_by: BO.id });
     await boot(items);
-    const row = screen.getByRole("checkbox", { name: "Bread: bought" }).closest("label")!;
-    expect(row.textContent).toMatch(/Pinned · bought .* by Bo$/);
+    expect(screen.queryByRole("checkbox", { name: "Bread: bought" })).toBeNull();
+    await go(`#/item/${BREAD}`);
+    expect(document.body.textContent).toMatch(/bought .* by Bo/);
     // Bought by the viewer: no name.
     cleanup();
     bread.state.last_bought_by = ME.id;
     await boot(items);
-    expect(screen.getByRole("checkbox", { name: "Bread: bought" }).closest("label")!.textContent).not.toMatch(/ by /);
+    await go(`#/item/${BREAD}`);
+    expect(document.body.textContent).toMatch(/bought /);
+    expect(document.body.textContent).not.toMatch(/bought [^.]* by /);
   });
 
   it("marking ordered warns when the item already has an open order", async () => {
@@ -339,12 +351,13 @@ describe("the to-buy list", () => {
     expect(api.server.orders.get(orderId)!.status).toBe("cancelled");
   });
 
-  it("grouping by urgency puts out first and pinned last", async () => {
+  it("grouping by urgency puts out first; a needed pinned row sits with Needed (APLANE-77)", async () => {
     await boot();
     fireEvent.change(screen.getByRole("combobox", { name: /Group/ }), { target: { value: "urgency" } });
     await settle();
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(headings.slice(0, 4)).toEqual(["Out", "Running low", "Needed", "Pinned"]);
+    expect(headings.slice(0, 3)).toEqual(["Out", "Running low", "Needed"]);
+    expect(within(screen.getByRole("region", { name: "Needed" })).getByText("Bread")).toBeTruthy();
     // S60: Wipes (units, 1 of minimum 3) is below its minimum, so it sits with "Running low".
     expect(within(screen.getByRole("region", { name: "Running low" })).getByText("Wipes")).toBeTruthy();
     expect(within(screen.getByRole("region", { name: "Out" })).getByText("Detergent")).toBeTruthy();
@@ -452,16 +465,139 @@ describe("inventory", () => {
     expect(api.ops().map((o) => [o.op, o.args.level])).toEqual([["set_level", "low"]]);
   });
 
-  it("the pin toggles pinned and occasional in one tap", async () => {
+  it("the pin toggles pinned and occasional in one tap and keeps needed; pinned items are gathered at the top and stay in their list (APLANE-77)", async () => {
     await boot(catalog(), "#/inventory");
-    fireEvent.click(await screen.findByRole("button", { name: "Bread: unpin" }));
+    const names = (region: HTMLElement) => [...region.querySelectorAll(".row .name")].map((a) => a.textContent);
+    // Groceries alphabetical, Bread included; Bread also in the Pinned section at the top.
+    const groceries = await screen.findByRole("region", { name: "Groceries" });
+    expect(names(groceries)).toEqual(["Bread", "Detergent", "Milk", "Salt"]);
+    expect(names(screen.getByRole("region", { name: "Pinned" }))).toEqual(["Bread"]);
+    expect(within(groceries).getByRole("button", { name: "Bread: needed" }).getAttribute("aria-pressed")).toBe("true");
+    // Unpinned: it leaves the Pinned section and stays where it was in its list (no jump under the finger).
+    fireEvent.click(within(groceries).getByRole("button", { name: "Bread: unpin" }));
     await settle();
-    expect(api.server.items.get(BREAD)!.mode).toBe("on_demand");
-    expect(screen.getByRole("button", { name: "Bread: pin" })).toBeTruthy();
+    expect(api.server.items.get(BREAD)).toMatchObject({ mode: "on_demand", needed: true });
+    expect(screen.queryByRole("region", { name: "Pinned" })).toBeNull();
+    expect(names(screen.getByRole("region", { name: "Groceries" }))).toEqual(["Bread", "Detergent", "Milk", "Salt"]);
+    // Pinning Milk: it appears at the top too, and its row in Groceries does not move.
+    fireEvent.click(
+      within(screen.getByRole("region", { name: "Groceries" })).getByRole("button", { name: "Milk: pin" })
+    );
+    await settle();
+    expect(names(screen.getByRole("region", { name: "Pinned" }))).toEqual(["Milk"]);
+    expect(names(screen.getByRole("region", { name: "Groceries" }))).toEqual(["Bread", "Detergent", "Milk", "Salt"]);
+    // Either copy of the row acts on the item: needed off from the Pinned section.
+    fireEvent.click(
+      within(screen.getByRole("region", { name: "Pinned" })).getByRole("button", { name: "Milk: needed" })
+    );
+    await settle();
+    expect(api.server.items.get(MILK)).toMatchObject({ mode: "pinned", needed: false });
+  });
+});
+
+describe("the queue's status line", () => {
+  it("a tap answered at once never shows 'Waiting to be sent' (it pushed the list down and back on every tap)", async () => {
+    await boot(catalog(), "#/inventory");
+    const seen: string[] = [];
+    const observer = new MutationObserver(() => {
+      const status = document.querySelector(".status");
+      if (status) seen.push(status.textContent ?? "");
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    fireEvent.click(await screen.findByRole("button", { name: "Milk: pin" }));
+    await settle();
+    observer.disconnect();
+    expect(seen).toEqual([]);
+  });
+
+  it("a tap still waiting after two seconds is shown", async () => {
+    await boot(catalog(), "#/inventory");
+    // A slow server (no failure: a failure is shown at once): the answer comes after three seconds.
+    const answer = api.fetch;
+    api.fetch = async (input, init) => {
+      if (String(input).endsWith("/inventory/ops/")) await new Promise((r) => setTimeout(r, 3000));
+      return answer(input, init);
+    };
+    fireEvent.click(await screen.findByRole("button", { name: "Milk: pin" }));
+    // The tap is queued (the pin shows at once) but not yet news.
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Milk: unpin" }).length).toBeGreaterThan(0));
+    await new Promise((r) => setTimeout(r, 1000));
+    expect(screen.queryByText(/Waiting to be sent/)).toBeNull();
+    await waitFor(() => expect(screen.getByText(/Waiting to be sent: 1/)).toBeTruthy(), { timeout: 2500 });
+    // Let the slow answer land inside this test, not the next one.
+    await waitFor(() => expect(controller.get().queue.entries.length).toBe(0), { timeout: 3000 });
   });
 });
 
 describe("item sheet", () => {
+  it("APLANE-81: deletes the item after a confirmation, online, and it leaves the device", async () => {
+    await boot(catalog(), `#/item/${MILK}`);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Delete item" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete “Milk”?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(api.calls.some((c) => c.method === "DELETE")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Delete item" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+    await settle();
+    expect(api.calls.filter((c) => c.method === "DELETE").map((c) => c.path)).toEqual([
+      expect.stringMatching(new RegExp(`/inventory/items/${MILK}/$`)),
+    ]);
+    expect(window.location.hash).toBe("#/inventory");
+    expect(controller.get().known[MILK]).toBeUndefined();
+    await go("#/");
+    expect(screen.queryByRole("checkbox", { name: "Milk: bought" })).toBeNull();
+  });
+
+  it("APLANE-81: a read that started before the DELETE does not bring the item back; a 404 counts as deleted", async () => {
+    const items = catalog();
+    await boot(items, `#/item/${MILK}`);
+    await settle();
+    const milk = items.find((i) => i.state.id === MILK)!;
+    fireEvent.click(screen.getByRole("button", { name: "Delete item" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/inventory"));
+    // A stale answer: the server still lists Milk (a read sent before the DELETE).
+    api.server.items.set(MILK, { ...milk.state });
+    api.data.set(MILK, milk.data);
+    await act(async () => controller.refresh());
+    expect(controller.get().known[MILK]).toBeUndefined();
+    // Bread deleted elsewhere first: the DELETE answers 404, and the person sees it deleted.
+    await go(`#/item/${BREAD}`);
+    api.data.delete(BREAD);
+    fireEvent.click(screen.getByRole("button", { name: "Delete item" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.getByText("Bread: deleted.")).toBeTruthy());
+    expect(controller.get().known[BREAD]).toBeUndefined();
+  });
+
+  it("APLANE-81: a delete that throws leaves the dialog closable and says it failed", async () => {
+    await boot(catalog(), `#/item/${MILK}`);
+    await settle();
+    controller.deleteItem = async () => {
+      throw new Error("boom");
+    };
+    fireEvent.click(screen.getByRole("button", { name: "Delete item" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByText(/Not deleted:/)).toBeTruthy();
+    expect(window.location.hash).toBe(`#/item/${MILK}`);
+  });
+
+  it("APLANE-81: refuses to delete while the device still holds changes to the item", async () => {
+    await boot(catalog(), `#/item/${MILK}`);
+    await settle();
+    api.poisonOp = (op) => op.target === MILK; // the tap below stays waiting; the DELETE itself would go through
+    fireEvent.click(screen.getByRole("button", { name: "Milk: needed" }));
+    // Not settle(): it waits for an empty queue, and this tap stays in it.
+    await waitFor(() => expect(api.calls.some((c) => c.path.endsWith("/inventory/ops/"))).toBe(true));
+    expect(controller.get().queue.entries.length).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "Delete item" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.getByText(/Not deleted: it has changes still waiting/)).toBeTruthy());
+    expect(api.calls.some((c) => c.method === "DELETE")).toBe(false);
+  });
+
   it("changing to units asks how many are at home", async () => {
     await boot(catalog(), `#/item/${SALT}`);
     await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "Salt" })).toBeTruthy());
@@ -1139,7 +1275,7 @@ describe("the queue belongs to its workspace", () => {
     });
     await controller.start();
     render(<App controller={controller} locale="en" />);
-    expect(screen.getByText("5 missing · 1 pinned")).toBeTruthy();
+    expect(screen.getByText("6 missing")).toBeTruthy();
     expect(screen.queryByRole("region", { name: /On the way/ })).toBeNull();
   });
 
@@ -1355,16 +1491,16 @@ describe("Plane's menu (APLANE-73)", () => {
     expect(within(nav).getByRole("link", { name: "Inventory" })).toBeTruthy();
   });
 
-  it("the counter shows icons and numbers; the sentence is there for screen readers", async () => {
+  it("the counter shows an icon and the number; the sentence is there for screen readers", async () => {
     await boot();
     await settle();
     const counts = document.querySelector(".topbar .counts")!;
-    expect(within(counts as HTMLElement).getByText("5 missing · 1 pinned").className).toBe("visually-hidden");
+    expect(within(counts as HTMLElement).getByText("6 missing").className).toBe("visually-hidden");
     const shown = counts.querySelector(".counts-shown")!;
     expect(shown.getAttribute("aria-hidden")).toBe("true");
-    expect([...shown.querySelectorAll(".count")].map((c) => c.textContent)).toEqual(["5", "1"]);
+    expect([...shown.querySelectorAll(".count")].map((c) => c.textContent)).toEqual(["6"]);
     // Only the hidden part carries the hover title; the outer span has no name of its own.
-    expect([counts.getAttribute("title"), shown.getAttribute("title")]).toEqual([null, "5 missing · 1 pinned"]);
+    expect([counts.getAttribute("title"), shown.getAttribute("title")]).toEqual([null, "6 missing"]);
   });
 
   it("every Plane entry carries its icon, as in the main app's sidebar", async () => {

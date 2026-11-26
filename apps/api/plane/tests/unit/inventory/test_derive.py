@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from plane.app.inventory.derive import counts, to_buy
+from plane.app.inventory.derive import to_buy
 
 pytestmark = pytest.mark.unit
 
@@ -30,7 +30,3 @@ def test_to_buy(case):
         case["has_open_order"],
     )
     assert got == case["to_buy"]
-
-
-def test_pinned_rows_never_count():
-    assert not counts("pinned") and all(counts(m) for m in ("on_demand", "level", "units"))

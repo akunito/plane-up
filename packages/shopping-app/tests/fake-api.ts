@@ -228,7 +228,7 @@ export class FakeApi {
         200,
         {
           items: rows,
-          count: rows.filter((r) => r.mode !== "pinned").length,
+          count: rows.length,
           on_the_way: orders,
           on_the_way_items: items.filter((i) => i.to_buy === 0 && waiting.has(i.id)),
           generated_at: new Date().toISOString(),
@@ -284,7 +284,7 @@ export class FakeApi {
         if (existing) return [409, { error: "exists", item: this.payload(existing[0]) }];
         const id = uid("4");
         const mode = (b.mode ?? "on_demand") as ItemState["mode"];
-        this.server.items.set(id, state(id, mode, mode === "on_demand" ? { needed: true } : {}));
+        this.server.items.set(id, state(id, mode, mode === "on_demand" || mode === "pinned" ? { needed: true } : {}));
         this.data.set(id, { name: b.name, list: listId });
         return [201, this.payload(id)];
       }
@@ -318,6 +318,12 @@ export class FakeApi {
       }
     }
     const item = p.match(/\/inventory\/items\/([^/]+)\/$/);
+    if (item && method === "DELETE") {
+      // As the server: soft-deleted, gone from every read (APLANE-81).
+      if (!this.data.delete(item[1]!)) return [404, { error: "not found" }];
+      this.server.items.delete(item[1]!);
+      return [204, null];
+    }
     if (item && method === "PATCH") {
       const d = this.data.get(item[1]!)!;
       const b = body as Record<string, unknown>;
@@ -346,6 +352,8 @@ export class FakeApi {
       });
     }
     const [status, out] = this.route(method, path, body);
+    // A 204 has no body (the Response constructor refuses one), as the server's DELETE answers.
+    if (status === 204) return new Response(null, { status });
     return new Response(JSON.stringify(out), { status, headers: { "content-type": "application/json" } });
   };
 }

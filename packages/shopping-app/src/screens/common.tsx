@@ -1,7 +1,7 @@
 // Pieces several screens share: the header tabs, the queue's status line, the bottom bar, the order and
 // arrival dialogs.
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { newUuid, waiting, heldEntries, isHeld } from "@plane/inventory";
 import type { AppState } from "../controller";
 import type { Order, Row } from "../model";
@@ -10,16 +10,11 @@ import { ago, listNames } from "../i18n";
 import { Ago, Dialog, Icon, NumberField, Rich, parseIntStrict, useCtx } from "../ui";
 import { NavToggle } from "./Nav";
 
-/** counts: the to-buy counter as icons and numbers (cart: missing, pin: pinned), the sentence for screen readers.
+/** counts: the to-buy counter as an icon and a number (cart: missing; pinned rows count too since APLANE-77), the
+ * sentence for screen readers.
  * The sentence did not fit beside the Plane menu toggle and the tabs at 360 px in any language (APLANE-73
  * mockup: 0 of 6 cases on one line; icons: 6 of 6). */
-export function Tabs({
-  active,
-  counts,
-}: {
-  active: "shopping" | "inventory";
-  counts?: { missing: number; pinned: number };
-}) {
+export function Tabs({ active, counts }: { active: "shopping" | "inventory"; counts?: { missing: number } }) {
   const { t } = useCtx();
   return (
     <header className="topbar">
@@ -43,11 +38,6 @@ export function Tabs({
               {Icon.cart(14)}
               {counts.missing}
             </span>
-            <span className="count">
-              {/* Filled: the rows' sign for pinned (the outline pin means not pinned). */}
-              {Icon.pin(true, 14)}
-              {counts.pinned}
-            </span>
           </span>
         </span>
       ) : null}
@@ -61,13 +51,34 @@ export function Tabs({
 }
 
 /** How many changes wait, at all times, and why sending fails when it does (plan, phase 6 / M10). */
+/** A tap that is simply on its way is not news: "Waiting to be sent" shows only once the oldest one has waited this
+ * long. Shown at once it flashed for ~70 ms on every tap and pushed the whole list down and back (owner, 2026-11-26:
+ * "la lista salta un momento"; measured on dev: +55 px, then back on the answer). */
+export const WAITING_SHOWN_AFTER_MS = 2000;
+
 export function QueueStatus({ s }: { s: AppState }) {
   const { t, now, locale } = useCtx();
   const n = waiting(s.queue);
   const held = heldEntries(s.queue, now()).length;
   const failure = s.queue.failure;
   const notices = s.queue.notices.length;
-  if (n === 0 && notices === 0 && !failure && !s.connection && !s.storageProblem) return null;
+  const oldest = s.queue.entries[0]?.tappedAt ?? 0;
+  // A tap "from the future" (the clock moved back) counts as old: shown, never hidden for the length of the skew.
+  const age = now() - oldest;
+  const quietFor =
+    n > 0 && held === 0 && notices === 0 && !failure && !s.connection && !s.storageProblem && age >= 0
+      ? WAITING_SHOWN_AFTER_MS - age
+      : 0;
+  // Render again when the quiet time is over, in case nothing else does.
+  const [, wake] = useState(0);
+  useEffect(() => {
+    if (quietFor <= 0) return;
+    const id = setTimeout(() => wake((x) => x + 1), quietFor + 50);
+    return () => clearTimeout(id);
+  }, [quietFor]);
+  // data-waiting: the queue's real length for the E2E (the line itself now waits 2 s before showing).
+  if (quietFor > 0 || (n === 0 && notices === 0 && !failure && !s.connection && !s.storageProblem))
+    return <span hidden data-waiting={n} />;
   let text: string | null = null;
   // No network is said plainly, with the age of what is shown when the app opened from its snapshot.
   if (s.connection === "offline" || (s.offlineSince !== null && s.connection))
@@ -80,7 +91,11 @@ export function QueueStatus({ s }: { s: AppState }) {
     text = t(`failure_${failure.kind}`, { error: failure.error ?? String(failure.status ?? "") });
   else if (s.connection) text = t("refresh_failed");
   return (
-    <div className={`status${failure || s.connection || held > 0 || s.storageProblem ? " warn" : ""}`} role="status">
+    <div
+      className={`status${failure || s.connection || held > 0 || s.storageProblem ? " warn" : ""}`}
+      role="status"
+      data-waiting={n}
+    >
       <span className="grow">
         {s.storageProblem ? <span className="block">{t(`storage_${s.storageProblem}`)}</span> : null}
         {text ? <span className="block">{text}</span> : null}

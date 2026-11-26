@@ -6,7 +6,7 @@ import type { AppState } from "../controller";
 import type { Row } from "../model";
 import { board, group } from "../model";
 import { Icon, Stepper, useCtx, useTick } from "../ui";
-import { BoughtAgo, QueueStatus } from "./common";
+import { QueueStatus } from "./common";
 import { DoneSection, groupLabel, tickArgs } from "./ToBuy";
 
 export function Shop({ s }: { s: AppState }) {
@@ -75,23 +75,11 @@ function ShopRow({ row }: { row: Row }) {
   const [quantity, setQuantity] = useState<number | null>(null);
   const qty = quantity ?? row.quantity;
   const sub =
-    row.state.mode === "pinned" ? (
-      <>
-        {t("badge_pinned")}
-        {row.state.last_bought_at ? (
-          <>
-            {" · "}
-            <BoughtAgo at={row.state.last_bought_at} by={row.state.last_bought_by} />
-          </>
-        ) : null}
-      </>
-    ) : row.state.mode === "on_demand" ? (
-      t("badge_needed")
-    ) : row.state.mode === "level" ? (
-      t(row.state.level === "out" ? "badge_out" : "badge_low")
-    ) : (
-      t("below_min", { min: row.state.min_quantity ?? 0 })
-    );
+    row.state.mode === "pinned" || row.state.mode === "on_demand"
+      ? t("badge_needed")
+      : row.state.mode === "level"
+        ? t(row.state.level === "out" ? "badge_out" : "badge_low")
+        : t("below_min", { min: row.state.min_quantity ?? 0 });
   const tone =
     row.state.mode === "level"
       ? row.state.level === "out"

@@ -8,7 +8,7 @@ import { shortDate } from "../i18n";
 import type { Key } from "../i18n";
 import { prefs } from "../store";
 import { Ago, Icon, Rich, StateBadge, useCtx, useTick } from "../ui";
-import { ArrivalDialog, BottomBar, BoughtAgo, OrderDialog, QueueStatus, Tabs, WorkspacePicker } from "./common";
+import { ArrivalDialog, BottomBar, OrderDialog, QueueStatus, Tabs, WorkspacePicker } from "./common";
 
 const GROUPINGS: readonly Grouping[] = ["category", "store", "list", "urgency"];
 
@@ -40,7 +40,7 @@ export function ToBuy({ s }: { s: AppState }) {
 
   return (
     <div className="screen">
-      <Tabs active="shopping" counts={{ missing: b.count, pinned: b.pinned }} />
+      <Tabs active="shopping" counts={{ missing: b.count }} />
       <div className="toolbar">
         <label className="select">
           <span className="visually-hidden">{t("group_by", { grouping: "" })}</span>
@@ -178,18 +178,7 @@ export function ToBuy({ s }: { s: AppState }) {
 function ToBuyRow({ row }: { row: Row }) {
   const { c, t } = useCtx();
   const item = row.data.name;
-  const hint =
-    row.state.mode === "pinned" ? (
-      <>
-        {t("badge_pinned")}
-        {row.state.last_bought_at ? (
-          <>
-            {" · "}
-            <BoughtAgo at={row.state.last_bought_at} by={row.state.last_bought_by} />
-          </>
-        ) : null}
-      </>
-    ) : null;
+  const hint = row.state.mode === "pinned" ? t("badge_pinned") : null;
   return (
     <label className="row" data-item={row.id}>
       <input

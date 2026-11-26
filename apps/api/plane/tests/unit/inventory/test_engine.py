@@ -32,7 +32,7 @@ TABLE = [
     ("buy", {}, False, {m: "applied" for m in MODES}),
     ("mark_ordered", None, False, {m: "applied" for m in MODES}),
     ("set_level", {"level": "out"}, True, {"level": "applied"}),
-    ("set_needed", {"needed": False}, True, {"on_demand": "applied"}),
+    ("set_needed", {"needed": False}, True, {"on_demand": "applied", "pinned": "applied"}),
     ("pin", {"pinned": True}, True, {"on_demand": "applied", "pinned": "applied"}),
     ("recount", {"quantity": 5}, True, {"units": "applied"}),
 ]
@@ -82,7 +82,7 @@ def test_quantity_is_never_clamped(make_item, ctx, alice):
     [
         ("units", {"mode": "units", "quantity": 4}, {"quantity": 4, "min_quantity": 1, "needed": False}),
         ("level", {"mode": "level"}, {"level": "ok", "quantity": None}),
-        ("pinned", {"mode": "pinned"}, {"needed": False, "level": None}),
+        ("pinned", {"mode": "pinned"}, {"level": None}),  # needed is kept: see the test below (APLANE-77)
     ],
 )
 def test_change_mode_clears_what_the_new_mode_does_not_use(target_mode, args, expect, make_item, ctx, alice):
@@ -93,6 +93,19 @@ def test_change_mode_clears_what_the_new_mode_does_not_use(target_mode, args, ex
     assert item.mode == target_mode
     for field, value in expect.items():
         assert getattr(item, field) == value, field
+
+
+def test_change_mode_between_on_demand_and_pinned_keeps_needed(make_item, ctx, alice):
+    # APLANE-77 audit: the main app pins through change_mode (its Tracking select), the shopping app through pin;
+    # both must leave a needed item on the list. Any other mode change still clears it.
+    item = make_item(mode="on_demand", needed=True)
+    assert apply(ctx(alice), op("change_mode", item, {"mode": "pinned"}, base_rev=0))["result"] == "applied"
+    assert (fresh(item).mode, fresh(item).needed) == ("pinned", True)
+    assert apply(ctx(alice), op("change_mode", item, {"mode": "on_demand"}, base_rev=1))["result"] == "applied"
+    assert (fresh(item).mode, fresh(item).needed) == ("on_demand", True)
+    apply(ctx(alice), op("change_mode", item, {"mode": "pinned"}, base_rev=2))
+    apply(ctx(alice), op("change_mode", item, {"mode": "level"}, base_rev=3))
+    assert (fresh(item).mode, fresh(item).needed, fresh(item).needed_by_id) == ("level", False, None)
 
 
 def test_change_mode_keeps_the_thresholds_and_sets_an_empty_minimum_to_one(make_item, ctx, alice):
