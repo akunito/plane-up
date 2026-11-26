@@ -121,7 +121,31 @@ test.describe("shopping app @shopping", () => {
     await salt.scrollIntoViewIfNeeded();
     expect(await page.locator("main.scroll").evaluate((m) => m.scrollTop)).toBeGreaterThan(40);
     const top = (await salt.boundingBox())!.y;
+    // DEBUG-77 (temporary): who moves main's scroll after the tap.
+    await page.locator("main.scroll").evaluate((m) => {
+      const log: string[] = [];
+      (window as unknown as { __log: string[] }).__log = log;
+      const desc = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop")!;
+      Object.defineProperty(m, "scrollTop", {
+        get() {
+          return desc.get!.call(this);
+        },
+        set(v) {
+          log.push(`set ${desc.get!.call(this)} -> ${v} ${new Error().stack?.split("\n").slice(2, 6).join(" | ")}`);
+          desc.set!.call(this, v);
+        },
+      });
+      m.addEventListener("scroll", () => log.push(`scroll event ${m.scrollTop} at ${performance.now().toFixed(0)}`));
+      const se = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = function (...args) {
+        log.push(`scrollIntoView ${(this as Element).outerHTML.slice(0, 80)}`);
+        return se.apply(this, args as []);
+      };
+      document.addEventListener("focusin", (e) => log.push(`focus ${(e.target as Element).outerHTML.slice(0, 80)}`));
+    });
     await salt.getByRole("button", { name: "Salt: pin" }).click();
+    await page.waitForTimeout(1500);
+    console.log("DEBUG-77", await page.evaluate(() => (window as unknown as { __log: string[] }).__log.join("\n")));
     await expect(pinnedSection.locator(".row .name")).toHaveText(["Bread", "Eggs", "Salt"]);
     const pinnedSalt = groceries.locator(".row", { has: page.getByRole("button", { name: "Salt: unpin" }) });
     // Answered first: while the tap waits, the queue's status line sits above the list and shifts it ~16 px (flaked
