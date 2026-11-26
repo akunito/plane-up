@@ -106,30 +106,6 @@ test.describe("shopping app @shopping", () => {
     await expect(names).toHaveText(before);
   });
 
-  test("DEBUG-JUMP frame log of a pin", async ({ page }) => {
-    await page.setViewportSize({ width: 412, height: 700 });
-    await open(page, "#/inventory");
-    await page.waitForLoadState("networkidle");
-    const salt = page.getByRole("region", { name: "Groceries" }).locator(".row", { has: page.getByRole("button", { name: "Salt: pin" }) });
-    await salt.scrollIntoViewIfNeeded();
-    await page.locator("main.scroll").evaluate((m) => {
-      const log: string[] = [];
-      (window as unknown as { __log: string[] }).__log = log;
-      const t0 = performance.now();
-      const row = Array.from(m.querySelectorAll('section[aria-label="Groceries"] .row')).find((r) => r.textContent?.startsWith("Salt"))!;
-      const tick = () => {
-        const secs = Array.from(m.children).map((c) => `${(c.getAttribute("aria-label") ?? "?").slice(0, 4)}:${Math.round(c.getBoundingClientRect().height)}`).join(",");
-        const line = `st=${Math.round(m.scrollTop)} mainTop=${Math.round(m.getBoundingClientRect().top)} mainH=${Math.round(m.clientHeight)} salt=${Math.round(row.getBoundingClientRect().top)} status=${document.querySelector(".status")?.textContent?.slice(0, 30) ?? "-"} ${secs}`;
-        if (log[log.length - 1]?.split("|")[1] !== line) log.push(`${Math.round(performance.now() - t0)}|${line}`);
-        if (performance.now() - t0 < 3000) requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-    });
-    await salt.getByRole("button", { name: "Salt: pin" }).click();
-    await page.waitForTimeout(3200);
-    console.log("DEBUG-JUMP\n" + (await page.evaluate(() => (window as unknown as { __log: string[] }).__log.join("\n"))));
-  });
-
   test("a tick buys at once, sits under Done, and Undo reverts it on the server", async ({ page }) => {
     await open(page);
     await page.getByRole("checkbox", { name: "Milk: bought" }).click();
