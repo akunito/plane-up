@@ -495,6 +495,38 @@ describe("inventory", () => {
   });
 });
 
+describe("the queue's status line", () => {
+  it("a tap answered at once never shows 'Waiting to be sent' (it pushed the list down and back on every tap)", async () => {
+    await boot(catalog(), "#/inventory");
+    const seen: string[] = [];
+    const observer = new MutationObserver(() => {
+      const status = document.querySelector(".status");
+      if (status) seen.push(status.textContent ?? "");
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    fireEvent.click(await screen.findByRole("button", { name: "Milk: pin" }));
+    await settle();
+    observer.disconnect();
+    expect(seen).toEqual([]);
+  });
+
+  it("a tap still waiting after two seconds is shown", async () => {
+    await boot(catalog(), "#/inventory");
+    // A slow server (no failure: a failure is shown at once): the answer comes after three seconds.
+    const answer = api.fetch;
+    api.fetch = async (input, init) => {
+      if (String(input).endsWith("/inventory/ops/")) await new Promise((r) => setTimeout(r, 3000));
+      return answer(input, init);
+    };
+    fireEvent.click(await screen.findByRole("button", { name: "Milk: pin" }));
+    // The tap is queued (the pin shows at once) but not yet news.
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Milk: unpin" }).length).toBeGreaterThan(0));
+    await new Promise((r) => setTimeout(r, 1000));
+    expect(screen.queryByText(/Waiting to be sent/)).toBeNull();
+    await waitFor(() => expect(screen.getByText(/Waiting to be sent: 1/)).toBeTruthy(), { timeout: 2500 });
+  });
+});
+
 describe("item sheet", () => {
   it("APLANE-81: deletes the item after a confirmation, online, and it leaves the device", async () => {
     await boot(catalog(), `#/item/${MILK}`);

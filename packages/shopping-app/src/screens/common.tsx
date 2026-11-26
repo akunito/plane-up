@@ -1,7 +1,7 @@
 // Pieces several screens share: the header tabs, the queue's status line, the bottom bar, the order and
 // arrival dialogs.
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { newUuid, waiting, heldEntries, isHeld } from "@plane/inventory";
 import type { AppState } from "../controller";
 import type { Order, Row } from "../model";
@@ -51,12 +51,30 @@ export function Tabs({ active, counts }: { active: "shopping" | "inventory"; cou
 }
 
 /** How many changes wait, at all times, and why sending fails when it does (plan, phase 6 / M10). */
+/** A tap that is simply on its way is not news: "Waiting to be sent" shows only once the oldest one has waited this
+ * long. Shown at once it flashed for ~70 ms on every tap and pushed the whole list down and back (owner, 2026-11-26:
+ * "la lista salta un momento"; measured on dev: +55 px, then back on the answer). */
+export const WAITING_SHOWN_AFTER_MS = 2000;
+
 export function QueueStatus({ s }: { s: AppState }) {
   const { t, now, locale } = useCtx();
   const n = waiting(s.queue);
   const held = heldEntries(s.queue, now()).length;
   const failure = s.queue.failure;
   const notices = s.queue.notices.length;
+  const oldest = s.queue.entries[0]?.tappedAt ?? 0;
+  const quietFor =
+    n > 0 && held === 0 && notices === 0 && !failure && !s.connection && !s.storageProblem
+      ? WAITING_SHOWN_AFTER_MS - (now() - oldest)
+      : 0;
+  // Render again when the quiet time is over, in case nothing else does.
+  const [, wake] = useState(0);
+  useEffect(() => {
+    if (quietFor <= 0) return;
+    const id = setTimeout(() => wake((x) => x + 1), quietFor + 50);
+    return () => clearTimeout(id);
+  }, [quietFor]);
+  if (quietFor > 0) return null;
   if (n === 0 && notices === 0 && !failure && !s.connection && !s.storageProblem) return null;
   let text: string | null = null;
   // No network is said plainly, with the age of what is shown when the app opened from its snapshot.

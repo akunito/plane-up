@@ -447,6 +447,57 @@ test.describe("shopping app @shopping", () => {
     }
   });
 
+  test("the grouping and the list filter share one line at every width and text size, with the longest names (prod 2026-11-26)", async ({
+    page,
+  }) => {
+    // Prod wrapped them onto two lines with the ES/PL list names; the longest real one is about this long.
+    // Sequential on purpose: one viewport at a time.
+    for (const width of [320, 360, 412]) {
+      // oxlint-disable-next-line no-await-in-loop
+      await page.setViewportSize({ width, height: 740 });
+      // oxlint-disable-next-line no-await-in-loop
+      await open(page);
+      // oxlint-disable-next-line no-await-in-loop
+      const result = await page.evaluate(async () => {
+        // oxlint-disable-next-line unicorn/consistent-function-scoping
+        const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+        const root = document.documentElement;
+        const scale = parseFloat(getComputedStyle(root).getPropertyValue("--font-scale")) || 1;
+        const [group, list] = Array.from(document.querySelectorAll<HTMLSelectElement>(".toolbar select"));
+        group!.options[group!.selectedIndex]!.text = "Grupuj: Kategoria sklepowa";
+        const long = document.createElement("option");
+        long.value = "long";
+        long.text = "Botiquín y suplementos / Apteczka i suplementy domowe";
+        list!.append(long);
+        list!.value = "long";
+        const out: Record<string, { sameLine: number; overflow: number; outside: number }> = {};
+        for (const k of [1, 1.3, 2]) {
+          root.style.setProperty("--font-scale", String(scale * k));
+          // Sequential on purpose: each size is measured after the previous one is replaced.
+          // oxlint-disable-next-line no-await-in-loop
+          await wait(150);
+          const labels = Array.from(document.querySelectorAll(".toolbar > .select")).map((l) =>
+            l.getBoundingClientRect()
+          );
+          const bar = document.querySelector(".toolbar")!;
+          out[String(k)] = {
+            sameLine: Math.abs(labels[0]!.top - labels[1]!.top),
+            overflow:
+              bar.scrollWidth - bar.clientWidth + Math.max(0, document.scrollingElement!.scrollWidth - innerWidth),
+            outside: labels.filter((r) => r.right > bar.getBoundingClientRect().right + 1 || r.width < 40).length,
+          };
+        }
+        root.style.removeProperty("--font-scale");
+        return out;
+      });
+      for (const [k, r] of Object.entries(result)) {
+        expect(r.sameLine, `${width} px, text ×${k}: the two selects on one line`).toBeLessThanOrEqual(1);
+        expect(r.overflow, `${width} px, text ×${k}: nothing scrolls sideways`).toBeLessThanOrEqual(0);
+        expect(r.outside, `${width} px, text ×${k}: both inside the bar, neither squeezed to nothing`).toBe(0);
+      }
+    }
+  });
+
   test("inventory list chips keep their names whole and apart when they do not fit (prod 2026-11-23)", async ({
     page,
   }) => {

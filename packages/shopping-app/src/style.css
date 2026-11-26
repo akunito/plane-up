@@ -201,11 +201,41 @@ select {
   min-width: 0;
 }
 
+/* Grouping and list filter always share one line (owner, 2026-11-26: prod wrapped them with the ES/PL list names).
+   A native select is as wide as its longest option, so both may shrink: the grouping to its content at most, the
+   list filter takes the rest, and a name that does not fit ends in "…". */
 .toolbar {
   display: flex;
   gap: 8px;
   padding: 8px 16px 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+.toolbar > .select {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.toolbar > .select:last-child {
+  flex: 1 1 0;
+}
+
+/* The grouping never takes more than half, whatever the language or text size. */
+.toolbar > .select:first-child {
+  max-width: 50%;
+}
+
+.toolbar > .select select {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolbar > .select > svg {
+  flex: none;
 }
 
 .select {
