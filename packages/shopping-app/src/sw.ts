@@ -9,7 +9,7 @@
 
 import { deviceLock } from "@plane/inventory";
 import { idbStoreQuiet, storedQueues } from "./store";
-import { CACHE_PREFIX, OLD_CACHE_PREFIXES, SYNC_TAG, precacheInto, sendQueues } from "./worker-core";
+import { CACHE_PREFIX, SYNC_TAG, cachesToDelete, fromCaches, precacheInto, sendQueues } from "./worker-core";
 
 // The few worker types used here, declared locally: the "webworker" lib clashes with "dom" in the one
 // TypeScript program this package type-checks as.
@@ -63,10 +63,7 @@ on<WaitEvent>("install", (event) => {
 on<WaitEvent>("activate", (event) => {
   event.waitUntil(
     (async () => {
-      const keys = await caches.keys();
-      await Promise.all(
-        keys.filter((k) => k !== CACHE && OLD_CACHE_PREFIXES.some((p) => k.startsWith(p))).map((k) => caches.delete(k))
-      );
+      await Promise.all(cachesToDelete(await caches.keys(), CACHE).map((k) => caches.delete(k)));
       await self.clients.claim();
     })()
   );
@@ -84,7 +81,7 @@ on<FetchWaitEvent>("fetch", (event) => {
     event.respondWith(caches.match(SCOPE, { cacheName: CACHE }).then((hit) => hit ?? fetch(req)));
     return;
   }
-  event.respondWith(caches.match(req, { cacheName: CACHE, ignoreSearch: true }).then((hit) => hit ?? fetch(req)));
+  event.respondWith(fromCaches(caches, CACHE, req, (r) => fetch(r)));
 });
 
 async function sendAndTell(): Promise<void> {

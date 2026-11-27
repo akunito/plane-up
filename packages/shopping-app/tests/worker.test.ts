@@ -5,7 +5,15 @@ import { createQueue, makeLock, OP_VERSION, refreshed, tap } from "@plane/invent
 import { memoryStore } from "../src/store";
 import type { AppStore } from "../src/store";
 import { StoredQueueError } from "../src/store";
-import { expectedType, precacheInto, precacheProblem, sendQueues, SHELL_MARKER } from "../src/worker-core";
+import {
+  cachesToDelete,
+  expectedType,
+  fromCaches,
+  precacheInto,
+  precacheProblem,
+  sendQueues,
+  SHELL_MARKER,
+} from "../src/worker-core";
 import { state } from "./fake-api";
 
 const SHELL = `<html><head><meta ${SHELL_MARKER} content="1"></head></html>`;
@@ -267,5 +275,45 @@ describe("sendQueues (background sync)", () => {
     };
     expect(await sendQueues(deps)).toEqual({ kind: "sent", waiting: 0 });
     expect(sent.map((x) => x.url)).toEqual(["/api/workspaces/work/inventory/ops/"]);
+  });
+});
+
+describe("APLANE-83: an update never leaves a page without its script", () => {
+  it("keeps the newest previous version's cache, deletes older ones and the stub's", () => {
+    const keys = ["shopping-stub-1", "plane-shopping-a", "other-app", "plane-shopping-b", "plane-shopping-c"];
+    expect(cachesToDelete(keys, "plane-shopping-c")).toEqual(["shopping-stub-1", "plane-shopping-a"]);
+    expect(cachesToDelete(["plane-shopping-a", "plane-shopping-b"], "plane-shopping-b")).toEqual([]);
+    expect(cachesToDelete(["plane-shopping-b"], "plane-shopping-b")).toEqual([]);
+    expect(cachesToDelete(["shopping-stub-1", "plane-shopping-b"], "plane-shopping-b")).toEqual(["shopping-stub-1"]);
+  });
+
+  it("a script of the previous version comes from the kept cache, not the network", async () => {
+    const stored = new Map<string, Map<string, Response>>([
+      ["plane-shopping-new", new Map([["/shopping/assets/index-NEW.js", new Response("new")]])],
+      ["plane-shopping-old", new Map([["/shopping/assets/index-OLD.js", new Response("old")]])],
+    ]);
+    const match = async (req: Request, opts?: { cacheName?: string }) => {
+      const path = new URL(req.url).pathname;
+      for (const [name, c] of stored)
+        if (!opts?.cacheName || opts.cacheName === name) if (c.has(path)) return c.get(path)!.clone();
+      return undefined;
+    };
+    const network: string[] = [];
+    const fetchImpl = async (req: Request) => {
+      network.push(new URL(req.url).pathname);
+      return new Response("net");
+    };
+    const get = (path: string) =>
+      fromCaches(
+        { match } as unknown as CacheStorage,
+        "plane-shopping-new",
+        new Request(`https://x${path}`),
+        fetchImpl
+      ).then((r) => r.text());
+    expect(await get("/shopping/assets/index-NEW.js")).toBe("new");
+    expect(await get("/shopping/assets/index-OLD.js")).toBe("old");
+    expect(network).toEqual([]);
+    expect(await get("/shopping/assets/index-GONE.js")).toBe("net");
+    expect(network).toEqual(["/shopping/assets/index-GONE.js"]);
   });
 });

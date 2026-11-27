@@ -15,6 +15,26 @@
   </head>
   <body>
     <div id="app"></div>
+    <script>
+      // APLANE-83: if the app's script cannot load (a shell from before an update whose script is gone), reload
+      // once instead of leaving a blank page; the reload gets the current version. At most once a minute.
+      addEventListener(
+        "error",
+        function (e) {
+          var s = e.target;
+          if (!s || s.tagName !== "SCRIPT" || s.type !== "module") return;
+          try {
+            var k = "plane-shopping-reloaded-at";
+            if (Date.now() - (Number(sessionStorage.getItem(k)) || 0) < 60000) return;
+            sessionStorage.setItem(k, String(Date.now()));
+          } catch (_) {
+            return;
+          }
+          location.reload();
+        },
+        true
+      );
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

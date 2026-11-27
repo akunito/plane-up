@@ -19,6 +19,36 @@ export const CACHE_PREFIX = "plane-shopping-";
 /** Caches left by earlier workers at this scope: the phase 0 stub's ("shopping-stub-…") and older versions. */
 export const OLD_CACHE_PREFIXES = ["shopping-stub-", CACHE_PREFIX] as const;
 
+/** The caches an activating worker deletes: every older one except the newest previous version's. APLANE-83
+ * (measured on the Realme 2026-11-26): a reload answered by the old worker got the old shell; the new worker then
+ * activated, deleted the old cache and claimed the page, so the old shell's script came from the network, where
+ * it no longer exists → blank page. Keeping one version back lets that page finish loading (it reloads into the
+ * new version on its next hide). `keys` is in creation order (CacheStorage.keys()). */
+export function cachesToDelete(keys: readonly string[], current: string): string[] {
+  const old = keys.filter((k) => k !== current && OLD_CACHE_PREFIXES.some((p) => k.startsWith(p)));
+  let keep = -1;
+  for (let i = old.length - 1; i >= 0; i--)
+    if (old[i]!.startsWith(CACHE_PREFIX)) {
+      keep = i;
+      break;
+    }
+  return keep < 0 ? old : old.filter((_, i) => i !== keep);
+}
+
+/** A file of the app: this version's cache, then the version kept back (cachesToDelete), then the network. */
+export async function fromCaches(
+  cachesImpl: Pick<CacheStorage, "match">,
+  cacheName: string,
+  req: Request,
+  fetchImpl: (req: Request) => Promise<Response>
+): Promise<Response> {
+  return (
+    (await cachesImpl.match(req, { cacheName, ignoreSearch: true })) ??
+    (await cachesImpl.match(req, { ignoreSearch: true })) ??
+    fetchImpl(req)
+  );
+}
+
 const TYPES: Record<string, string> = {
   js: "javascript",
   mjs: "javascript",

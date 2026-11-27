@@ -499,6 +499,32 @@ test.describe("shopping app @shopping", () => {
     }
   });
 
+  test("APLANE-83: a missing file of the app is a 404, not the main app's page", async ({ page }) => {
+    const res = await page.request.get("/shopping/assets/index-APLANE83-does-not-exist.js");
+    expect(res.status()).toBe(404);
+    expect(res.headers()["content-type"] ?? "").not.toContain("text/html");
+  });
+
+  test("APLANE-83: if the app's script cannot load once, the page reloads itself instead of staying blank", async ({
+    browser,
+  }) => {
+    // No worker: the first load goes to the network, where the route below can break it.
+    const context = await browser.newContext({ storageState: authFile("qa-inv-ana"), serviceWorkers: "block" });
+    const page = await context.newPage();
+    let broken = 0;
+    await page.route(/\/shopping\/assets\/index-[^/]+\.js$/, async (route) => {
+      if (broken++ > 0) return route.continue();
+      // What the server answered for a script that no longer exists: the main app's HTML.
+      return route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><html></html>" });
+    });
+    await page.goto("/shopping/#/");
+    await expect(page.locator("[data-phase]")).toHaveCount(0);
+    await expect(page.locator(".toolbar select").first()).toBeVisible();
+    expect(broken).toBe(2);
+    expect(await page.evaluate(() => sessionStorage.getItem("plane-shopping-reloaded-at"))).not.toBeNull();
+    await context.close();
+  });
+
   test("the grouping and the list filter share one line at every width and text size, with the longest names (prod 2026-11-26)", async ({
     page,
   }) => {
