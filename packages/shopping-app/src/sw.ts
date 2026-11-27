@@ -9,7 +9,7 @@
 
 import { deviceLock } from "@plane/inventory";
 import { idbStoreQuiet, storedQueues } from "./store";
-import { CACHE_PREFIX, SYNC_TAG, cachesToDelete, fromCaches, precacheInto, sendQueues } from "./worker-core";
+import { CACHE_PREFIX, SYNC_TAG, fromCaches, precacheInto, rotateCaches, sendQueues } from "./worker-core";
 
 // The few worker types used here, declared locally: the "webworker" lib clashes with "dom" in the one
 // TypeScript program this package type-checks as.
@@ -63,7 +63,7 @@ on<WaitEvent>("install", (event) => {
 on<WaitEvent>("activate", (event) => {
   event.waitUntil(
     (async () => {
-      await Promise.all(cachesToDelete(await caches.keys(), CACHE).map((k) => caches.delete(k)));
+      await rotateCaches(caches, CACHE);
       await self.clients.claim();
     })()
   );

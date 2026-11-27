@@ -503,13 +503,25 @@ test.describe("shopping app @shopping", () => {
     const res = await page.request.get("/shopping/assets/index-APLANE83-does-not-exist.js");
     expect(res.status()).toBe(404);
     expect(res.headers()["content-type"] ?? "").not.toContain("text/html");
+    // Never cached for a year (Cloudflare would keep the 404 after a rollback); a real file is.
+    expect(res.headers()["cache-control"] ?? "").not.toContain("immutable");
+    const shell = await (await page.request.get("/shopping/")).text();
+    const entry = /\/shopping\/assets\/index-[^"]+\.js/.exec(shell)?.[0];
+    expect(entry, "the shell names its script").toBeTruthy();
+    const real = await page.request.get(entry!);
+    expect(real.status()).toBe(200);
+    expect(real.headers()["cache-control"] ?? "").toContain("immutable");
   });
 
   test("APLANE-83: if the app's script cannot load once, the page reloads itself instead of staying blank", async ({
     browser,
-  }) => {
+  }, info) => {
     // No worker: the first load goes to the network, where the route below can break it.
-    const context = await browser.newContext({ storageState: authFile("qa-inv-ana"), serviceWorkers: "block" });
+    const context = await browser.newContext({
+      ...info.project.use,
+      storageState: authFile("qa-inv-ana"),
+      serviceWorkers: "block",
+    });
     const page = await context.newPage();
     let broken = 0;
     await page.route(/\/shopping\/assets\/index-[^/]+\.js$/, async (route) => {

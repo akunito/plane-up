@@ -35,7 +35,9 @@
 	# served as a script, that HTML left a blank page after an update. Hashed names never change content.
 	handle /shopping/assets/* {
 		root * /app/web
-		header Cache-Control "public, max-age=31536000, immutable"
+		# Only on a file that exists: a 404 marked immutable would sit a year in Cloudflare (audit 2026-11-27).
+		@found file
+		header @found Cache-Control "public, max-age=31536000, immutable"
 		file_server
 	}
     handle_path /* {

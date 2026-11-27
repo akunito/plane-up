@@ -1,5 +1,5 @@
 // The app's root: phases (loading, signed out, no inventory...), hash routes, the toast with "Undo".
-// Hash routes because the server answers unknown paths with the main app's shell (brief: Why a
+// Hash routes because the server answers unknown paths (outside /shopping/assets/) with the main app's shell (brief: Why a
 // standalone app). The marker the gate looks for is in index.html, not here.
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
