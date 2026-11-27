@@ -21,7 +21,9 @@ export const OLD_CACHE_PREFIXES = ["shopping-stub-", CACHE_PREFIX] as const;
 
 /** Where the worker records which version's cache is serving; not a CACHE_PREFIX name, so never rotated away. */
 export const META_CACHE = "shopping-meta";
-const ACTIVE_KEY = "/shopping/__active-cache";
+// Not a "/shopping/…" literal: the deploy gate reads every such string in sw.js as a file to precache (it refused
+// "/shopping/__active-cache" on 2026-11-27). A Cache key can be any URL; .invalid never resolves.
+const ACTIVE_KEY = "https://shopping-meta.invalid/active-cache";
 
 /** The caches an activating worker deletes: every older one except `previous`, the version that was serving
  * until now. APLANE-83 (measured on the Realme 2026-11-26): a reload answered by the old worker got the old
