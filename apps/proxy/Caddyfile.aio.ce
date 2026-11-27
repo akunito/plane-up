@@ -11,6 +11,14 @@
 		reverse_proxy {$AWS_S3_ENDPOINT_URL}
 	}
 
+	# APLANE-76: dev and prod run the same image, so the dev install names come from the host: plane-dev.* gets
+	# the *.dev.json manifests ("Plane-dev", "Shopping-dev"); prod's files are untouched.
+	@devManifest {
+		expression {http.request.host}.startsWith("plane-dev.")
+		path /manifest.json /site.webmanifest.json /shopping/manifest.json
+	}
+	uri @devManifest replace .json .dev.json
+
     handle /spaces/* {
         reverse_proxy localhost:3002
     }

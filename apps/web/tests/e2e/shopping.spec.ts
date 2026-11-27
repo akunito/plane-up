@@ -15,7 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Locator, Page } from "@playwright/test";
-import { apiDelete, apiPost, authFile, expect, expectNoHorizontalOverflow, test } from "./helpers";
+import { apiDelete, apiPost, authFile, expect, expectNoHorizontalOverflow, SCREENSHOT_STYLE, test } from "./helpers";
 import { INV, contextFor, item, restoreSeed, server } from "./inventory-helpers";
 
 const items = INV?.inventory.items ?? {};
@@ -499,6 +499,35 @@ test.describe("shopping app @shopping", () => {
     }
   });
 
+  test("APLANE-76: dev says so — a DEV badge on both apps, and they install as Shopping-dev / Plane-dev", async ({
+    page,
+  }) => {
+    // The suite runs on dev only; prod's side (names unchanged, no badge) is L7's check.
+    const names = await Promise.all(
+      (
+        [
+          ["/shopping/manifest.json", "Shopping-dev"],
+          ["/manifest.json", "Plane-dev"],
+          ["/site.webmanifest.json", "Plane-dev"],
+        ] as const
+      ).map(async ([url, want]) => {
+        const res = await page.request.get(url);
+        return { url, status: res.status(), name: ((await res.json()) as { name?: string }).name, want };
+      })
+    );
+    for (const n of names) {
+      expect(n.status, n.url).toBe(200);
+      expect(n.name, n.url).toBe(n.want);
+    }
+    await open(page);
+    const badge = page.getByTestId("dev-badge");
+    await expect(badge).toHaveText("DEV");
+    // It never takes a tap: the corner under it still works.
+    expect(await badge.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe("none");
+    await page.goto("/");
+    await expect(page.getByTestId("dev-badge")).toHaveText("DEV");
+  });
+
   test("APLANE-83: a missing file of the app is a 404, not the main app's page", async ({ page }) => {
     const res = await page.request.get("/shopping/assets/index-APLANE83-does-not-exist.js");
     expect(res.status()).toBe(404);
@@ -748,6 +777,7 @@ const shot = async (page: Page, name: string, target?: Locator) => {
     animations: "disabled" as const,
     caret: "hide" as const,
     scale: "css" as const,
+    stylePath: SCREENSHOT_STYLE,
     // Relative times change from run to run; every one of them is a <time> element in this app.
     // Only those inside the target: a mask behind a dialog would be drawn over the dialog.
     mask: [(target ?? page).locator("time")],

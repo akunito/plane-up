@@ -12,6 +12,8 @@ export const QA_USERS = ["qa-alice", "qa-bob", "qa-carol", "qa-guest"] as const;
 export const INV_USERS = ["qa-inv-ana", "qa-inv-bo", "qa-inv-gus"] as const;
 export type QaUser = (typeof QA_USERS)[number] | (typeof INV_USERS)[number];
 const HERE = path.dirname(fileURLToPath(import.meta.url)); // ES module: no __dirname
+/** stylePath for every screenshot: hides the dev-only DEV badge (APLANE-76). */
+export const SCREENSHOT_STYLE = path.join(HERE, "screenshot.css");
 export const authFile = (user: QaUser) => path.join(HERE, ".auth", `${user}.json`);
 
 type Project = {

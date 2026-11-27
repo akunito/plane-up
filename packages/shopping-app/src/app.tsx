@@ -15,6 +15,7 @@ import { Pending } from "./screens/Pending";
 import { Shop } from "./screens/Shop";
 import { ToBuy } from "./screens/ToBuy";
 import { WorkspacePicker } from "./screens/common";
+import { isDevHost } from "./dev";
 
 export type Route =
   | { name: "list" }
@@ -67,6 +68,11 @@ export function App({
   return (
     <AppCtx.Provider value={ctx}>
       <Root />
+      {isDevHost(globalThis.location?.hostname ?? "") ? (
+        <div className="dev-badge" data-testid="dev-badge" aria-label="Development environment">
+          DEV
+        </div>
+      ) : null}
     </AppCtx.Provider>
   );
 }

@@ -1196,3 +1196,19 @@ button.stepper-value {
     font-size: 16px;
   }
 }
+
+/* APLANE-76: on dev only (host plane-dev.*), so a screen of dev is never taken for prod. Taps pass through. */
+.dev-badge {
+  position: fixed;
+  top: env(safe-area-inset-top, 0);
+  right: 0;
+  z-index: 1000;
+  padding: 1px 6px;
+  border-bottom-left-radius: 4px;
+  background: #f97316;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+}

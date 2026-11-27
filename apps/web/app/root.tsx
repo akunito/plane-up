@@ -32,6 +32,7 @@ import "@fontsource-variable/inter";
 import interVariableWoff2 from "@fontsource-variable/inter/files/inter-latin-wght-normal.woff2?url";
 import "@fontsource/material-symbols-rounded";
 import "@fontsource/ibm-plex-mono";
+import { DevBadge } from "@/components/dev-badge";
 
 const APP_TITLE = "Plane | Simple, extensible, open-source project management tool.";
 
@@ -79,6 +80,7 @@ export function Layout({ children }: { children: ReactNode }) {
         <ThemeProvider themes={["light", "dark", "light-contrast", "dark-contrast", "custom"]} defaultTheme="system">
           {children}
         </ThemeProvider>
+        <DevBadge />
         <Scripts />
         {!!isSessionRecorderEnabled && process.env.VITE_SESSION_RECORDER_KEY && (
           <Script id="clarity-tracking">
