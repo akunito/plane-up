@@ -1,5 +1,5 @@
 // The app's root: phases (loading, signed out, no inventory...), hash routes, the toast with "Undo".
-// Hash routes because the server answers unknown paths with the main app's shell (brief: Why a
+// Hash routes because the server answers unknown paths (outside /shopping/assets/) with the main app's shell (brief: Why a
 // standalone app). The marker the gate looks for is in index.html, not here.
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -15,6 +15,10 @@ import { Pending } from "./screens/Pending";
 import { Shop } from "./screens/Shop";
 import { ToBuy } from "./screens/ToBuy";
 import { WorkspacePicker } from "./screens/common";
+import { isDevHost } from "./dev";
+
+/** Read once: the host does not change while the app runs (APLANE-76). */
+const IS_DEV = isDevHost(globalThis.location?.hostname ?? "");
 
 export type Route =
   | { name: "list" }
@@ -67,6 +71,11 @@ export function App({
   return (
     <AppCtx.Provider value={ctx}>
       <Root />
+      {IS_DEV ? (
+        <div className="dev-badge" data-testid="dev-badge" aria-label="Development environment">
+          DEV
+        </div>
+      ) : null}
     </AppCtx.Provider>
   );
 }

@@ -1,0 +1,4 @@
+/* Applied to every screenshot (stylePath): the APLANE-76 DEV badge is on every dev page and is not what any baseline tests. */
+[data-testid="dev-badge"] {
+  display: none !important;
+}

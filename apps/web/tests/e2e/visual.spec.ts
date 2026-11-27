@@ -6,7 +6,7 @@
  *   plane-tests run.sh e2e --update-snapshots -g @visual
  */
 import type { Locator, Page } from "@playwright/test";
-import { authFile, closeDrawer, expect, isPhone, manifest, test } from "./helpers";
+import { authFile, closeDrawer, expect, isPhone, manifest, SCREENSHOT_STYLE, test } from "./helpers";
 
 const QAA = manifest.workspaces.qa.projects.QAA;
 const VIEWS = manifest.workspaces.qa.views;
@@ -17,6 +17,7 @@ const shot = async (page: Page, name: string, mask: Locator[] = []) => {
     animations: "disabled",
     caret: "hide",
     maxDiffPixelRatio: 0.01,
+    stylePath: SCREENSHOT_STYLE,
     // relative times, avatars' initials colours and unread dots are not what these screens test
     mask: [page.locator("time"), page.locator("[class*='rounded-full'][class*='bg-danger']"), ...mask],
   });
@@ -72,7 +73,10 @@ test.describe("@visual", () => {
         })
       )
       .toBe(true);
-    await expect(sheet).toHaveScreenshot("vr-06-display-sheet.png", { maxDiffPixelRatio: 0.01 });
+    await expect(sheet).toHaveScreenshot("vr-06-display-sheet.png", {
+      maxDiffPixelRatio: 0.01,
+      stylePath: SCREENSHOT_STYLE,
+    });
   });
 
   test("VR-08 global Board", async ({ page }, info) => {
@@ -108,6 +112,9 @@ test.describe("@visual", () => {
     await page.goto(`/qa/workspace-views/${VIEWS["QA Board"]}/`);
     await closeDrawer(page, info.project.name);
     await expect(page.getByRole("button", { name: "Display" }).first()).toBeVisible();
-    await expect(page.locator("div.h-11").first()).toHaveScreenshot("vr-11-header-320.png", { animations: "disabled" });
+    await expect(page.locator("div.h-11").first()).toHaveScreenshot("vr-11-header-320.png", {
+      animations: "disabled",
+      stylePath: SCREENSHOT_STYLE,
+    });
   });
 });

@@ -5,7 +5,16 @@ import { createQueue, makeLock, OP_VERSION, refreshed, tap } from "@plane/invent
 import { memoryStore } from "../src/store";
 import type { AppStore } from "../src/store";
 import { StoredQueueError } from "../src/store";
-import { expectedType, precacheInto, precacheProblem, sendQueues, SHELL_MARKER } from "../src/worker-core";
+import {
+  cachesToDelete,
+  expectedType,
+  fromCaches,
+  rotateCaches,
+  precacheInto,
+  precacheProblem,
+  sendQueues,
+  SHELL_MARKER,
+} from "../src/worker-core";
 import { state } from "./fake-api";
 
 const SHELL = `<html><head><meta ${SHELL_MARKER} content="1"></head></html>`;
@@ -267,5 +276,102 @@ describe("sendQueues (background sync)", () => {
     };
     expect(await sendQueues(deps)).toEqual({ kind: "sent", waiting: 0 });
     expect(sent.map((x) => x.url)).toEqual(["/api/workspaces/work/inventory/ops/"]);
+  });
+});
+
+describe("APLANE-83: an update never leaves a page without its script", () => {
+  it("keeps the version that was serving, deletes older ones and the stub's", () => {
+    const keys = ["shopping-stub-1", "plane-shopping-a", "other-app", "plane-shopping-b", "plane-shopping-c"];
+    expect(cachesToDelete(keys, "plane-shopping-c", "plane-shopping-b")).toEqual([
+      "shopping-stub-1",
+      "plane-shopping-a",
+    ]);
+    expect(cachesToDelete(["plane-shopping-b"], "plane-shopping-b", null)).toEqual([]);
+  });
+
+  it("after a rollback A→B→A the next version keeps A, the one serving, not B (newer by creation)", () => {
+    expect(
+      cachesToDelete(
+        ["plane-shopping-a", "plane-shopping-b", "plane-shopping-c"],
+        "plane-shopping-c",
+        "plane-shopping-a"
+      )
+    ).toEqual(["plane-shopping-b"]);
+  });
+
+  it("a half-written cache of an install that never activated is not kept", () => {
+    expect(
+      cachesToDelete(
+        ["plane-shopping-a", "plane-shopping-broken", "plane-shopping-c"],
+        "plane-shopping-c",
+        "plane-shopping-a"
+      )
+    ).toEqual(["plane-shopping-broken"]);
+  });
+
+  it("without a record (the first update to this code) it keeps the newest other version", () => {
+    expect(
+      cachesToDelete(["plane-shopping-a", "plane-shopping-b", "plane-shopping-c"], "plane-shopping-c", null)
+    ).toEqual(["plane-shopping-a"]);
+  });
+
+  it("rotateCaches records the serving version and keeps it across two updates", async () => {
+    const store = new Map<string, Map<string, string>>();
+    const fake = {
+      open: async (name: string) => {
+        if (!store.has(name)) store.set(name, new Map());
+        const c = store.get(name)!;
+        return {
+          match: async (k: string) => (c.has(k) ? new Response(c.get(k)) : undefined),
+          put: async (k: string, r: Response) => void c.set(k, await r.text()),
+        };
+      },
+      keys: async () => [...store.keys()],
+      delete: async (name: string) => store.delete(name),
+    } as unknown as CacheStorage;
+    // Sequential on purpose: one activation after the other.
+    for (const v of ["plane-shopping-a", "plane-shopping-b"]) {
+      // oxlint-disable-next-line no-await-in-loop
+      await fake.open(v);
+      // oxlint-disable-next-line no-await-in-loop
+      await rotateCaches(fake, v);
+    }
+    await fake.open("plane-shopping-a"); // rollback to A: its cache never went away
+    await rotateCaches(fake, "plane-shopping-a");
+    await fake.open("plane-shopping-c");
+    await rotateCaches(fake, "plane-shopping-c");
+    // oxlint-disable-next-line unicorn/no-array-sort -- toSorted is not in the es2022 lib
+    expect([...store.keys()].filter((k) => k.startsWith("plane-shopping-")).sort()).toEqual([
+      "plane-shopping-a",
+      "plane-shopping-c",
+    ]);
+  });
+
+  it("a script of the previous version comes from the kept cache, never from another app's cache or the network", async () => {
+    const stored = new Map<string, Map<string, Response>>([
+      ["plane-shopping-new", new Map([["/shopping/assets/index-NEW.js", new Response("new")]])],
+      ["workbox-runtime", new Map([["/shopping/assets/index-OTHER.js", new Response("<html>")]])],
+      ["plane-shopping-old", new Map([["/shopping/assets/index-OLD.js", new Response("old")]])],
+    ]);
+    const match = async (req: Request, opts?: { cacheName?: string }) => {
+      const path = new URL(req.url).pathname;
+      for (const [name, c] of stored)
+        if (!opts?.cacheName || opts.cacheName === name) if (c.has(path)) return c.get(path)!.clone();
+      return undefined;
+    };
+    const network: string[] = [];
+    const fetchImpl = async (req: Request) => {
+      network.push(new URL(req.url).pathname);
+      return new Response("net");
+    };
+    const caches = { match, keys: async () => [...stored.keys()] } as unknown as CacheStorage;
+    const get = (path: string) =>
+      fromCaches(caches, "plane-shopping-new", new Request(`https://x${path}`), fetchImpl).then((r) => r.text());
+    expect(await get("/shopping/assets/index-NEW.js")).toBe("new");
+    expect(await get("/shopping/assets/index-OLD.js")).toBe("old");
+    expect(network).toEqual([]);
+    expect(await get("/shopping/assets/index-OTHER.js")).toBe("net");
+    expect(await get("/shopping/assets/index-GONE.js")).toBe("net");
+    expect(network).toEqual(["/shopping/assets/index-OTHER.js", "/shopping/assets/index-GONE.js"]);
   });
 });

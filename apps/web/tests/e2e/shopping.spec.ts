@@ -15,7 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Locator, Page } from "@playwright/test";
-import { apiDelete, apiPost, authFile, expect, expectNoHorizontalOverflow, test } from "./helpers";
+import { apiDelete, apiPost, authFile, expect, expectNoHorizontalOverflow, SCREENSHOT_STYLE, test } from "./helpers";
 import { INV, contextFor, item, restoreSeed, server } from "./inventory-helpers";
 
 const items = INV?.inventory.items ?? {};
@@ -499,6 +499,73 @@ test.describe("shopping app @shopping", () => {
     }
   });
 
+  test("APLANE-76: dev says so — a DEV badge on both apps, and they install as Shopping-dev / Plane-dev", async ({
+    page,
+  }) => {
+    // The suite runs on dev only; prod's side (names unchanged, no badge) is L7's check.
+    const names = await Promise.all(
+      (
+        [
+          ["/shopping/manifest.json", "Shopping-dev"],
+          ["/manifest.json", "Plane-dev"],
+          ["/site.webmanifest.json", "Plane-dev"],
+        ] as const
+      ).map(async ([url, want]) => {
+        const res = await page.request.get(url);
+        return { url, status: res.status(), name: ((await res.json()) as { name?: string }).name, want };
+      })
+    );
+    for (const n of names) {
+      expect(n.status, n.url).toBe(200);
+      expect(n.name, n.url).toBe(n.want);
+    }
+    await open(page);
+    const badge = page.getByTestId("dev-badge");
+    await expect(badge).toHaveText("DEV");
+    // It never takes a tap: the corner under it still works.
+    expect(await badge.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe("none");
+    await page.goto("/");
+    await expect(page.getByTestId("dev-badge")).toHaveText("DEV");
+  });
+
+  test("APLANE-83: a missing file of the app is a 404, not the main app's page", async ({ page }) => {
+    const res = await page.request.get("/shopping/assets/index-APLANE83-does-not-exist.js");
+    expect(res.status()).toBe(404);
+    expect(res.headers()["content-type"] ?? "").not.toContain("text/html");
+    // Never cached for a year (Cloudflare would keep the 404 after a rollback); a real file is.
+    expect(res.headers()["cache-control"] ?? "").not.toContain("immutable");
+    const shell = await (await page.request.get("/shopping/")).text();
+    const entry = /\/shopping\/assets\/index-[^"]+\.js/.exec(shell)?.[0];
+    expect(entry, "the shell names its script").toBeTruthy();
+    const real = await page.request.get(entry!);
+    expect(real.status()).toBe(200);
+    expect(real.headers()["cache-control"] ?? "").toContain("immutable");
+  });
+
+  test("APLANE-83: if the app's script cannot load once, the page reloads itself instead of staying blank", async ({
+    browser,
+  }, info) => {
+    // No worker: the first load goes to the network, where the route below can break it.
+    const context = await browser.newContext({
+      ...info.project.use,
+      storageState: authFile("qa-inv-ana"),
+      serviceWorkers: "block",
+    });
+    const page = await context.newPage();
+    let broken = 0;
+    await page.route(/\/shopping\/assets\/index-[^/]+\.js$/, async (route) => {
+      if (broken++ > 0) return route.continue();
+      // What the server answered for a script that no longer exists: the main app's HTML.
+      return route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><html></html>" });
+    });
+    await page.goto("/shopping/#/");
+    await expect(page.locator("[data-phase]")).toHaveCount(0);
+    await expect(page.locator(".toolbar select").first()).toBeVisible();
+    expect(broken).toBe(2);
+    expect(await page.evaluate(() => sessionStorage.getItem("plane-shopping-reloaded-at"))).not.toBeNull();
+    await context.close();
+  });
+
   test("the grouping and the list filter share one line at every width and text size, with the longest names (prod 2026-11-26)", async ({
     page,
   }) => {
@@ -710,6 +777,7 @@ const shot = async (page: Page, name: string, target?: Locator) => {
     animations: "disabled" as const,
     caret: "hide" as const,
     scale: "css" as const,
+    stylePath: SCREENSHOT_STYLE,
     // Relative times change from run to run; every one of them is a <time> element in this app.
     // Only those inside the target: a mask behind a dialog would be drawn over the dialog.
     mask: [(target ?? page).locator("time")],

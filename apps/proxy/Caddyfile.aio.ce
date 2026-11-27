@@ -11,6 +11,14 @@
 		reverse_proxy {$AWS_S3_ENDPOINT_URL}
 	}
 
+	# APLANE-76: dev and prod run the same image, so the dev install names come from the host: plane-dev.* gets
+	# the *.dev.json manifests ("Plane-dev", "Shopping-dev"); prod's files are untouched.
+	@devManifest {
+		expression {http.request.host}.startsWith("plane-dev.")
+		path /manifest.json /site.webmanifest.json /shopping/manifest.json
+	}
+	uri @devManifest replace .json .dev.json
+
     handle /spaces/* {
         reverse_proxy localhost:3002
     }
@@ -31,6 +39,15 @@
         try_files {path} {path}/ /index.html
         file_server
     }
+	# APLANE-83: a missing file of the shopping app is a 404, never the main app's index.html (the fallback below):
+	# served as a script, that HTML left a blank page after an update. Hashed names never change content.
+	handle /shopping/assets/* {
+		root * /app/web
+		# Only on a file that exists: a 404 marked immutable would sit a year in Cloudflare (audit 2026-11-27).
+		@found file
+		header @found Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
     handle_path /* {
         root * /app/web
         try_files {path} {path}/ /index.html

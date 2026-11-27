@@ -1,8 +1,8 @@
 // The service worker's logic, apart from its event wiring (sw.ts) so tests can drive it with fakes.
 //
-// Precache (plan, phase 6; M1, measured in phase 0): a file missing under /shopping/ is answered 200 with
-// the MAIN app's index.html, so a status check caches HTML as JavaScript and the next offline start is
-// blank. Every response must carry the content type of the file asked for, and the shell must be the
+// Precache (plan, phase 6; M1, measured in phase 0): a file missing under /shopping/ was answered 200 with
+// the MAIN app's index.html (since APLANE-83 a missing /shopping/assets/* is a 404, other paths still get the
+// HTML), so a status check caches HTML as JavaScript and the next offline start is blank. Every response must carry the content type of the file asked for, and the shell must be the
 // shopping app's (its marker), or the install fails and the old version keeps serving.
 //
 // Sending (M10): the browser fires a one-off background sync once it sees a network again, while it is
@@ -18,6 +18,59 @@ export const SYNC_TAG = "plane-shopping-queue";
 export const CACHE_PREFIX = "plane-shopping-";
 /** Caches left by earlier workers at this scope: the phase 0 stub's ("shopping-stub-…") and older versions. */
 export const OLD_CACHE_PREFIXES = ["shopping-stub-", CACHE_PREFIX] as const;
+
+/** Where the worker records which version's cache is serving; not a CACHE_PREFIX name, so never rotated away. */
+export const META_CACHE = "shopping-meta";
+// Not a "/shopping/…" literal: the deploy gate reads every such string in sw.js as a file to precache (it refused
+// "/shopping/__active-cache" on 2026-11-27). A Cache key can be any URL; .invalid never resolves.
+const ACTIVE_KEY = "https://shopping-meta.invalid/active-cache";
+
+/** The caches an activating worker deletes: every older one except `previous`, the version that was serving
+ * until now. APLANE-83 (measured on the Realme 2026-11-26): a reload answered by the old worker got the old
+ * shell; the new worker then activated, deleted the old cache and claimed the page, so the old shell's script
+ * came from the network, where it no longer exists → blank page. Keeping the serving version lets that page
+ * finish loading (it reloads into the new one on its next hide). Recorded, not guessed from creation order
+ * (audit 2026-11-27): after a rollback A→B→A, a killed install or two overlapping deploys, "the newest other
+ * cache" is not the one serving. Without a record (the first update to this code) it falls back to that guess. */
+export function cachesToDelete(keys: readonly string[], current: string, previous: string | null): string[] {
+  const old = keys.filter((k) => k !== current && OLD_CACHE_PREFIXES.some((p) => k.startsWith(p)));
+  let keep = previous && previous !== current ? old.indexOf(previous) : -1;
+  if (keep < 0)
+    for (let i = old.length - 1; i >= 0; i--)
+      if (old[i]!.startsWith(CACHE_PREFIX)) {
+        keep = i;
+        break;
+      }
+  return keep < 0 ? old : old.filter((_, i) => i !== keep);
+}
+
+/** Activate: delete what cachesToDelete says, then record `current` as the serving version. */
+export async function rotateCaches(cachesImpl: CacheStorage, current: string): Promise<void> {
+  const meta = await cachesImpl.open(META_CACHE);
+  const previous = (await (await meta.match(ACTIVE_KEY))?.text()) ?? null;
+  await Promise.all(cachesToDelete(await cachesImpl.keys(), current, previous).map((k) => cachesImpl.delete(k)));
+  await meta.put(ACTIVE_KEY, new Response(current));
+}
+
+/** A file of the app: this version's cache, then the version kept back (only the app's own caches: an old
+ * root-scope worker's runtime caches may hold HTML under a .js URL), then the network. */
+export async function fromCaches(
+  cachesImpl: Pick<CacheStorage, "match" | "keys">,
+  cacheName: string,
+  req: Request,
+  fetchImpl: (req: Request) => Promise<Response>
+): Promise<Response> {
+  const own = await cachesImpl.match(req, { cacheName, ignoreSearch: true });
+  if (own) return own;
+  for (const name of await cachesImpl.keys()) {
+    if (name === cacheName || !name.startsWith(CACHE_PREFIX)) continue;
+    // Sequential on purpose: at most one other version is kept, and this runs only on a miss.
+    // oxlint-disable-next-line no-await-in-loop
+    const hit = await cachesImpl.match(req, { cacheName: name, ignoreSearch: true });
+    if (hit) return hit;
+  }
+  return fetchImpl(req);
+}
 
 const TYPES: Record<string, string> = {
   js: "javascript",
