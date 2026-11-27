@@ -17,6 +17,9 @@ import { ToBuy } from "./screens/ToBuy";
 import { WorkspacePicker } from "./screens/common";
 import { isDevHost } from "./dev";
 
+/** Read once: the host does not change while the app runs (APLANE-76). */
+const IS_DEV = isDevHost(globalThis.location?.hostname ?? "");
+
 export type Route =
   | { name: "list" }
   | { name: "shop" }
@@ -68,7 +71,7 @@ export function App({
   return (
     <AppCtx.Provider value={ctx}>
       <Root />
-      {isDevHost(globalThis.location?.hostname ?? "") ? (
+      {IS_DEV ? (
         <div className="dev-badge" data-testid="dev-badge" aria-label="Development environment">
           DEV
         </div>
