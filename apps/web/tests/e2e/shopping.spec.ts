@@ -499,6 +499,28 @@ test.describe("shopping app @shopping", () => {
     }
   });
 
+  test("APLANE-75: every manifest link sends cookies, or Cloudflare Access answers it with the sign-in page", async ({
+    page,
+  }) => {
+    // Dev is not behind Access, so it cannot fail the real way here: this pins the attribute that fixed prod
+    // (measured on the Realme 2026-11-27 with Page.getAppManifest).
+    await open(page);
+    const shopping = await page
+      .locator('link[rel="manifest"]')
+      .evaluateAll((ls) => ls.map((l) => l.getAttribute("crossorigin")));
+    await page.goto("/");
+    await expect(page.locator('link[rel="manifest"]').first()).toBeAttached();
+    const main = await page
+      .locator('link[rel="manifest"]')
+      .evaluateAll((ls) => ls.map((l) => l.getAttribute("crossorigin")));
+    expect(shopping).toEqual(["use-credentials"]);
+    expect(main.length).toBeGreaterThan(0);
+    expect(
+      main.every((c) => c === "use-credentials"),
+      JSON.stringify(main)
+    ).toBe(true);
+  });
+
   test("APLANE-76: dev says so — a DEV badge on both apps, and they install as Shopping-dev / Plane-dev", async ({
     page,
   }) => {

@@ -9,7 +9,9 @@
     <meta name="theme-color" content="#141415" />
     <meta name="color-scheme" content="dark light" />
     <title>Shopping</title>
-    <link rel="manifest" href="/manifest.json" />
+    <!-- use-credentials (APLANE-75): behind Cloudflare Access a manifest fetched without cookies gets the sign-in
+         302. The worker hid that after the first visit; the first visit itself had no installable manifest. -->
+    <link rel="manifest" href="/manifest.json" crossorigin="use-credentials" />
     <link rel="icon" href="/icon-192.png" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
   </head>

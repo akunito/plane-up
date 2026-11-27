@@ -40,11 +40,14 @@ export const links: LinksFunction = () => [
   { rel: "icon", type: "image/png", sizes: "32x32", href: favicon32 },
   { rel: "icon", type: "image/png", sizes: "16x16", href: favicon16 },
   { rel: "shortcut icon", href: faviconIco },
-  { rel: "manifest", href: "/site.webmanifest.json" },
+  // use-credentials (APLANE-75): prod sits behind Cloudflare Access and a manifest is fetched WITHOUT cookies by
+  // default, so it got the 302 to the sign-in page and the app was not installable (measured on the Realme
+  // 2026-11-27: no manifest as served; "Plane" and no installability errors with the attribute).
+  { rel: "manifest", href: "/site.webmanifest.json", crossOrigin: "use-credentials" },
   { rel: "apple-touch-icon", href: icon512 },
   { rel: "apple-touch-icon", sizes: "180x180", href: icon180 },
   { rel: "apple-touch-icon", sizes: "512x512", href: icon512 },
-  { rel: "manifest", href: "/manifest.json" },
+  { rel: "manifest", href: "/manifest.json", crossOrigin: "use-credentials" },
   { rel: "stylesheet", href: globalStyles },
   {
     rel: "preload",
